@@ -4,6 +4,10 @@ setlocal
 cd /d "%~dp0"
 
 echo.
+echo === Resetting obsolete PowerShell helper ===
+git checkout -- Update-Build-Run-OpenSim.ps1 2>NUL
+
+echo.
 echo === Updating source from Git ===
 git pull --ff-only
 if errorlevel 1 goto failed
