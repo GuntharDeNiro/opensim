@@ -1022,7 +1022,7 @@ namespace OpenSim.Region.PhysicsModule.BulletS
         {
             get
             {
-                return VehicleVelocity * Quaternion.Inverse(VehicleFrameOrientation);
+                return VehicleVelocity * Quaternion.Inverse(VehicleLinearFrameOrientation);
             }
         }
 
@@ -1038,6 +1038,19 @@ namespace OpenSim.Region.PhysicsModule.BulletS
             get
             {
                 return VehicleOrientation * m_referenceFrame;
+            }
+        }
+        private Quaternion VehicleLinearFrameOrientation
+        {
+            get
+            {
+                Quaternion frame = VehicleFrameOrientation;
+                if (!UsesDynamicBoatWater())
+                    return frame;
+
+                Vector3 euler = Vector3.Zero;
+                frame.GetEulerAngles(out euler.X, out euler.Y, out euler.Z);
+                return Quaternion.CreateFromAxisAngle(Vector3.UnitZ, euler.Z);
             }
         }
 
@@ -1151,7 +1164,7 @@ namespace OpenSim.Region.PhysicsModule.BulletS
             linearMotorCorrectionV -= (currentVelV * frictionFactorV);
 
             // Motor is vehicle coordinates. Rotate it to world coordinates
-            Vector3 linearMotorVelocityW = linearMotorCorrectionV * VehicleFrameOrientation;
+            Vector3 linearMotorVelocityW = linearMotorCorrectionV * VehicleLinearFrameOrientation;
 
             // If we're a ground vehicle, don't add any upward Z movement
             if ((m_flags & VehicleFlag.LIMIT_MOTOR_UP) != 0)
@@ -1196,7 +1209,7 @@ namespace OpenSim.Region.PhysicsModule.BulletS
                 linearDeflectionV *= new Vector3(1, -1, -1);
 
                 // Correction is vehicle relative. Convert to world coordinates.
-                Vector3 linearDeflectionW = linearDeflectionV * VehicleFrameOrientation;
+                Vector3 linearDeflectionW = linearDeflectionV * VehicleLinearFrameOrientation;
 
                 // Optionally, if not colliding, don't effect world downward velocity. Let falling things fall.
                 if (BSParam.VehicleLinearDeflectionNotCollidingNoZ && !m_controllingPrim.HasSomeCollision)

@@ -832,6 +832,13 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             Quaternion rotq = objrotq;    // rotq = rotation of object
             rotq *= m_referenceFrame; // rotq is now rotation in vehicle reference frame
             Quaternion irotq = Quaternion.Inverse(rotq);
+            Quaternion linearRotq = rotq;
+            if (UsesDynamicBoatWater())
+            {
+                Vector3 euler = ubRot2Euler(rotq);
+                linearRotq = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, euler.Z);
+            }
+            Quaternion ilinearRotq = Quaternion.Inverse(linearRotq);
 
             Vector3 tmpV;
             Vector3 force = Vector3.Zero; // actually linear aceleration until mult by mass in world frame
@@ -839,7 +846,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             UBOdeNative.Vector3 dtorque = new();
 
             Vector3 curVel = UBOdeNative.BodyGetLinearVelOMV(Body);  // velocity in world
-            Vector3 curLocalVel = curVel * irotq; // current velocity in  local
+            Vector3 curLocalVel = curVel * ilinearRotq; // current velocity in local, ignoring boat wave roll
 
             Vector3 curAngVel = UBOdeNative.BodyGetAngularVelOMV(Body); // angular velocity in world
             Vector3 curLocalAngVel = curAngVel * irotq; // current angular velocity in  local
@@ -873,7 +880,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             {
                 tmpV = m_linearMotorDirection - curLocalVel; // velocity error
                 tmpV *= m_lmEfect / m_linearMotorTimescale; // error to correct in this timestep
-                tmpV *= rotq; // to world
+                tmpV *= linearRotq; // to world
 
                 if ((m_flags & VehicleFlag.LIMIT_MOTOR_UP) != 0)
                     tmpV.Z = 0;
@@ -972,7 +979,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 float len = deflectionVel.Length();
                 if (len > 0.01f) // if moving
                 {
-                    Vector3 atAxis = Xrot(rotq); // where are we pointing to
+                    Vector3 atAxis = Xrot(linearRotq); // where are we pointing to
                     atAxis *= len; // make it same size as world velocity vector
 
                     tmpV = -atAxis; // oposite direction
@@ -1002,7 +1009,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 tmpV.X = -curLocalVel.X / m_linearFrictionTimescale.X;
                 tmpV.Y = -curLocalVel.Y / m_linearFrictionTimescale.Y;
                 tmpV.Z = -curLocalVel.Z / m_linearFrictionTimescale.Z;
-                tmpV *= rotq; // to world
+                tmpV *= linearRotq; // to world
 
                 if(ldampZ != 0 && MathF.Abs(ldampZ) > MathF.Abs(tmpV.Z))
                     tmpV.Z = ldampZ;
