@@ -119,7 +119,7 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
         /// This gives the viewer a short window to attach to the destination child/root agent and reduces the visible
         /// border flash without changing the destination handoff order.
         /// </remarks>
-        public int RegionCrossingSourceCleanupDelayMS { get; set; } = 120;
+        public int RegionCrossingSourceCleanupDelayMS { get; set; } = 250;
 
         /// <summary>
         /// Delays deleting source-region attachments after a neighbour crossing.
@@ -128,7 +128,7 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
         /// Immediate attachment deletion on the source region can reach the viewer while the destination region is
         /// still reattaching the same items, which shows up as a short detach/reattach flash.
         /// </remarks>
-        public int RegionCrossingAttachmentCleanupDelayMS { get; set; } = 1500;
+        public int RegionCrossingAttachmentCleanupDelayMS { get; set; } = 2500;
 
         /// <summary>
         /// Number of times inter-region teleport was attempted.
