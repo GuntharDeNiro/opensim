@@ -95,6 +95,12 @@ namespace OpenSim.Region.Framework.Scenes
             }
         }
 
+        public void Clear()
+        {
+            lock (MAOLock)
+                m_overrides.Clear();
+        }
+
         public void CopyAOPairsFrom(Dictionary<string, UUID> src)
         {
             lock (MAOLock)
