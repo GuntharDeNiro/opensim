@@ -111,8 +111,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         private const float BoatWaveSpeed1 = 0.85f;
         private const float BoatWaveSpeed2 = 0.55f;
         private const float BoatWaveNormalScale = 2.5f;
-        private const float BoatWaveNormalFollowTimescale = 3.5f;
-        private const float BoatWaveDriftScale = 0.35f;
+        private const float BoatWaveNormalFollowTimescale = 18f;
+        private const float BoatWaveDriftScale = 0.25f;
         private Vector3 m_smoothedBoatWaterNormal = Vector3.UnitZ;
                     // Modifies gravity. Slider between -1 (double-gravity) and 1 (full anti-gravity)
                     // KF: So far I have found no good method to combine a script-requested .Z velocity and gravity.
@@ -799,7 +799,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 1f);
             normal.Normalize();
 
-            float alpha = Math.Clamp(m_timestep / BoatWaveNormalFollowTimescale, 0.01f, 0.08f);
+            float alpha = Math.Clamp(m_timestep / BoatWaveNormalFollowTimescale, 0.001f, 0.015f);
             m_smoothedBoatWaterNormal += (normal - m_smoothedBoatWaterNormal) * alpha;
             m_smoothedBoatWaterNormal.Normalize();
             return m_smoothedBoatWaterNormal;
@@ -823,8 +823,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             float flow2 = BoatWaveHeight2 * BoatWaveSpeed2 * (0.5f + 0.5f * MathF.Sin(phase2));
 
             return new Vector3(
-                (dir1x * flow1 + dir2x * flow2) * BoatWaveDriftScale,
-                (dir1y * flow1 + dir2y * flow2) * BoatWaveDriftScale,
+                -(dir1x * flow1 + dir2x * flow2) * BoatWaveDriftScale,
+                -(dir1y * flow1 + dir2y * flow2) * BoatWaveDriftScale,
                 0f);
         }
 
