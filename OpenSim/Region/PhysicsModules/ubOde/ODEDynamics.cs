@@ -933,17 +933,21 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             // linear deflection
             if (m_linearDeflectionEfficiency > 0)
             {
-                float len = curVel.Length();
+                Vector3 deflectionVel = curVel;
+                if (UsesDynamicBoatWater())
+                    deflectionVel.Z = 0f;
+
+                float len = deflectionVel.Length();
                 if (len > 0.01f) // if moving
                 {
                     Vector3 atAxis = Xrot(rotq); // where are we pointing to
                     atAxis *= len; // make it same size as world velocity vector
 
                     tmpV = -atAxis; // oposite direction
-                    atAxis -= curVel; // error to one direction
+                    atAxis -= deflectionVel; // error to one direction
                     len = atAxis.LengthSquared();
 
-                    tmpV -= curVel; // error to oposite
+                    tmpV -= deflectionVel; // error to oposite
                     float lens = tmpV.LengthSquared();
 
                     if (len > 0.01f || lens > 0.01f) // do nothing if close enougth

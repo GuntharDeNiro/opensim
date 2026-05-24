@@ -1147,6 +1147,8 @@ namespace OpenSim.Region.PhysicsModule.BulletS
         {
             Vector3 linearDeflectionV = Vector3.Zero;
             Vector3 velocityV = VehicleForwardVelocity;
+            if (UsesDynamicBoatWater())
+                velocityV.Z = 0f;
 
             if (BSParam.VehicleEnableLinearDeflection)
             {
@@ -1157,7 +1159,8 @@ namespace OpenSim.Region.PhysicsModule.BulletS
 
                 // Velocity to the side and around is corrected and moved into the forward direction
                 linearDeflectionV.X += Math.Abs(linearDeflectionV.Y);
-                linearDeflectionV.X += Math.Abs(linearDeflectionV.Z);
+                if (!UsesDynamicBoatWater())
+                    linearDeflectionV.X += Math.Abs(linearDeflectionV.Z);
 
                 // Scale the deflection to the fractional simulation time
                 linearDeflectionV *= pTimestep;
