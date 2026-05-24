@@ -4950,6 +4950,9 @@ namespace OpenSim.Region.Framework.Scenes
 
         private void CopyFrom(AgentData cAgent)
         {
+            if (IsDeleted || cAgent == null)
+                return;
+
             m_callbackURI = cAgent.CallbackURI;
             m_newCallbackURI = cAgent.NewCallbackURI;
             //m_log.DebugFormat(
@@ -4992,7 +4995,8 @@ namespace OpenSim.Region.Framework.Scenes
 
             SetAlwaysRun = cAgent.AlwaysRun;
 
-            Appearance = new AvatarAppearance(cAgent.Appearance, true, true);
+            if (cAgent.Appearance != null)
+                Appearance = new AvatarAppearance(cAgent.Appearance, true, true);
 
             /*
             bool isFlying = ((m_AgentControlFlags & ACFlags.AGENT_CONTROL_FLY) != 0);
@@ -5005,6 +5009,9 @@ namespace OpenSim.Region.Framework.Scenes
             */
 
             Scene.AttachmentsModule?.CopyAttachments(cAgent, this);
+
+            if (IsDeleted)
+                return;
 
             try
             {
@@ -5039,7 +5046,12 @@ namespace OpenSim.Region.Framework.Scenes
             else
                 Animator.ResetAnimations();
 
-            Overrides.CopyAOPairsFrom(cAgent.MovementAnimationOverRides);
+            if (cAgent.MovementAnimationOverRides != null)
+                Overrides.CopyAOPairsFrom(cAgent.MovementAnimationOverRides);
+
+            if (ControllingClient == null)
+                return;
+
             int nanim = ControllingClient.NextAnimationSequenceNumber;
             // FIXME: Why is this null check necessary?  Where are the cases where we get a null Anims object?
             if (cAgent.DefaultAnim != null)

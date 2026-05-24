@@ -352,7 +352,12 @@ namespace OpenSim.Region.CoreModules.Avatar.Attachments
 
         public void CopyAttachments(AgentData ad, IScenePresence isp)
         {
+            if (ad == null)
+                return;
+
             ScenePresence sp = isp as ScenePresence;
+            if (sp == null || sp.IsDeleted)
+                return;
 
             if (ad.AttachmentObjects is not null && ad.AttachmentObjects.Count > 0)
             {
@@ -369,16 +374,27 @@ namespace OpenSim.Region.CoreModules.Avatar.Attachments
                 {
                     if(ad.AttachmentObjects[indx] is SceneObjectGroup sog && sog.OwnerID.Equals(sp.UUID))
                     {
+                        if (sp.IsDeleted)
+                            return;
+
+                        if (sog.RootPart == null)
+                            continue;
+
                         sog.LocalId = 0;
                         sog.RootPart.ClearUpdateSchedule();
 
-                        sog.SetState(ad.AttachmentObjectStates[i++], m_scene);
+                        if (ad.AttachmentObjectStates != null && i < ad.AttachmentObjectStates.Count)
+                            sog.SetState(ad.AttachmentObjectStates[i++], m_scene);
+
                         attachments.Add(sog);
                     }
                 }
 
                 ad.AttachmentObjects = null;
                 ad.AttachmentObjectStates = null;
+
+                if (sp.IsDeleted)
+                    return;
 
                 if (attachments.Count > 0)
                     m_scene.IncomingAttechments(sp, attachments);
