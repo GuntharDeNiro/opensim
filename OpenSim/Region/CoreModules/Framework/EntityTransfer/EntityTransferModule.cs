@@ -113,6 +113,15 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
         public float MaxRegionCrossingVelocity { get; set; } = 30.0f;
 
         /// <summary>
+        /// Small grace period after sending CrossRegion before the source scene removes the root avatar.
+        /// </summary>
+        /// <remarks>
+        /// This gives the viewer a short window to attach to the destination child/root agent and reduces the visible
+        /// border flash without changing the destination handoff order.
+        /// </remarks>
+        public int RegionCrossingSourceCleanupDelayMS { get; set; } = 120;
+
+        /// <summary>
         /// Number of times inter-region teleport was attempted.
         /// </summary>
         private Stat m_interRegionTeleportAttempts;
@@ -289,6 +298,9 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
 
                 MaxRegionCrossingVelocity
                     = Math.Max(0.0f, transferConfig.GetFloat("MaxRegionCrossingVelocity", MaxRegionCrossingVelocity));
+
+                RegionCrossingSourceCleanupDelayMS
+                    = Math.Max(0, transferConfig.GetInt("RegionCrossingSourceCleanupDelayMS", RegionCrossingSourceCleanupDelayMS));
             }
 
             m_entityTransferStateMachine = new EntityTransferStateMachine(this);
@@ -1903,6 +1915,9 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
 
             // Unlike a teleport, here we do not wait for the destination region to confirm the receipt.
             m_entityTransferStateMachine.UpdateInTransit(agentUUID, AgentTransferState.CleaningUp);
+
+            if (RegionCrossingSourceCleanupDelayMS > 0)
+                Thread.Sleep(RegionCrossingSourceCleanupDelayMS);
 
             if(childRegionsToClose != null)
                 agent.CloseChildAgents(childRegionsToClose);
