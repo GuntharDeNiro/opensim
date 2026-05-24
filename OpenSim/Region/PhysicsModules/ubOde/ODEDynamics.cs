@@ -110,6 +110,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         private const float BoatWaveLength2 = 12f;
         private const float BoatWaveSpeed1 = 0.85f;
         private const float BoatWaveSpeed2 = 0.55f;
+        private const float BoatWaveNormalScale = 2.5f;
+        private const float BoatWaveDriftScale = 0.35f;
                     // Modifies gravity. Slider between -1 (double-gravity) and 1 (full anti-gravity)
                     // KF: So far I have found no good method to combine a script-requested .Z velocity and gravity.
                     // Therefore only m_VehicleBuoyancy=1 (0g) will use the script-requested .Z velocity.
@@ -786,8 +788,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             float waveNumber2 = 2f * MathF.PI / BoatWaveLength2;
             float phase1 = ((x * dir1x + y * dir1y) * waveNumber1) + time * BoatWaveSpeed1;
             float phase2 = ((x * dir2x + y * dir2y) * waveNumber2) + time * BoatWaveSpeed2;
-            float slope1 = BoatWaveHeight1 * waveNumber1 * MathF.Cos(phase1);
-            float slope2 = BoatWaveHeight2 * waveNumber2 * MathF.Cos(phase2);
+            float slope1 = BoatWaveHeight1 * waveNumber1 * MathF.Cos(phase1) * BoatWaveNormalScale;
+            float slope2 = BoatWaveHeight2 * waveNumber2 * MathF.Cos(phase2) * BoatWaveNormalScale;
 
             Vector3 normal = new(
                 -(slope1 * dir1x + slope2 * dir2x),
@@ -795,6 +797,29 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 1f);
             normal.Normalize();
             return normal;
+        }
+
+        private Vector3 GetDynamicBoatWaterFlow(float x, float y)
+        {
+            if (!UsesDynamicBoatWater())
+                return Vector3.Zero;
+
+            float time = _pParentScene.SimulatedTime;
+            const float dir1x = 0.928477f;
+            const float dir1y = -0.371391f;
+            const float dir2x = 0.691905f;
+            const float dir2y = 0.721989f;
+            float waveNumber1 = 2f * MathF.PI / BoatWaveLength1;
+            float waveNumber2 = 2f * MathF.PI / BoatWaveLength2;
+            float phase1 = ((x * dir1x + y * dir1y) * waveNumber1) + time * BoatWaveSpeed1;
+            float phase2 = ((x * dir2x + y * dir2y) * waveNumber2) + time * BoatWaveSpeed2;
+            float flow1 = BoatWaveHeight1 * BoatWaveSpeed1 * (0.5f + 0.5f * MathF.Sin(phase1));
+            float flow2 = BoatWaveHeight2 * BoatWaveSpeed2 * (0.5f + 0.5f * MathF.Sin(phase2));
+
+            return new Vector3(
+                (dir1x * flow1 + dir2x * flow2) * BoatWaveDriftScale,
+                (dir1y * flow1 + dir2y * flow2) * BoatWaveDriftScale,
+                0f);
         }
 
         internal void Step()
@@ -928,6 +953,13 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             {
                 // default gravity and Buoyancy
                 force.Z += _pParentScene.gravityz * m_gravmod * (1f - m_VehicleBuoyancy);
+            }
+
+            if (UsesDynamicBoatWater())
+            {
+                Vector3 waterFlow = GetDynamicBoatWaterFlow(rootPrim.Position.X, rootPrim.Position.Y);
+                force.X += waterFlow.X;
+                force.Y += waterFlow.Y;
             }
 
             // linear deflection

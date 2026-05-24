@@ -118,6 +118,8 @@ namespace OpenSim.Region.PhysicsModule.BulletS
         private const float BoatWaveLength2 = 12f;
         private const float BoatWaveSpeed1 = 0.85f;
         private const float BoatWaveSpeed2 = 0.55f;
+        private const float BoatWaveNormalScale = 2.5f;
+        private const float BoatWaveDriftScale = 0.35f;
         // Modifies gravity. Slider between -1 (double-gravity) and 1 (full anti-gravity)
         private float m_VehicleBuoyancy = 0f;
         private Vector3 m_VehicleGravity = Vector3.Zero;    // Gravity computed when buoyancy set
@@ -863,8 +865,8 @@ namespace OpenSim.Region.PhysicsModule.BulletS
             float waveNumber2 = TwoPI / BoatWaveLength2;
             float phase1 = ((pos.X * dir1x + pos.Y * dir1y) * waveNumber1) + time * BoatWaveSpeed1;
             float phase2 = ((pos.X * dir2x + pos.Y * dir2y) * waveNumber2) + time * BoatWaveSpeed2;
-            float slope1 = BoatWaveHeight1 * waveNumber1 * MathF.Cos(phase1);
-            float slope2 = BoatWaveHeight2 * waveNumber2 * MathF.Cos(phase2);
+            float slope1 = BoatWaveHeight1 * waveNumber1 * MathF.Cos(phase1) * BoatWaveNormalScale;
+            float slope2 = BoatWaveHeight2 * waveNumber2 * MathF.Cos(phase2) * BoatWaveNormalScale;
 
             Vector3 normal = new Vector3(
                 -(slope1 * dir1x + slope2 * dir2x),
@@ -872,6 +874,29 @@ namespace OpenSim.Region.PhysicsModule.BulletS
                 1f);
             normal.Normalize();
             return normal;
+        }
+
+        private Vector3 GetDynamicBoatWaterFlow(Vector3 pos)
+        {
+            if (!UsesDynamicBoatWater())
+                return Vector3.Zero;
+
+            float time = m_physicsScene.m_simulatedTime;
+            const float dir1x = 0.928477f;
+            const float dir1y = -0.371391f;
+            const float dir2x = 0.691905f;
+            const float dir2y = 0.721989f;
+            float waveNumber1 = TwoPI / BoatWaveLength1;
+            float waveNumber2 = TwoPI / BoatWaveLength2;
+            float phase1 = ((pos.X * dir1x + pos.Y * dir1y) * waveNumber1) + time * BoatWaveSpeed1;
+            float phase2 = ((pos.X * dir2x + pos.Y * dir2y) * waveNumber2) + time * BoatWaveSpeed2;
+            float flow1 = BoatWaveHeight1 * BoatWaveSpeed1 * (0.5f + 0.5f * MathF.Sin(phase1));
+            float flow2 = BoatWaveHeight2 * BoatWaveSpeed2 * (0.5f + 0.5f * MathF.Sin(phase2));
+
+            return new Vector3(
+                (dir1x * flow1 + dir2x * flow2) * BoatWaveDriftScale,
+                (dir1y * flow1 + dir2y * flow2) * BoatWaveDriftScale,
+                0f);
         }
 
         private Vector3 VehiclePosition
@@ -1063,6 +1088,8 @@ namespace OpenSim.Region.PhysicsModule.BulletS
             ComputeLinearTerrainHeightCorrection(pTimestep);
 
             ComputeLinearHover(pTimestep);
+
+            ComputeLinearBoatWaveDrift(pTimestep);
 
             ComputeLinearBlockingEndPoint(pTimestep);
 
@@ -1279,6 +1306,12 @@ namespace OpenSim.Region.PhysicsModule.BulletS
                                     verticalError, verticalCorrection);
                 }
             }
+        }
+
+        private void ComputeLinearBoatWaveDrift(float pTimestep)
+        {
+            if (UsesDynamicBoatWater())
+                VehicleVelocity += GetDynamicBoatWaterFlow(VehiclePosition) * pTimestep;
         }
 
         public bool ComputeLinearBlockingEndPoint(float pTimestep)
