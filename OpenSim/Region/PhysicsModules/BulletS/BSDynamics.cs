@@ -112,6 +112,12 @@ namespace OpenSim.Region.PhysicsModule.BulletS
         private float m_VhoverEfficiency = 0f;
         private float m_VhoverTimescale = 0f;
         private float m_VhoverTargetHeight = -1.0f;     // if <0 then no hover, else its the current target height
+        private const float BoatWaveHeight1 = 0.18f;
+        private const float BoatWaveHeight2 = 0.09f;
+        private const float BoatWaveLength1 = 14f;
+        private const float BoatWaveLength2 = 8f;
+        private const float BoatWaveSpeed1 = 1.25f;
+        private const float BoatWaveSpeed2 = 0.85f;
         // Modifies gravity. Slider between -1 (double-gravity) and 1 (full anti-gravity)
         private float m_VehicleBuoyancy = 0f;
         private Vector3 m_VehicleGravity = Vector3.Zero;    // Gravity computed when buoyancy set
@@ -822,6 +828,52 @@ namespace OpenSim.Region.PhysicsModule.BulletS
             return m_knownWaterLevel;
         }
 
+        private bool UsesDynamicBoatWater()
+        {
+            return Type == Vehicle.TYPE_BOAT && (m_flags & VehicleFlag.HOVER_WATER_ONLY) != 0;
+        }
+
+        private float GetDynamicBoatWaterHeight(Vector3 pos)
+        {
+            if (!UsesDynamicBoatWater())
+                return GetWaterLevel(pos);
+
+            float time = m_physicsScene.m_simulatedTime;
+            float dir1 = (pos.X * 0.928477f) + (pos.Y * -0.371391f);
+            float dir2 = (pos.X * 0.691905f) + (pos.Y * 0.721989f);
+            float waveNumber1 = TwoPI / BoatWaveLength1;
+            float waveNumber2 = TwoPI / BoatWaveLength2;
+
+            return GetWaterLevel(pos)
+                + BoatWaveHeight1 * MathF.Sin((dir1 * waveNumber1) + time * BoatWaveSpeed1)
+                + BoatWaveHeight2 * MathF.Sin((dir2 * waveNumber2) + time * BoatWaveSpeed2);
+        }
+
+        private Vector3 GetDynamicBoatWaterNormal(Vector3 pos)
+        {
+            if (!UsesDynamicBoatWater())
+                return Vector3.UnitZ;
+
+            float time = m_physicsScene.m_simulatedTime;
+            const float dir1x = 0.928477f;
+            const float dir1y = -0.371391f;
+            const float dir2x = 0.691905f;
+            const float dir2y = 0.721989f;
+            float waveNumber1 = TwoPI / BoatWaveLength1;
+            float waveNumber2 = TwoPI / BoatWaveLength2;
+            float phase1 = ((pos.X * dir1x + pos.Y * dir1y) * waveNumber1) + time * BoatWaveSpeed1;
+            float phase2 = ((pos.X * dir2x + pos.Y * dir2y) * waveNumber2) + time * BoatWaveSpeed2;
+            float slope1 = BoatWaveHeight1 * waveNumber1 * MathF.Cos(phase1);
+            float slope2 = BoatWaveHeight2 * waveNumber2 * MathF.Cos(phase2);
+
+            Vector3 normal = new Vector3(
+                -(slope1 * dir1x + slope2 * dir2x),
+                -(slope1 * dir1y + slope2 * dir2y),
+                1f);
+            normal.Normalize();
+            return normal;
+        }
+
         private Vector3 VehiclePosition
         {
             get
@@ -1148,12 +1200,12 @@ namespace OpenSim.Region.PhysicsModule.BulletS
         {
             // m_VhoverEfficiency: 0=bouncy, 1=totally damped
             // m_VhoverTimescale: time to achieve height
-            if ((m_flags & (VehicleFlag.HOVER_WATER_ONLY | VehicleFlag.HOVER_TERRAIN_ONLY | VehicleFlag.HOVER_GLOBAL_HEIGHT)) != 0 && (m_VhoverHeight > 0) && (m_VhoverTimescale < 300))
+            if ((m_flags & (VehicleFlag.HOVER_WATER_ONLY | VehicleFlag.HOVER_TERRAIN_ONLY | VehicleFlag.HOVER_GLOBAL_HEIGHT)) != 0 && ((m_VhoverHeight > 0) || UsesDynamicBoatWater()) && (m_VhoverTimescale < 300))
             {
                 // We should hover, get the target height
                 if ((m_flags & VehicleFlag.HOVER_WATER_ONLY) != 0)
                 {
-                    m_VhoverTargetHeight = GetWaterLevel(VehiclePosition) + m_VhoverHeight;
+                    m_VhoverTargetHeight = GetDynamicBoatWaterHeight(VehiclePosition) + m_VhoverHeight;
                 }
                 if ((m_flags & VehicleFlag.HOVER_TERRAIN_ONLY) != 0)
                 {
@@ -1452,6 +1504,7 @@ namespace OpenSim.Region.PhysicsModule.BulletS
             // If vertical attaction timescale is reasonable
             if (BSParam.VehicleEnableAngularVerticalAttraction && m_verticalAttractionTimescale < m_verticalAttractionCutoff)
             {
+                Vector3 targetUpAxis = GetDynamicBoatWaterNormal(VehiclePosition);
                 Vector3 vehicleUpAxis = Vector3.UnitZ * VehicleFrameOrientation;
                 switch (BSParam.VehicleAngularVerticalAttractionAlgorithm)
                 {
@@ -1469,7 +1522,7 @@ namespace OpenSim.Region.PhysicsModule.BulletS
                             Vector3 predictedUp = vehicleUpAxis * Quaternion.CreateFromAxisAngle(VehicleRotationalVelocity, 0f);
 
                             // This is only half the distance to the target so it will take 2 seconds to complete the turn.
-                            Vector3 torqueVector = Vector3.Cross(predictedUp, Vector3.UnitZ);
+                            Vector3 torqueVector = Vector3.Cross(predictedUp, targetUpAxis);
 
                             if ((m_flags & VehicleFlag.LIMIT_ROLL_ONLY) != 0)
                             {
@@ -1496,17 +1549,12 @@ namespace OpenSim.Region.PhysicsModule.BulletS
                             // Possible solution derived from a discussion at:
                             // http://stackoverflow.com/questions/14939657/computing-vector-from-quaternion-works-computing-quaternion-from-vector-does-no
 
-                            // Create a rotation that is only the vehicle's rotation around Z
-                            Vector3 currentEulerW = Vector3.Zero;
-                            VehicleFrameOrientation.GetEulerAngles(out currentEulerW.X, out currentEulerW.Y, out currentEulerW.Z);
-                            Quaternion justZOrientation = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, currentEulerW.Z);
-
                             // Create the axis that is perpendicular to the up vector and the rotated up vector.
                             Vector3 UnitZInFrame = Vector3.UnitZ * VehicleFrameOrientation;
-                            Vector3 differenceAxisW = Vector3.Cross(Vector3.UnitZ * justZOrientation, UnitZInFrame);
+                            Vector3 differenceAxisW = Vector3.Cross(targetUpAxis, UnitZInFrame);
                             // Compute the angle between those to vectors.
                             UnitZInFrame.Normalize();
-                            double differenceAngle = Math.Acos((double)Vector3.Dot(Vector3.UnitZ, UnitZInFrame));
+                            double differenceAngle = Math.Acos((double)Util.Clamp<float>(Vector3.Dot(targetUpAxis, UnitZInFrame), -1f, 1f));
                             // 'differenceAngle' is the angle to rotate and 'differenceAxis' is the plane to rotate in to get the vehicle vertical
 
                             // Reduce the change by the time period it is to change in. Timestep is handled when velocity is applied.
@@ -1539,7 +1587,7 @@ namespace OpenSim.Region.PhysicsModule.BulletS
                             Vector3 origRotVelW = VehicleRotationalVelocity;        // DEBUG DEBUG
 
                             // Take a vector pointing up and convert it from world to vehicle relative coords.
-                            Vector3 verticalError = Vector3.UnitZ * VehicleFrameOrientation;
+                            Vector3 verticalError = targetUpAxis * VehicleFrameOrientation;
                             verticalError.Normalize();
 
                             // If vertical attraction correction is needed, the vector that was pointing up (UnitZ)

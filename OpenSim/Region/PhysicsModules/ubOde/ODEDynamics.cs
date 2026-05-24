@@ -104,6 +104,12 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         private float m_VhoverEfficiency = 0f;
         private float m_VhoverTimescale = 1000f;
         private float m_VehicleBuoyancy = 0f;           //KF: m_VehicleBuoyancy is set by VEHICLE_BUOYANCY for a vehicle.
+        private const float BoatWaveHeight1 = 0.18f;
+        private const float BoatWaveHeight2 = 0.09f;
+        private const float BoatWaveLength1 = 14f;
+        private const float BoatWaveLength2 = 8f;
+        private const float BoatWaveSpeed1 = 1.25f;
+        private const float BoatWaveSpeed2 = 0.85f;
                     // Modifies gravity. Slider between -1 (double-gravity) and 1 (full anti-gravity)
                     // KF: So far I have found no good method to combine a script-requested .Z velocity and gravity.
                     // Therefore only m_VehicleBuoyancy=1 (0g) will use the script-requested .Z velocity.
@@ -745,6 +751,52 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             }
         }
 
+        private bool UsesDynamicBoatWater()
+        {
+            return m_type == Vehicle.TYPE_BOAT && (m_flags & VehicleFlag.HOVER_WATER_ONLY) != 0;
+        }
+
+        private float GetDynamicBoatWaterHeight(float x, float y)
+        {
+            if (!UsesDynamicBoatWater())
+                return _pParentScene.WaterLevel;
+
+            float time = _pParentScene.SimulatedTime;
+            float dir1 = (x * 0.928477f) + (y * -0.371391f);
+            float dir2 = (x * 0.691905f) + (y * 0.721989f);
+            float waveNumber1 = 2f * MathF.PI / BoatWaveLength1;
+            float waveNumber2 = 2f * MathF.PI / BoatWaveLength2;
+
+            return _pParentScene.WaterLevel
+                + BoatWaveHeight1 * MathF.Sin((dir1 * waveNumber1) + time * BoatWaveSpeed1)
+                + BoatWaveHeight2 * MathF.Sin((dir2 * waveNumber2) + time * BoatWaveSpeed2);
+        }
+
+        private Vector3 GetDynamicBoatWaterNormal(float x, float y)
+        {
+            if (!UsesDynamicBoatWater())
+                return Vector3.UnitZ;
+
+            float time = _pParentScene.SimulatedTime;
+            const float dir1x = 0.928477f;
+            const float dir1y = -0.371391f;
+            const float dir2x = 0.691905f;
+            const float dir2y = 0.721989f;
+            float waveNumber1 = 2f * MathF.PI / BoatWaveLength1;
+            float waveNumber2 = 2f * MathF.PI / BoatWaveLength2;
+            float phase1 = ((x * dir1x + y * dir1y) * waveNumber1) + time * BoatWaveSpeed1;
+            float phase2 = ((x * dir2x + y * dir2y) * waveNumber2) + time * BoatWaveSpeed2;
+            float slope1 = BoatWaveHeight1 * waveNumber1 * MathF.Cos(phase1);
+            float slope2 = BoatWaveHeight2 * waveNumber2 * MathF.Cos(phase2);
+
+            Vector3 normal = new(
+                -(slope1 * dir1x + slope2 * dir2x),
+                -(slope1 * dir1y + slope2 * dir2y),
+                1f);
+            normal.Normalize();
+            return normal;
+        }
+
         internal void Step()
         {
             IntPtr Body = rootPrim.Body;
@@ -840,7 +892,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 {
                     if ((m_flags & VehicleFlag.HOVER_WATER_ONLY) != 0)
                     {
-                        perr += _pParentScene.WaterLevel;
+                        perr += GetDynamicBoatWaterHeight(pos.X, pos.Y);
                     }
                     else if ((m_flags & VehicleFlag.HOVER_TERRAIN_ONLY) != 0)
                     {
@@ -997,6 +1049,15 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 {
                     m_amdampZ = 1f / m_angularFrictionTimescale.Z;
                     m_amdampY = m_amdampX;
+                }
+
+                if (UsesDynamicBoatWater())
+                {
+                    Vector3 targetUp = GetDynamicBoatWaterNormal(rootPrim.Position.X, rootPrim.Position.Y);
+                    Vector3 waterTilt = Vector3.Cross(Vector3.UnitZ, targetUp) * irotq;
+                    torque.X += waterTilt.X * ftmp;
+                    if ((m_flags & VehicleFlag.LIMIT_ROLL_ONLY) == 0)
+                        torque.Y += waterTilt.Y * ftmp;
                 }
             }
             else

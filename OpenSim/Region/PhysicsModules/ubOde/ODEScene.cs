@@ -210,6 +210,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         public float gravityz = -9.8f;
 
         public float WaterLevel = 0f;
+        internal float SimulatedTime = 0f;
         private int framecount = 0;
 
         private float avDensity = 80f;
@@ -1818,6 +1819,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     }
 
                     step_time -= ODE_STEPSIZE;
+                    SimulatedTime += ODE_STEPSIZE;
                     nodeframes++;
 
                      if (Util.GetTimeStampMS() > maxLoopTime)
