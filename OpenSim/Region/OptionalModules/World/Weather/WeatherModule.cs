@@ -85,7 +85,7 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             m_commandChannel = config.GetInt("CommandChannel", 89);
             m_estateManagerOnly = config.GetBoolean("EstateManagerOnly", true);
             m_emitterGrid = Math.Max(1, config.GetInt("EmitterGrid", 4));
-            m_emitterHeight = Math.Max(8f, config.GetFloat("EmitterHeight", 35f));
+            m_emitterHeight = Math.Max(4f, config.GetFloat("EmitterHeight", 18f));
             m_intensity = Clamp(config.GetFloat("Intensity", 1f), 0.1f, 4f);
         }
 
@@ -191,6 +191,7 @@ namespace OpenSim.Region.OptionalModules.World.Weather
                         return false;
                     }
 
+                    emitter.RootPart.SendFullUpdateToAllClients();
                     emitter.ScheduleGroupForUpdate(PrimUpdateFlags.FullUpdatewithAnimMatOvr);
                     created.Add(emitter);
                 }
@@ -237,6 +238,7 @@ namespace OpenSim.Region.OptionalModules.World.Weather
                 CRC = 1,
                 PartDataFlags = (Primitive.ParticleSystem.ParticleDataFlags)ParticleFlags,
                 Pattern = (Primitive.ParticleSystem.SourcePattern)1, // PSYS_SRC_PATTERN_DROP
+                Texture = Util.BLANK_TEXTURE_UUID,
                 BurstRadius = radius,
                 MaxAge = 0f,
                 InnerAngle = 0f,
@@ -255,9 +257,9 @@ namespace OpenSim.Region.OptionalModules.World.Weather
                 particles.PartEndScaleY = 0.24f;
                 particles.BurstSpeedMin = 0.05f;
                 particles.BurstSpeedMax = 0.35f;
-                particles.BurstRate = 0.08f;
-                particles.PartMaxAge = 9.0f;
-                particles.BurstPartCount = (byte)Clamp((int)(7 * m_intensity), 1, 40);
+                particles.BurstRate = 0.05f;
+                particles.PartMaxAge = 10.0f;
+                particles.BurstPartCount = (byte)Clamp((int)(12 * m_intensity), 1, 60);
                 particles.PartAcceleration = new Vector3(0.1f, 0.05f, -0.9f);
                 return particles;
             }
@@ -266,23 +268,23 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             float rainIntensity = storm ? m_intensity * 1.75f : m_intensity;
 
             particles.PartStartColor = storm
-                ? new Color4(0.55f, 0.68f, 0.82f, 0.72f)
-                : new Color4(0.62f, 0.82f, 1f, 0.58f);
+                ? new Color4(0.65f, 0.78f, 0.95f, 0.9f)
+                : new Color4(0.72f, 0.88f, 1f, 0.82f);
             particles.PartEndColor = storm
-                ? new Color4(0.45f, 0.58f, 0.72f, 0.03f)
-                : new Color4(0.55f, 0.75f, 1f, 0.03f);
-            particles.PartStartScaleX = storm ? 0.04f : 0.035f;
-            particles.PartStartScaleY = storm ? 0.85f : 0.65f;
-            particles.PartEndScaleX = storm ? 0.025f : 0.025f;
-            particles.PartEndScaleY = storm ? 1.05f : 0.8f;
-            particles.BurstSpeedMin = storm ? 8.0f : 5.0f;
-            particles.BurstSpeedMax = storm ? 13.0f : 9.0f;
-            particles.BurstRate = storm ? 0.025f : 0.04f;
-            particles.PartMaxAge = storm ? 3.0f : 4.0f;
-            particles.BurstPartCount = (byte)Clamp((int)(10 * rainIntensity), 1, 80);
+                ? new Color4(0.5f, 0.65f, 0.82f, 0.08f)
+                : new Color4(0.58f, 0.78f, 1f, 0.06f);
+            particles.PartStartScaleX = storm ? 0.055f : 0.045f;
+            particles.PartStartScaleY = storm ? 1.15f : 0.95f;
+            particles.PartEndScaleX = storm ? 0.035f : 0.03f;
+            particles.PartEndScaleY = storm ? 1.35f : 1.05f;
+            particles.BurstSpeedMin = storm ? 5.0f : 3.0f;
+            particles.BurstSpeedMax = storm ? 9.0f : 6.0f;
+            particles.BurstRate = storm ? 0.018f : 0.028f;
+            particles.PartMaxAge = storm ? 5.0f : 6.0f;
+            particles.BurstPartCount = (byte)Clamp((int)(16 * rainIntensity), 1, 120);
             particles.PartAcceleration = storm
-                ? new Vector3(1.2f, 0.4f, -12f)
-                : new Vector3(0.45f, 0.15f, -8f);
+                ? new Vector3(1.2f, 0.4f, -7f)
+                : new Vector3(0.45f, 0.15f, -4.5f);
 
             return particles;
         }
