@@ -6805,9 +6805,15 @@ namespace OpenSim.Region.Framework.Scenes
 
         public void HasMovedAway(bool nearRegion)
         {
+            HasMovedAway(nearRegion, true);
+        }
+
+        public void HasMovedAway(bool nearRegion, bool deleteAttachments)
+        {
             if (nearRegion)
             {
-                Scene.AttachmentsModule?.DeleteAttachmentsFromScene(this, true);
+                if (deleteAttachments)
+                    Scene.AttachmentsModule?.DeleteAttachmentsFromScene(this, true);
 
                 if (!ParcelHideThisAvatar || IsViewerUIGod)
                     return;
@@ -6843,7 +6849,8 @@ namespace OpenSim.Region.Framework.Scenes
                         p.SendKillTo(this);
                 }
 
-                Scene.AttachmentsModule?.DeleteAttachmentsFromScene(this, true);
+                if (deleteAttachments)
+                    Scene.AttachmentsModule?.DeleteAttachmentsFromScene(this, true);
             }
         }
 

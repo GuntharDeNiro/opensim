@@ -122,6 +122,15 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
         public int RegionCrossingSourceCleanupDelayMS { get; set; } = 120;
 
         /// <summary>
+        /// Delays deleting source-region attachments after a neighbour crossing.
+        /// </summary>
+        /// <remarks>
+        /// Immediate attachment deletion on the source region can reach the viewer while the destination region is
+        /// still reattaching the same items, which shows up as a short detach/reattach flash.
+        /// </remarks>
+        public int RegionCrossingAttachmentCleanupDelayMS { get; set; } = 1500;
+
+        /// <summary>
         /// Number of times inter-region teleport was attempted.
         /// </summary>
         private Stat m_interRegionTeleportAttempts;
@@ -301,6 +310,9 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
 
                 RegionCrossingSourceCleanupDelayMS
                     = Math.Max(0, transferConfig.GetInt("RegionCrossingSourceCleanupDelayMS", RegionCrossingSourceCleanupDelayMS));
+
+                RegionCrossingAttachmentCleanupDelayMS
+                    = Math.Max(0, transferConfig.GetInt("RegionCrossingAttachmentCleanupDelayMS", RegionCrossingAttachmentCleanupDelayMS));
             }
 
             m_entityTransferStateMachine = new EntityTransferStateMachine(this);
@@ -1925,15 +1937,38 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
             if((agent.m_crossingFlags & 8) == 0)
                 agent.ClearControls(); // don't let attachments delete (called in HasMovedAway) disturb taken controls on viewers
 
-            agent.HasMovedAway((agent.m_crossingFlags & 8) == 0);
+            bool nearRegionCrossing = (agent.m_crossingFlags & 8) == 0;
+            bool delayAttachmentCleanup = nearRegionCrossing && RegionCrossingAttachmentCleanupDelayMS > 0;
+            agent.HasMovedAway(nearRegionCrossing, !delayAttachmentCleanup);
 
             agent.MakeChildAgent(neighbourRegion.RegionHandle);
+
+            if (delayAttachmentCleanup)
+                DelaySourceAttachmentCleanup(agent, RegionCrossingAttachmentCleanupDelayMS);
 
             // FIXME: Possibly this should occur lower down after other commands to close other agents,
             // but not sure yet what the side effects would be.
             m_entityTransferStateMachine.ResetFromTransit(agentUUID);
 
             return true;
+        }
+
+        private void DelaySourceAttachmentCleanup(ScenePresence agent, int delayMS)
+        {
+            ScenePresence sourceAgent = agent;
+
+            Util.FireAndForget(
+                o =>
+                {
+                    Thread.Sleep(delayMS);
+
+                    if (sourceAgent.IsDeleted || !sourceAgent.IsChildAgent)
+                        return;
+
+                    sourceAgent.Scene.AttachmentsModule?.DeleteAttachmentsFromScene(sourceAgent, true);
+                },
+                null,
+                "AgentCrossingAttachmentCleanup-" + sourceAgent.UUID);
         }
 
         private Vector3 GetRegionCrossingVelocity(ScenePresence agent)
