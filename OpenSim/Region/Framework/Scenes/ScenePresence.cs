@@ -174,7 +174,8 @@ namespace OpenSim.Region.Framework.Scenes
         /// </remarks>
         private readonly object m_completeMovementLock = new();
 
-        private const int AttachmentScriptRestartDelayMS = 500;
+        private const int AttachmentScriptRestartDelayMS = 2000;
+        private int m_attachmentScriptRestartGeneration;
 
         /// <summary>
         /// Experimentally determined "fudge factor" to make sit-target positions
@@ -1613,12 +1614,14 @@ namespace OpenSim.Region.Framework.Scenes
 
         private void QueueRestartAttachmentScripts()
         {
+            int restartGeneration = Interlocked.Increment(ref m_attachmentScriptRestartGeneration);
+
             Util.FireAndForget(x =>
             {
                 if (AttachmentScriptRestartDelayMS > 0)
                     Thread.Sleep(AttachmentScriptRestartDelayMS);
 
-                if (IsDeleted || IsChildAgent)
+                if (restartGeneration != m_attachmentScriptRestartGeneration || IsDeleted || IsChildAgent)
                     return;
 
                 RestartAttachmentScripts();
