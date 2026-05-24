@@ -174,6 +174,8 @@ namespace OpenSim.Region.Framework.Scenes
         /// </remarks>
         private readonly object m_completeMovementLock = new();
 
+        private const int AttachmentScriptRestartDelayMS = 500;
+
         /// <summary>
         /// Experimentally determined "fudge factor" to make sit-target positions
         /// the same as in SecondLife. Fudge factor was tested for 36 different
@@ -1609,6 +1611,20 @@ namespace OpenSim.Region.Framework.Scenes
             }
         }
 
+        private void QueueRestartAttachmentScripts()
+        {
+            Util.FireAndForget(x =>
+            {
+                if (AttachmentScriptRestartDelayMS > 0)
+                    Thread.Sleep(AttachmentScriptRestartDelayMS);
+
+                if (IsDeleted || IsChildAgent)
+                    return;
+
+                RestartAttachmentScripts();
+            }, null, "ScenePresence.RestartAttachmentScripts");
+        }
+
         private static bool IsRealLogin(TeleportFlags teleportFlags)
         {
             return (teleportFlags & (TeleportFlags.ViaLogin | TeleportFlags.ViaHGLogin)) == TeleportFlags.ViaLogin;
@@ -2385,7 +2401,7 @@ namespace OpenSim.Region.Framework.Scenes
                 {
                     if (m_attachments.Count > 0)
                     {
-                        Util.FireAndForget(x => RestartAttachmentScripts());
+                        QueueRestartAttachmentScripts();
 
                         foreach (ScenePresence p in allpresences)
                         {
