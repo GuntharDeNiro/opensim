@@ -335,10 +335,10 @@ namespace OpenSim.Region.Framework.Scenes
                     vd.m_bankingTimescale = 1;
                     vd.m_flags &= ~(VehicleFlag.HOVER_TERRAIN_ONLY |
                             VehicleFlag.HOVER_GLOBAL_HEIGHT |
-                            VehicleFlag.HOVER_UP_ONLY |
                             VehicleFlag.LIMIT_ROLL_ONLY);
                     vd.m_flags |= (VehicleFlag.NO_DEFLECTION_UP |
                                 VehicleFlag.LIMIT_MOTOR_UP |
+                                VehicleFlag.HOVER_UP_ONLY |
                                 VehicleFlag.HOVER_WATER_ONLY);
                     break;
                 case Vehicle.TYPE_AIRPLANE:

@@ -484,10 +484,10 @@ namespace OpenSim.Region.PhysicsModule.BulletS
                     m_referenceFrame = Quaternion.Identity;
                     m_flags &= ~(VehicleFlag.HOVER_TERRAIN_ONLY
                                     | VehicleFlag.HOVER_GLOBAL_HEIGHT
-                                    | VehicleFlag.LIMIT_ROLL_ONLY
-                                    | VehicleFlag.HOVER_UP_ONLY);
+                                    | VehicleFlag.LIMIT_ROLL_ONLY);
                     m_flags |= (VehicleFlag.NO_DEFLECTION_UP
                                     | VehicleFlag.LIMIT_MOTOR_UP
+                                    | VehicleFlag.HOVER_UP_ONLY
                                     | VehicleFlag.HOVER_WATER_ONLY);
                     break;
                 case Vehicle.TYPE_AIRPLANE:
