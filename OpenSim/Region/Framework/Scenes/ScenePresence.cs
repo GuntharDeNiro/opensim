@@ -1634,6 +1634,11 @@ namespace OpenSim.Region.Framework.Scenes
             }, null, "ScenePresence.RestartAttachmentScripts");
         }
 
+        public void CancelQueuedAttachmentScriptRestart()
+        {
+            Interlocked.Increment(ref m_attachmentScriptRestartGeneration);
+        }
+
         private static bool IsRealLogin(TeleportFlags teleportFlags)
         {
             return (teleportFlags & (TeleportFlags.ViaLogin | TeleportFlags.ViaHGLogin)) == TeleportFlags.ViaLogin;

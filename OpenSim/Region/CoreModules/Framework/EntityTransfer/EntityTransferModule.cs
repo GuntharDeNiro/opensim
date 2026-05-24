@@ -1664,6 +1664,7 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
             ScenePresence ag = agent;
             ag.IsInLocalTransit = true;
             ag.IsInTransit = true;
+            ag.CancelQueuedAttachmentScriptRestart();
             WorkManager.RunInThreadPool(delegate
             {
                 CrossAsync(ag, isFlying);
