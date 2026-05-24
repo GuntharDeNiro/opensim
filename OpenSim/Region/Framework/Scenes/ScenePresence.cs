@@ -1621,7 +1621,7 @@ namespace OpenSim.Region.Framework.Scenes
                 if (AttachmentScriptRestartDelayMS > 0)
                     Thread.Sleep(AttachmentScriptRestartDelayMS);
 
-                if (restartGeneration != m_attachmentScriptRestartGeneration || IsDeleted || IsChildAgent)
+                if (restartGeneration != m_attachmentScriptRestartGeneration || IsDeleted || IsChildAgent || IsInTransit)
                     return;
 
                 RestartAttachmentScripts();
