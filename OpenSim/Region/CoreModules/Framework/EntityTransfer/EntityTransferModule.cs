@@ -102,6 +102,17 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
         public bool DisableInterRegionTeleportCancellation { get; set; }
 
         /// <summary>
+        /// If true, region crossing sends the avatar's horizontal velocity to the destination viewer handoff.
+        /// </summary>
+        /// <remarks>
+        /// Sending zero velocity on normal avatar crossings makes the viewer visibly stall at the border before the
+        /// destination region resumes movement.  Vehicle crossings already preserve velocity through crossing flags.
+        /// </remarks>
+        public bool PreserveVelocityOnRegionCrossing { get; set; } = true;
+
+        public float MaxRegionCrossingVelocity { get; set; } = 30.0f;
+
+        /// <summary>
         /// Number of times inter-region teleport was attempted.
         /// </summary>
         private Stat m_interRegionTeleportAttempts;
@@ -272,6 +283,12 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
 
                 WaitForAgentArrivedAtDestination
                     = transferConfig.GetBoolean("wait_for_callback", WaitForAgentArrivedAtDestination);
+
+                PreserveVelocityOnRegionCrossing
+                    = transferConfig.GetBoolean("PreserveVelocityOnRegionCrossing", PreserveVelocityOnRegionCrossing);
+
+                MaxRegionCrossingVelocity
+                    = Math.Max(0.0f, transferConfig.GetFloat("MaxRegionCrossingVelocity", MaxRegionCrossingVelocity));
             }
 
             m_entityTransferStateMachine = new EntityTransferStateMachine(this);
@@ -1865,21 +1882,19 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
 
             m_log.DebugFormat("[ENTITY TRANSFER MODULE]: Sending new CAPS seed url {0} to client {1}", capsPath, agent.UUID);
 
-            Vector3 vel2 = Vector3.Zero;
-            if((agent.m_crossingFlags & 2) != 0)
-                vel2 = new Vector3(agent.Velocity.X, agent.Velocity.Y, 0);
+            Vector3 crossingVelocity = GetRegionCrossingVelocity(agent);
 
             if (m_eqModule != null)
             {
                 m_eqModule.CrossRegion(
-                    neighbourRegion.RegionHandle, pos, vel2 /* agent.Velocity */,
+                    neighbourRegion.RegionHandle, pos, crossingVelocity,
                     endpoint, capsPath, agentUUID, agent.ControllingClient.SessionId,
                     neighbourRegion.RegionSizeX, neighbourRegion.RegionSizeY);
             }
             else
             {
                 m_log.ErrorFormat("{0} Using old CrossRegion packet. Varregion will not work!!", LogHeader);
-                agent.ControllingClient.CrossRegion(neighbourRegion.RegionHandle, pos, agent.Velocity,
+                agent.ControllingClient.CrossRegion(neighbourRegion.RegionHandle, pos, crossingVelocity,
                         endpoint,capsPath);
             }
 
@@ -1904,6 +1919,27 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
             m_entityTransferStateMachine.ResetFromTransit(agentUUID);
 
             return true;
+        }
+
+        private Vector3 GetRegionCrossingVelocity(ScenePresence agent)
+        {
+            if (!PreserveVelocityOnRegionCrossing && (agent.m_crossingFlags & 2) == 0)
+                return Vector3.Zero;
+
+            Vector3 velocity = new(agent.Velocity.X, agent.Velocity.Y, 0.0f);
+            float speedSq = velocity.LengthSquared();
+
+            if (MaxRegionCrossingVelocity > 0.0f)
+            {
+                float maxSpeedSq = MaxRegionCrossingVelocity * MaxRegionCrossingVelocity;
+                if (speedSq > maxSpeedSq)
+                {
+                    velocity.Normalize();
+                    velocity *= MaxRegionCrossingVelocity;
+                }
+            }
+
+            return velocity;
         }
 
         private void CrossAgentToNewRegionCompleted(IAsyncResult iar)
