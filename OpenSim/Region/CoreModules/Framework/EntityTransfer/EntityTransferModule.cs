@@ -2939,15 +2939,43 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
                 return false;
             }
 
+            List<SceneObjectGroup> failedAttachments = null;
             foreach(SceneObjectGroup so in attachments)
             {
-                if (!m_scene.AddSceneObject(so))
+                if (so == null)
                 {
-                    m_log.DebugFormat(
-                        "[ENTITY TRANSFER MODULE]: Problem adding attachment {0} {1} into {2} ",
-                        so.Name, so.UUID, m_sceneName);
+                    failedAttachments ??= new List<SceneObjectGroup>();
+                    failedAttachments.Add(so);
                     continue;
                 }
+
+                if (!m_scene.AddSceneObject(so))
+                {
+                    SceneObjectGroup oldAttachment = m_scene.GetSceneObjectGroup(so.UUID);
+                    if (oldAttachment != null && oldAttachment.OwnerID.Equals(sp.UUID) && oldAttachment.IsAttachmentCheckFull())
+                    {
+                        m_log.DebugFormat(
+                            "[ENTITY TRANSFER MODULE]: Replacing stale attachment {0} {1} for {2} in {3}",
+                            so.Name, so.UUID, sp.Name, m_sceneName);
+
+                        m_scene.DeleteSceneObject(oldAttachment, true);
+                        if (m_scene.AddSceneObject(so))
+                            continue;
+                    }
+
+                    m_log.DebugFormat(
+                        "[ENTITY TRANSFER MODULE]: Problem adding attachment {0} {1} into {2}",
+                        so.Name, so.UUID, m_sceneName);
+
+                    failedAttachments ??= new List<SceneObjectGroup>();
+                    failedAttachments.Add(so);
+                }
+            }
+
+            if (failedAttachments != null)
+            {
+                foreach (SceneObjectGroup failedAttachment in failedAttachments)
+                    attachments.Remove(failedAttachment);
             }
 
             sp.GotAttachmentsData = true;
