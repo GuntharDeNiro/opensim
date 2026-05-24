@@ -117,7 +117,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             BuildTemplate template = ResolveTemplate(request);
             if (template == null)
             {
-                SendReply(client, "TextBuild: I can build car, house, tree, dock, table.");
+                SendReply(client, "TextBuild: I can build car, boat, house, gazebo, tree, fountain, lamp, sofa, dock, table.");
                 return;
             }
 
@@ -172,11 +172,26 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             if (lower.Contains("car") || lower.Contains("machine") || lower.Contains("macchina") || lower.Contains("auto"))
                 return CreateCarTemplate();
 
+            if (lower.Contains("boat") || lower.Contains("barca") || lower.Contains("yacht") || lower.Contains("sailboat") || lower.Contains("vela"))
+                return CreateBoatTemplate();
+
             if (lower.Contains("house") || lower.Contains("home") || lower.Contains("casa"))
                 return CreateHouseTemplate();
 
+            if (lower.Contains("gazebo") || lower.Contains("pavilion") || lower.Contains("padiglione"))
+                return CreateGazeboTemplate();
+
             if (lower.Contains("tree") || lower.Contains("albero"))
                 return CreateTreeTemplate();
+
+            if (lower.Contains("fountain") || lower.Contains("fontana"))
+                return CreateFountainTemplate();
+
+            if (lower.Contains("lamp") || lower.Contains("streetlight") || lower.Contains("lampione") || lower.Contains("lanterna"))
+                return CreateLampTemplate();
+
+            if (lower.Contains("sofa") || lower.Contains("couch") || lower.Contains("divano"))
+                return CreateSofaTemplate();
 
             if (lower.Contains("dock") || lower.Contains("pier") || lower.Contains("molo") || lower.Contains("pontile"))
                 return CreateDockTemplate();
@@ -214,6 +229,11 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 shape = PrimitiveBaseShape.CreateSphere();
             else if (buildPart.Shape == BuildShape.Cylinder)
                 shape = PrimitiveBaseShape.CreateCylinder();
+            else if (buildPart.Shape == BuildShape.Prism)
+            {
+                shape = PrimitiveBaseShape.CreateBox();
+                shape.ProfileShape = ProfileShape.EquilateralTriangle;
+            }
             else
                 shape = PrimitiveBaseShape.CreateBox();
 
@@ -250,24 +270,68 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
         private static BuildTemplate CreateCarTemplate()
         {
             Quaternion wheelRot = Quaternion.CreateFromAxisAngle(Vector3.UnitY, (float)Math.PI * 0.5f);
-            return new BuildTemplate("textbuild car", 0.35f,
-                Box("car body", new Vector3(0f, 0f, 0.45f), new Vector3(3.2f, 1.5f, 0.55f), new Color4(0.1f, 0.28f, 0.75f, 1f)),
-                Box("car cabin", new Vector3(0.1f, 0f, 0.95f), new Vector3(1.35f, 1.15f, 0.55f), new Color4(0.08f, 0.1f, 0.16f, 1f)),
-                Cylinder("front left wheel", new Vector3(0.95f, 0.82f, 0.22f), new Vector3(0.38f, 0.38f, 0.28f), wheelRot, new Color4(0.02f, 0.02f, 0.02f, 1f)),
-                Cylinder("front right wheel", new Vector3(0.95f, -0.82f, 0.22f), new Vector3(0.38f, 0.38f, 0.28f), wheelRot, new Color4(0.02f, 0.02f, 0.02f, 1f)),
-                Cylinder("rear left wheel", new Vector3(-0.95f, 0.82f, 0.22f), new Vector3(0.38f, 0.38f, 0.28f), wheelRot, new Color4(0.02f, 0.02f, 0.02f, 1f)),
-                Cylinder("rear right wheel", new Vector3(-0.95f, -0.82f, 0.22f), new Vector3(0.38f, 0.38f, 0.28f), wheelRot, new Color4(0.02f, 0.02f, 0.02f, 1f)));
+            Quaternion windshieldRot = Quaternion.CreateFromAxisAngle(Vector3.UnitY, -0.35f);
+            return new BuildTemplate("textbuild sport car", 0.35f,
+                Box("main body", new Vector3(0f, 0f, 0.45f), new Vector3(3.35f, 1.42f, 0.46f), new Color4(0.04f, 0.22f, 0.72f, 1f)),
+                Box("front hood", new Vector3(1.15f, 0f, 0.72f), new Vector3(1.25f, 1.25f, 0.16f), windshieldRot, new Color4(0.05f, 0.28f, 0.88f, 1f)),
+                Box("rear deck", new Vector3(-1.18f, 0f, 0.72f), new Vector3(1.05f, 1.25f, 0.16f), new Color4(0.03f, 0.18f, 0.62f, 1f)),
+                Box("cabin glass", new Vector3(0.02f, 0f, 1.03f), new Vector3(1.1f, 1.05f, 0.46f), new Color4(0.09f, 0.15f, 0.19f, 0.88f)),
+                Box("windshield", new Vector3(0.58f, 0f, 1.05f), new Vector3(0.08f, 1.0f, 0.52f), windshieldRot, new Color4(0.35f, 0.7f, 0.95f, 0.75f)),
+                Box("front bumper", new Vector3(1.78f, 0f, 0.43f), new Vector3(0.18f, 1.36f, 0.2f), new Color4(0.02f, 0.02f, 0.025f, 1f)),
+                Box("rear bumper", new Vector3(-1.78f, 0f, 0.43f), new Vector3(0.18f, 1.36f, 0.2f), new Color4(0.02f, 0.02f, 0.025f, 1f)),
+                Box("left headlight", new Vector3(1.88f, 0.42f, 0.58f), new Vector3(0.05f, 0.32f, 0.12f), new Color4(1f, 0.92f, 0.55f, 1f)),
+                Box("right headlight", new Vector3(1.88f, -0.42f, 0.58f), new Vector3(0.05f, 0.32f, 0.12f), new Color4(1f, 0.92f, 0.55f, 1f)),
+                Cylinder("front left wheel", new Vector3(0.95f, 0.82f, 0.25f), new Vector3(0.48f, 0.48f, 0.3f), wheelRot, new Color4(0.015f, 0.015f, 0.018f, 1f)),
+                Cylinder("front right wheel", new Vector3(0.95f, -0.82f, 0.25f), new Vector3(0.48f, 0.48f, 0.3f), wheelRot, new Color4(0.015f, 0.015f, 0.018f, 1f)),
+                Cylinder("rear left wheel", new Vector3(-0.95f, 0.82f, 0.25f), new Vector3(0.48f, 0.48f, 0.3f), wheelRot, new Color4(0.015f, 0.015f, 0.018f, 1f)),
+                Cylinder("rear right wheel", new Vector3(-0.95f, -0.82f, 0.25f), new Vector3(0.48f, 0.48f, 0.3f), wheelRot, new Color4(0.015f, 0.015f, 0.018f, 1f)),
+                Cylinder("front left hub", new Vector3(0.95f, 0.99f, 0.25f), new Vector3(0.24f, 0.24f, 0.06f), wheelRot, new Color4(0.75f, 0.75f, 0.72f, 1f)),
+                Cylinder("front right hub", new Vector3(0.95f, -0.99f, 0.25f), new Vector3(0.24f, 0.24f, 0.06f), wheelRot, new Color4(0.75f, 0.75f, 0.72f, 1f)),
+                Cylinder("rear left hub", new Vector3(-0.95f, 0.99f, 0.25f), new Vector3(0.24f, 0.24f, 0.06f), wheelRot, new Color4(0.75f, 0.75f, 0.72f, 1f)),
+                Cylinder("rear right hub", new Vector3(-0.95f, -0.99f, 0.25f), new Vector3(0.24f, 0.24f, 0.06f), wheelRot, new Color4(0.75f, 0.75f, 0.72f, 1f)));
+        }
+
+        private static BuildTemplate CreateBoatTemplate()
+        {
+            Quaternion bowRot = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, (float)Math.PI * 0.5f);
+            Quaternion mastRot = Quaternion.Identity;
+            return new BuildTemplate("textbuild small sailboat", 0.4f,
+                Box("hull", new Vector3(0f, 0f, 0.42f), new Vector3(3.8f, 1.25f, 0.5f), new Color4(0.82f, 0.82f, 0.78f, 1f)),
+                Prism("bow", new Vector3(2.05f, 0f, 0.43f), new Vector3(0.95f, 1.28f, 0.5f), bowRot, new Color4(0.78f, 0.78f, 0.74f, 1f)),
+                Box("deck", new Vector3(-0.3f, 0f, 0.78f), new Vector3(2.8f, 0.9f, 0.12f), new Color4(0.62f, 0.44f, 0.24f, 1f)),
+                Box("cabin", new Vector3(-0.65f, 0f, 1.0f), new Vector3(0.95f, 0.72f, 0.38f), new Color4(0.95f, 0.92f, 0.84f, 1f)),
+                Cylinder("mast", new Vector3(0.45f, 0f, 1.95f), new Vector3(0.08f, 0.08f, 2.4f), mastRot, new Color4(0.54f, 0.38f, 0.18f, 1f)),
+                Prism("main sail", new Vector3(0.72f, 0.08f, 1.85f), new Vector3(0.08f, 1.65f, 1.95f), Quaternion.CreateFromAxisAngle(Vector3.UnitZ, -0.12f), new Color4(0.95f, 0.96f, 0.9f, 0.92f)),
+                Prism("front sail", new Vector3(1.42f, -0.04f, 1.55f), new Vector3(0.07f, 1.2f, 1.45f), Quaternion.CreateFromAxisAngle(Vector3.UnitZ, 0.25f), new Color4(0.88f, 0.92f, 0.94f, 0.88f)));
         }
 
         private static BuildTemplate CreateHouseTemplate()
         {
-            Quaternion roofRot = Quaternion.CreateFromAxisAngle(Vector3.UnitX, (float)Math.PI * 0.25f);
-            return new BuildTemplate("textbuild house", 0.5f,
-                Box("house body", new Vector3(0f, 0f, 1.0f), new Vector3(3.4f, 3.0f, 2.0f), new Color4(0.78f, 0.72f, 0.62f, 1f)),
-                Box("house roof", new Vector3(0f, 0f, 2.25f), new Vector3(3.8f, 3.25f, 0.42f), roofRot, new Color4(0.55f, 0.12f, 0.08f, 1f)),
-                Box("house door", new Vector3(1.72f, 0f, 0.65f), new Vector3(0.08f, 0.75f, 1.2f), new Color4(0.32f, 0.18f, 0.08f, 1f)),
-                Box("left window", new Vector3(1.73f, 0.9f, 1.3f), new Vector3(0.06f, 0.55f, 0.45f), new Color4(0.45f, 0.75f, 0.95f, 1f)),
-                Box("right window", new Vector3(1.73f, -0.9f, 1.3f), new Vector3(0.06f, 0.55f, 0.45f), new Color4(0.45f, 0.75f, 0.95f, 1f)));
+            return new BuildTemplate("textbuild cottage", 0.5f,
+                Box("house body", new Vector3(0f, 0f, 1.05f), new Vector3(3.4f, 3.0f, 2.1f), new Color4(0.82f, 0.76f, 0.65f, 1f)),
+                Prism("gable roof", new Vector3(0f, 0f, 2.42f), new Vector3(3.95f, 3.35f, 1.05f), Quaternion.CreateFromAxisAngle(Vector3.UnitX, (float)Math.PI * 0.5f), new Color4(0.52f, 0.11f, 0.08f, 1f)),
+                Box("front trim", new Vector3(1.74f, 0f, 2.0f), new Vector3(0.08f, 3.08f, 0.16f), new Color4(0.95f, 0.9f, 0.8f, 1f)),
+                Box("door", new Vector3(1.75f, 0f, 0.72f), new Vector3(0.08f, 0.72f, 1.25f), new Color4(0.32f, 0.18f, 0.08f, 1f)),
+                Cylinder("door knob", new Vector3(1.82f, -0.22f, 0.82f), new Vector3(0.09f, 0.09f, 0.05f), Quaternion.CreateFromAxisAngle(Vector3.UnitY, (float)Math.PI * 0.5f), new Color4(0.95f, 0.72f, 0.22f, 1f)),
+                Box("left window glass", new Vector3(1.76f, 0.95f, 1.32f), new Vector3(0.06f, 0.58f, 0.48f), new Color4(0.45f, 0.75f, 0.95f, 0.82f)),
+                Box("right window glass", new Vector3(1.76f, -0.95f, 1.32f), new Vector3(0.06f, 0.58f, 0.48f), new Color4(0.45f, 0.75f, 0.95f, 0.82f)),
+                Box("left window cross", new Vector3(1.8f, 0.95f, 1.32f), new Vector3(0.05f, 0.62f, 0.06f), new Color4(0.95f, 0.9f, 0.8f, 1f)),
+                Box("right window cross", new Vector3(1.8f, -0.95f, 1.32f), new Vector3(0.05f, 0.62f, 0.06f), new Color4(0.95f, 0.9f, 0.8f, 1f)),
+                Box("chimney", new Vector3(-0.85f, 0.72f, 3.02f), new Vector3(0.42f, 0.42f, 0.95f), new Color4(0.45f, 0.18f, 0.14f, 1f)));
+        }
+
+        private static BuildTemplate CreateGazeboTemplate()
+        {
+            return new BuildTemplate("textbuild gazebo", 0.2f,
+                Cylinder("base", new Vector3(0f, 0f, 0.18f), new Vector3(3.3f, 3.3f, 0.22f), Quaternion.Identity, new Color4(0.56f, 0.43f, 0.28f, 1f)),
+                Cylinder("roof", new Vector3(0f, 0f, 2.85f), new Vector3(3.65f, 3.65f, 0.45f), Quaternion.Identity, new Color4(0.22f, 0.34f, 0.38f, 1f)),
+                Cylinder("roof cap", new Vector3(0f, 0f, 3.18f), new Vector3(0.55f, 0.55f, 0.22f), Quaternion.Identity, new Color4(0.78f, 0.68f, 0.45f, 1f)),
+                Cylinder("post north", new Vector3(0f, 1.35f, 1.48f), new Vector3(0.16f, 0.16f, 2.45f), Quaternion.Identity, new Color4(0.84f, 0.8f, 0.68f, 1f)),
+                Cylinder("post south", new Vector3(0f, -1.35f, 1.48f), new Vector3(0.16f, 0.16f, 2.45f), Quaternion.Identity, new Color4(0.84f, 0.8f, 0.68f, 1f)),
+                Cylinder("post east", new Vector3(1.35f, 0f, 1.48f), new Vector3(0.16f, 0.16f, 2.45f), Quaternion.Identity, new Color4(0.84f, 0.8f, 0.68f, 1f)),
+                Cylinder("post west", new Vector3(-1.35f, 0f, 1.48f), new Vector3(0.16f, 0.16f, 2.45f), Quaternion.Identity, new Color4(0.84f, 0.8f, 0.68f, 1f)),
+                Box("rail north", new Vector3(0f, 1.42f, 1.1f), new Vector3(2.25f, 0.12f, 0.16f), new Color4(0.84f, 0.8f, 0.68f, 1f)),
+                Box("rail south", new Vector3(0f, -1.42f, 1.1f), new Vector3(2.25f, 0.12f, 0.16f), new Color4(0.84f, 0.8f, 0.68f, 1f)));
         }
 
         private static BuildTemplate CreateTreeTemplate()
@@ -277,6 +341,40 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 Sphere("tree crown", new Vector3(0f, 0f, 2.45f), new Vector3(2.2f, 2.2f, 1.8f), new Color4(0.08f, 0.45f, 0.14f, 1f)),
                 Sphere("tree crown left", new Vector3(0f, 0.7f, 2.0f), new Vector3(1.35f, 1.35f, 1.15f), new Color4(0.06f, 0.36f, 0.12f, 1f)),
                 Sphere("tree crown right", new Vector3(0f, -0.7f, 2.0f), new Vector3(1.35f, 1.35f, 1.15f), new Color4(0.06f, 0.36f, 0.12f, 1f)));
+        }
+
+        private static BuildTemplate CreateFountainTemplate()
+        {
+            return new BuildTemplate("textbuild fountain", 0.15f,
+                Cylinder("stone basin", new Vector3(0f, 0f, 0.28f), new Vector3(2.5f, 2.5f, 0.55f), Quaternion.Identity, new Color4(0.56f, 0.56f, 0.52f, 1f)),
+                Cylinder("water surface", new Vector3(0f, 0f, 0.6f), new Vector3(2.12f, 2.12f, 0.08f), Quaternion.Identity, new Color4(0.18f, 0.58f, 0.9f, 0.75f)),
+                Cylinder("center column", new Vector3(0f, 0f, 1.0f), new Vector3(0.38f, 0.38f, 1.15f), Quaternion.Identity, new Color4(0.62f, 0.62f, 0.58f, 1f)),
+                Sphere("upper bowl", new Vector3(0f, 0f, 1.58f), new Vector3(1.05f, 1.05f, 0.34f), new Color4(0.58f, 0.58f, 0.54f, 1f)),
+                Cylinder("water jet", new Vector3(0f, 0f, 2.05f), new Vector3(0.12f, 0.12f, 0.85f), Quaternion.Identity, new Color4(0.45f, 0.82f, 1f, 0.62f)),
+                Sphere("spray", new Vector3(0f, 0f, 2.52f), new Vector3(0.38f, 0.38f, 0.24f), new Color4(0.72f, 0.9f, 1f, 0.65f)));
+        }
+
+        private static BuildTemplate CreateLampTemplate()
+        {
+            return new BuildTemplate("textbuild street lamp", 0.15f,
+                Cylinder("base", new Vector3(0f, 0f, 0.2f), new Vector3(0.55f, 0.55f, 0.28f), Quaternion.Identity, new Color4(0.12f, 0.12f, 0.12f, 1f)),
+                Cylinder("pole", new Vector3(0f, 0f, 1.6f), new Vector3(0.14f, 0.14f, 2.7f), Quaternion.Identity, new Color4(0.08f, 0.08f, 0.08f, 1f)),
+                Box("arm", new Vector3(0.45f, 0f, 2.85f), new Vector3(0.9f, 0.1f, 0.1f), new Color4(0.08f, 0.08f, 0.08f, 1f)),
+                Sphere("lamp glow", new Vector3(0.95f, 0f, 2.62f), new Vector3(0.55f, 0.55f, 0.45f), new Color4(1f, 0.86f, 0.36f, 0.72f)),
+                Cylinder("lamp cap", new Vector3(0.95f, 0f, 2.92f), new Vector3(0.68f, 0.68f, 0.15f), Quaternion.Identity, new Color4(0.06f, 0.06f, 0.06f, 1f)));
+        }
+
+        private static BuildTemplate CreateSofaTemplate()
+        {
+            return new BuildTemplate("textbuild sofa", 0.25f,
+                Box("seat", new Vector3(0f, 0f, 0.58f), new Vector3(2.8f, 1.2f, 0.38f), new Color4(0.48f, 0.12f, 0.18f, 1f)),
+                Box("back cushion", new Vector3(-0.1f, 0.6f, 1.02f), new Vector3(2.9f, 0.28f, 0.95f), Quaternion.CreateFromAxisAngle(Vector3.UnitX, -0.18f), new Color4(0.42f, 0.08f, 0.14f, 1f)),
+                Box("left arm", new Vector3(1.52f, 0f, 0.82f), new Vector3(0.32f, 1.25f, 0.72f), new Color4(0.42f, 0.08f, 0.14f, 1f)),
+                Box("right arm", new Vector3(-1.52f, 0f, 0.82f), new Vector3(0.32f, 1.25f, 0.72f), new Color4(0.42f, 0.08f, 0.14f, 1f)),
+                Box("left pillow", new Vector3(0.72f, 0.04f, 0.86f), new Vector3(0.78f, 1.02f, 0.16f), new Color4(0.62f, 0.18f, 0.24f, 1f)),
+                Box("right pillow", new Vector3(-0.72f, 0.04f, 0.86f), new Vector3(0.78f, 1.02f, 0.16f), new Color4(0.62f, 0.18f, 0.24f, 1f)),
+                Cylinder("left front foot", new Vector3(1.05f, -0.45f, 0.18f), new Vector3(0.16f, 0.16f, 0.28f), Quaternion.Identity, new Color4(0.08f, 0.04f, 0.02f, 1f)),
+                Cylinder("right front foot", new Vector3(-1.05f, -0.45f, 0.18f), new Vector3(0.16f, 0.16f, 0.28f), Quaternion.Identity, new Color4(0.08f, 0.04f, 0.02f, 1f)));
         }
 
         private static BuildTemplate CreateDockTemplate()
@@ -314,6 +412,11 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             return new BuildPart(name, BuildShape.Sphere, offset, scale, Quaternion.Identity, color);
         }
 
+        private static BuildPart Prism(string name, Vector3 offset, Vector3 scale, Quaternion rotation, Color4 color)
+        {
+            return new BuildPart(name, BuildShape.Prism, offset, scale, rotation, color);
+        }
+
         private static BuildPart Cylinder(string name, Vector3 offset, Vector3 scale, Quaternion rotation, Color4 color)
         {
             return new BuildPart(name, BuildShape.Cylinder, offset, scale, rotation, color);
@@ -323,7 +426,8 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
         {
             Box,
             Sphere,
-            Cylinder
+            Cylinder,
+            Prism
         }
 
         private class BuildTemplate
