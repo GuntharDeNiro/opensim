@@ -112,12 +112,12 @@ namespace OpenSim.Region.PhysicsModule.BulletS
         private float m_VhoverEfficiency = 0f;
         private float m_VhoverTimescale = 0f;
         private float m_VhoverTargetHeight = -1.0f;     // if <0 then no hover, else its the current target height
-        private const float BoatWaveHeight1 = 0.18f;
-        private const float BoatWaveHeight2 = 0.09f;
-        private const float BoatWaveLength1 = 14f;
-        private const float BoatWaveLength2 = 8f;
-        private const float BoatWaveSpeed1 = 1.25f;
-        private const float BoatWaveSpeed2 = 0.85f;
+        private const float BoatWaveHeight1 = 0.09f;
+        private const float BoatWaveHeight2 = 0.04f;
+        private const float BoatWaveLength1 = 18f;
+        private const float BoatWaveLength2 = 12f;
+        private const float BoatWaveSpeed1 = 0.85f;
+        private const float BoatWaveSpeed2 = 0.55f;
         // Modifies gravity. Slider between -1 (double-gravity) and 1 (full anti-gravity)
         private float m_VehicleBuoyancy = 0f;
         private Vector3 m_VehicleGravity = Vector3.Zero;    // Gravity computed when buoyancy set
