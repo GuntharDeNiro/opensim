@@ -1590,9 +1590,22 @@ namespace OpenSim.Region.Framework.Scenes
             // Resume scripts
             foreach (SceneObjectGroup sog in attachments)
             {
-                sog.RootPart.ParentGroup.CreateScriptInstances(0, false, m_scene.DefaultScriptEngine, GetStateSource());
-                sog.ResumeScripts();
-                sog.ScheduleGroupForFullUpdate();
+                try
+                {
+                    SceneObjectGroup parentGroup = sog?.RootPart?.ParentGroup;
+                    if (parentGroup == null)
+                        continue;
+
+                    parentGroup.CreateScriptInstances(0, false, m_scene.DefaultScriptEngine, GetStateSource());
+                    sog.ResumeScripts();
+                    sog.ScheduleGroupForFullUpdate();
+                }
+                catch (Exception e)
+                {
+                    m_log.WarnFormat(
+                        "[SCENE PRESENCE]: Failed restarting attachment scripts for {0} in {1}: {2}",
+                        Name, Scene.Name, e.Message);
+                }
             }
         }
 
@@ -2372,11 +2385,7 @@ namespace OpenSim.Region.Framework.Scenes
                 {
                     if (m_attachments.Count > 0)
                     {
-                        foreach (SceneObjectGroup sog in m_attachments)
-                        {
-                            sog.RootPart.ParentGroup.CreateScriptInstances(0, false, m_scene.DefaultScriptEngine, GetStateSource());
-                            sog.ResumeScripts();
-                        }
+                        Util.FireAndForget(x => RestartAttachmentScripts());
 
                         foreach (ScenePresence p in allpresences)
                         {

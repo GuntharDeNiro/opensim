@@ -2828,9 +2828,23 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
                 {
                     if (i < sp.InTransitScriptStates.Count)
                     {
-                        sog.SetState(sp.InTransitScriptStates[i++], sp.Scene);
-                        sog.CreateScriptInstances(0, false, sp.Scene.DefaultScriptEngine, -1);
-                        sog.ResumeScripts();
+                        string scriptState = sp.InTransitScriptStates[i++];
+                        SceneObjectGroup parentGroup = sog?.RootPart?.ParentGroup;
+                        if (parentGroup == null)
+                            continue;
+
+                        try
+                        {
+                            sog.SetState(scriptState, sp.Scene);
+                            parentGroup.CreateScriptInstances(0, false, sp.Scene.DefaultScriptEngine, -1);
+                            sog.ResumeScripts();
+                        }
+                        catch (Exception e)
+                        {
+                            m_log.WarnFormat(
+                                "[ENTITY TRANSFER MODULE]: Failed reinstantiating attachment scripts for {0} in {1}: {2}",
+                                sp.Name, m_sceneName, e.Message);
+                        }
                     }
                     else
                         m_log.ErrorFormat(

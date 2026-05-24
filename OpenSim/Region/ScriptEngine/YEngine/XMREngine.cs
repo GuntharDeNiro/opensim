@@ -1265,7 +1265,7 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         public void OnRezScript(uint localID, UUID itemID, string script,
                 int startParam, bool postOnRez, string defEngine, int stateSource)
         {
-            if (script.StartsWith("//MRM:"))
+            if (string.IsNullOrEmpty(script) || script.StartsWith("//MRM:"))
                 return;
 
             if(!m_LateInit)
@@ -1333,7 +1333,12 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                 return;
 
             SceneObjectPart part = m_Scene.GetSceneObjectPart(localID);
+            if (part?.Inventory == null)
+                return;
+
             TaskInventoryItem item = part.Inventory.GetInventoryItem(itemID);
+            if (item == null)
+                return;
 
             // Put on object/instance lists.
             XMRInstance instance = (XMRInstance)Activator.CreateInstance(ScriptCodeGen.xmrInstSuperType);
