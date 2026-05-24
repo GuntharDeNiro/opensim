@@ -176,6 +176,7 @@ namespace OpenSim.Region.Framework.Scenes
 
         private const int AttachmentScriptRestartDelayMS = 2000;
         private int m_attachmentScriptRestartGeneration;
+        private bool m_forceMovementAnimationUpdateAfterCrossing;
 
         /// <summary>
         /// Experimentally determined "fudge factor" to make sit-target positions
@@ -2291,6 +2292,12 @@ namespace OpenSim.Region.Framework.Scenes
                 ParcelDwellTickMS = Util.GetTimeStampMS();
 
                 m_inTransit = false;
+                if (m_forceMovementAnimationUpdateAfterCrossing)
+                {
+                    m_forceMovementAnimationUpdateAfterCrossing = false;
+                    Animator.ForceUpdateMovementAnimations();
+                }
+
                 ILandChannel landch = m_scene.LandChannel;
                 if (landch != null)
                 {
@@ -5103,7 +5110,7 @@ namespace OpenSim.Region.Framework.Scenes
                 if((cAgent.CrossExtraFlags & 2) != 0)
                     LastCommands |= ScriptControlled.CONTROL_ML_LBUTTON;
                 MouseDown = (cAgent.CrossExtraFlags & 3) != 0;
-                Animator.ForceUpdateMovementAnimations();
+                m_forceMovementAnimationUpdateAfterCrossing = true;
             }
 
             m_haveGroupInformation = false;
