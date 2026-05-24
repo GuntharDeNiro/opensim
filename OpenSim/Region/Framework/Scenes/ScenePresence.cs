@@ -436,6 +436,11 @@ namespace OpenSim.Region.Framework.Scenes
                                                 ACFlags.AGENT_CONTROL_NUDGE_UP_POS |
                                                 ACFlags.AGENT_CONTROL_NUDGE_UP_NEG);
 
+        const uint CROSSING_TRANSIENT_MOVEMENT_MASK = CONTROL_FLAG_NORM_MASK |
+                                                CONTROL_FLAG_NUDGE_MASK |
+                                                (uint)ACFlags.AGENT_CONTROL_FAST_AT |
+                                                (uint)ACFlags.AGENT_CONTROL_FAST_UP;
+
         protected int  m_reprioritizationLastTime;
         protected bool m_reprioritizationBusy;
         protected Vector3 m_reprioritizationLastPosition;
@@ -5086,12 +5091,19 @@ namespace OpenSim.Region.Framework.Scenes
             m_gotCrossUpdate = (m_crossingFlags != 0);
             if(m_gotCrossUpdate)
             {
+                m_AgentControlFlags &= unchecked((ACFlags)~CROSSING_TRANSIENT_MOVEMENT_MASK);
+                MovementFlags = 0;
+
+                if (ParentID == 0 && ParentUUID.IsZero() && (m_AgentControlFlags & ACFlags.AGENT_CONTROL_FLY) == 0)
+                    Animator.currentControlState = ScenePresenceAnimator.motionControlStates.onsurface;
+
                 LastCommands &= ~(ScriptControlled.CONTROL_LBUTTON | ScriptControlled.CONTROL_ML_LBUTTON);
                 if((cAgent.CrossExtraFlags & 1) != 0)
                     LastCommands |= ScriptControlled.CONTROL_LBUTTON;
                 if((cAgent.CrossExtraFlags & 2) != 0)
                     LastCommands |= ScriptControlled.CONTROL_ML_LBUTTON;
                 MouseDown = (cAgent.CrossExtraFlags & 3) != 0;
+                Animator.ForceUpdateMovementAnimations();
             }
 
             m_haveGroupInformation = false;
