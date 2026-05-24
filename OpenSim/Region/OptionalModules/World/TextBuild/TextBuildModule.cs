@@ -117,7 +117,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             BuildTemplate template = ResolveTemplate(request);
             if (template == null)
             {
-                SendReply(client, "TextBuild: I can build car, boat, house, gazebo, tree, fountain, lamp, sofa, dock, table.");
+                SendReply(client, "TextBuild: I can build car, boat, house, gazebo, portal, fountain, lamp, sofa, dock, table.");
                 return;
             }
 
@@ -181,6 +181,9 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             if (lower.Contains("gazebo") || lower.Contains("pavilion") || lower.Contains("padiglione"))
                 return CreateGazeboTemplate();
 
+            if (lower.Contains("portal") || lower.Contains("portale") || lower.Contains("gate") || lower.Contains("teleport"))
+                return CreatePortalTemplate();
+
             if (lower.Contains("tree") || lower.Contains("albero"))
                 return CreateTreeTemplate();
 
@@ -229,6 +232,13 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 shape = PrimitiveBaseShape.CreateSphere();
             else if (buildPart.Shape == BuildShape.Cylinder)
                 shape = PrimitiveBaseShape.CreateCylinder();
+            else if (buildPart.Shape == BuildShape.Torus)
+            {
+                shape = PrimitiveBaseShape.CreateCylinder();
+                shape.ProfileShape = ProfileShape.Circle;
+                shape.PathCurve = (byte)Extrusion.Curve1;
+                shape.PathScaleY = 150;
+            }
             else if (buildPart.Shape == BuildShape.Prism)
             {
                 shape = PrimitiveBaseShape.CreateBox();
@@ -238,6 +248,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 shape = PrimitiveBaseShape.CreateBox();
 
             shape.Scale = buildPart.Scale;
+            buildPart.ConfigureShape?.Invoke(shape);
             Primitive.TextureEntry textures = shape.Textures;
             textures.DefaultTexture.RGBA = buildPart.Color;
             shape.Textures = textures;
@@ -323,8 +334,8 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
         private static BuildTemplate CreateGazeboTemplate()
         {
             return new BuildTemplate("textbuild gazebo", 0.2f,
-                Cylinder("base", new Vector3(0f, 0f, 0.18f), new Vector3(3.3f, 3.3f, 0.22f), Quaternion.Identity, new Color4(0.56f, 0.43f, 0.28f, 1f)),
-                Cylinder("roof", new Vector3(0f, 0f, 2.85f), new Vector3(3.65f, 3.65f, 0.45f), Quaternion.Identity, new Color4(0.22f, 0.34f, 0.38f, 1f)),
+                Cylinder("base", new Vector3(0f, 0f, 0.18f), new Vector3(3.3f, 3.3f, 0.22f), Quaternion.Identity, new Color4(0.56f, 0.43f, 0.28f, 1f), Hollow(0.48f)),
+                Cylinder("roof", new Vector3(0f, 0f, 2.85f), new Vector3(3.65f, 3.65f, 0.45f), Quaternion.Identity, new Color4(0.22f, 0.34f, 0.38f, 1f), Taper(0.68f, 0.68f)),
                 Cylinder("roof cap", new Vector3(0f, 0f, 3.18f), new Vector3(0.55f, 0.55f, 0.22f), Quaternion.Identity, new Color4(0.78f, 0.68f, 0.45f, 1f)),
                 Cylinder("post north", new Vector3(0f, 1.35f, 1.48f), new Vector3(0.16f, 0.16f, 2.45f), Quaternion.Identity, new Color4(0.84f, 0.8f, 0.68f, 1f)),
                 Cylinder("post south", new Vector3(0f, -1.35f, 1.48f), new Vector3(0.16f, 0.16f, 2.45f), Quaternion.Identity, new Color4(0.84f, 0.8f, 0.68f, 1f)),
@@ -332,6 +343,20 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 Cylinder("post west", new Vector3(-1.35f, 0f, 1.48f), new Vector3(0.16f, 0.16f, 2.45f), Quaternion.Identity, new Color4(0.84f, 0.8f, 0.68f, 1f)),
                 Box("rail north", new Vector3(0f, 1.42f, 1.1f), new Vector3(2.25f, 0.12f, 0.16f), new Color4(0.84f, 0.8f, 0.68f, 1f)),
                 Box("rail south", new Vector3(0f, -1.42f, 1.1f), new Vector3(2.25f, 0.12f, 0.16f), new Color4(0.84f, 0.8f, 0.68f, 1f)));
+        }
+
+        private static BuildTemplate CreatePortalTemplate()
+        {
+            Quaternion sideRot = Quaternion.CreateFromAxisAngle(Vector3.UnitY, (float)Math.PI * 0.5f);
+            return new BuildTemplate("textbuild luminous portal", 0.15f,
+                Cylinder("left pillar", new Vector3(0f, 0.95f, 1.55f), new Vector3(0.34f, 0.34f, 2.85f), Quaternion.Identity, new Color4(0.12f, 0.11f, 0.16f, 1f), Taper(0.25f, 0.25f)),
+                Cylinder("right pillar", new Vector3(0f, -0.95f, 1.55f), new Vector3(0.34f, 0.34f, 2.85f), Quaternion.Identity, new Color4(0.12f, 0.11f, 0.16f, 1f), Taper(0.25f, 0.25f)),
+                Torus("upper ring", new Vector3(0f, 0f, 2.92f), new Vector3(2.35f, 0.34f, 2.35f), sideRot, new Color4(0.08f, 0.22f, 0.34f, 1f)),
+                Torus("inner glow", new Vector3(0.02f, 0f, 1.75f), new Vector3(1.65f, 0.08f, 2.45f), sideRot, new Color4(0.2f, 0.85f, 1f, 0.58f)),
+                Sphere("core mist", new Vector3(0.04f, 0f, 1.72f), new Vector3(1.12f, 0.08f, 1.65f), new Color4(0.28f, 0.72f, 1f, 0.36f)),
+                Cylinder("left crystal", new Vector3(0f, 1.22f, 3.08f), new Vector3(0.28f, 0.28f, 0.55f), Quaternion.Identity, new Color4(0.25f, 0.9f, 1f, 0.75f), Taper(0.85f, 0.85f)),
+                Cylinder("right crystal", new Vector3(0f, -1.22f, 3.08f), new Vector3(0.28f, 0.28f, 0.55f), Quaternion.Identity, new Color4(0.25f, 0.9f, 1f, 0.75f), Taper(0.85f, 0.85f)),
+                Cylinder("base ring", new Vector3(0f, 0f, 0.22f), new Vector3(2.45f, 2.45f, 0.22f), Quaternion.Identity, new Color4(0.08f, 0.08f, 0.11f, 1f), Hollow(0.62f)));
         }
 
         private static BuildTemplate CreateTreeTemplate()
@@ -346,9 +371,9 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
         private static BuildTemplate CreateFountainTemplate()
         {
             return new BuildTemplate("textbuild fountain", 0.15f,
-                Cylinder("stone basin", new Vector3(0f, 0f, 0.28f), new Vector3(2.5f, 2.5f, 0.55f), Quaternion.Identity, new Color4(0.56f, 0.56f, 0.52f, 1f)),
-                Cylinder("water surface", new Vector3(0f, 0f, 0.6f), new Vector3(2.12f, 2.12f, 0.08f), Quaternion.Identity, new Color4(0.18f, 0.58f, 0.9f, 0.75f)),
-                Cylinder("center column", new Vector3(0f, 0f, 1.0f), new Vector3(0.38f, 0.38f, 1.15f), Quaternion.Identity, new Color4(0.62f, 0.62f, 0.58f, 1f)),
+                Cylinder("stone basin", new Vector3(0f, 0f, 0.28f), new Vector3(2.5f, 2.5f, 0.55f), Quaternion.Identity, new Color4(0.56f, 0.56f, 0.52f, 1f), Hollow(0.46f)),
+                Cylinder("water surface", new Vector3(0f, 0f, 0.6f), new Vector3(2.12f, 2.12f, 0.08f), Quaternion.Identity, new Color4(0.18f, 0.58f, 0.9f, 0.75f), Hollow(0.18f)),
+                Cylinder("center column", new Vector3(0f, 0f, 1.0f), new Vector3(0.38f, 0.38f, 1.15f), Quaternion.Identity, new Color4(0.62f, 0.62f, 0.58f, 1f), Taper(0.18f, 0.18f)),
                 Sphere("upper bowl", new Vector3(0f, 0f, 1.58f), new Vector3(1.05f, 1.05f, 0.34f), new Color4(0.58f, 0.58f, 0.54f, 1f)),
                 Cylinder("water jet", new Vector3(0f, 0f, 2.05f), new Vector3(0.12f, 0.12f, 0.85f), Quaternion.Identity, new Color4(0.45f, 0.82f, 1f, 0.62f)),
                 Sphere("spray", new Vector3(0f, 0f, 2.52f), new Vector3(0.38f, 0.38f, 0.24f), new Color4(0.72f, 0.9f, 1f, 0.65f)));
@@ -404,22 +429,62 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
 
         private static BuildPart Box(string name, Vector3 offset, Vector3 scale, Quaternion rotation, Color4 color)
         {
-            return new BuildPart(name, BuildShape.Box, offset, scale, rotation, color);
+            return new BuildPart(name, BuildShape.Box, offset, scale, rotation, color, null);
         }
 
         private static BuildPart Sphere(string name, Vector3 offset, Vector3 scale, Color4 color)
         {
-            return new BuildPart(name, BuildShape.Sphere, offset, scale, Quaternion.Identity, color);
+            return new BuildPart(name, BuildShape.Sphere, offset, scale, Quaternion.Identity, color, null);
         }
 
         private static BuildPart Prism(string name, Vector3 offset, Vector3 scale, Quaternion rotation, Color4 color)
         {
-            return new BuildPart(name, BuildShape.Prism, offset, scale, rotation, color);
+            return new BuildPart(name, BuildShape.Prism, offset, scale, rotation, color, null);
+        }
+
+        private static BuildPart Torus(string name, Vector3 offset, Vector3 scale, Quaternion rotation, Color4 color)
+        {
+            return new BuildPart(name, BuildShape.Torus, offset, scale, rotation, color, null);
         }
 
         private static BuildPart Cylinder(string name, Vector3 offset, Vector3 scale, Quaternion rotation, Color4 color)
         {
-            return new BuildPart(name, BuildShape.Cylinder, offset, scale, rotation, color);
+            return Cylinder(name, offset, scale, rotation, color, null);
+        }
+
+        private static BuildPart Cylinder(string name, Vector3 offset, Vector3 scale, Quaternion rotation, Color4 color, Action<PrimitiveBaseShape> configureShape)
+        {
+            return new BuildPart(name, BuildShape.Cylinder, offset, scale, rotation, color, configureShape);
+        }
+
+        private static Action<PrimitiveBaseShape> Hollow(float amount)
+        {
+            return shape =>
+            {
+                shape.HollowShape = HollowShape.Circle;
+                shape.ProfileHollow = ClampProfileHollow(amount);
+            };
+        }
+
+        private static Action<PrimitiveBaseShape> Taper(float x, float y)
+        {
+            return shape =>
+            {
+                shape.PathTaperX = ClampPathParam(x);
+                shape.PathTaperY = ClampPathParam(y);
+            };
+        }
+
+        private static ushort ClampProfileHollow(float value)
+        {
+            value = Math.Max(0f, Math.Min(0.95f, value));
+            return (ushort)(value * 50000f);
+        }
+
+        private static sbyte ClampPathParam(float value)
+        {
+            value = Math.Max(-1f, Math.Min(1f, value));
+            return (sbyte)(value * 100f);
         }
 
         private enum BuildShape
@@ -427,7 +492,8 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             Box,
             Sphere,
             Cylinder,
-            Prism
+            Prism,
+            Torus
         }
 
         private class BuildTemplate
@@ -452,8 +518,9 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             public readonly Vector3 Scale;
             public readonly Quaternion Rotation;
             public readonly Color4 Color;
+            public readonly Action<PrimitiveBaseShape> ConfigureShape;
 
-            public BuildPart(string name, BuildShape shape, Vector3 offset, Vector3 scale, Quaternion rotation, Color4 color)
+            public BuildPart(string name, BuildShape shape, Vector3 offset, Vector3 scale, Quaternion rotation, Color4 color, Action<PrimitiveBaseShape> configureShape)
             {
                 Name = name;
                 Shape = shape;
@@ -461,6 +528,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 Scale = scale;
                 Rotation = rotation;
                 Color = color;
+                ConfigureShape = configureShape;
             }
         }
     }
