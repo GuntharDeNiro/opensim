@@ -105,4 +105,11 @@
     <Key Name="fileName" Value="DefaultSayAndTouch.lsl" />
   </Section>
 
+  <Section Name="BoatMooring">
+    <Key Name="assetID" Value="62c84e2e-9e5e-4c03-9c68-5e30dc5f9f43" />
+    <Key Name="name" Value="BoatMooring" />
+    <Key Name="assetType" Value="10" />
+    <Key Name="fileName" Value="BoatMooring.lsl" />
+  </Section>
+
 </Nini>

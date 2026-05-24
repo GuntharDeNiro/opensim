@@ -110,7 +110,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         private const float BoatWaveLength2 = 12f;
         private const float BoatWaveSpeed1 = 0.85f;
         private const float BoatWaveSpeed2 = 0.55f;
-        private const float BoatWaveNormalScale = 2.5f;
+        private const float BoatWaveNormalScale = 3.0f;
         private const float BoatWaveNormalFollowTimescale = 18f;
         private const float BoatWaveDriftScale = 0.25f;
         private Vector3 m_smoothedBoatWaterNormal = Vector3.UnitZ;
