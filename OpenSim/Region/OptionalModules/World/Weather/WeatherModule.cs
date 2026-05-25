@@ -29,6 +29,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
+using System.Threading;
 using log4net;
 using Mono.Addins;
 using Nini.Config;
@@ -59,6 +60,7 @@ namespace OpenSim.Region.OptionalModules.World.Weather
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
         private readonly object m_sync = new object();
+        private readonly object m_randomSync = new object();
         private readonly List<SceneObjectGroup> m_emitters = new List<SceneObjectGroup>();
         private readonly Random m_random = new Random();
 
@@ -74,6 +76,13 @@ namespace OpenSim.Region.OptionalModules.World.Weather
         private IEnvironmentModule m_environmentModule;
         private RegionLightShareData m_savedEnvironment;
         private WeatherKind m_currentWeather = WeatherKind.Clear;
+        private int m_stormEffectGeneration;
+        private bool m_lightningEnabled;
+        private int m_lightningMinDelayMS;
+        private int m_lightningMaxDelayMS;
+        private bool m_thunderEnabled;
+        private UUID m_thunderSound = UUID.Zero;
+        private float m_thunderVolume;
 
         public string Name { get { return "Weather Module"; } }
 
@@ -93,6 +102,15 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             m_intensity = Clamp(config.GetFloat("Intensity", 1f), 0.1f, 4f);
             m_adjustClouds = config.GetBoolean("AdjustClouds", true);
             m_restoreCloudsOnClear = config.GetBoolean("RestoreCloudsOnClear", true);
+            m_lightningEnabled = config.GetBoolean("LightningEnabled", true);
+            m_lightningMinDelayMS = Math.Max(1000, config.GetInt("LightningMinDelayMS", 7000));
+            m_lightningMaxDelayMS = Math.Max(m_lightningMinDelayMS, config.GetInt("LightningMaxDelayMS", 18000));
+            m_thunderEnabled = config.GetBoolean("ThunderEnabled", true);
+            m_thunderVolume = Clamp(config.GetFloat("ThunderVolume", 1f), 0f, 1f);
+
+            string thunderSound = config.GetString("ThunderSound", string.Empty);
+            if (!string.IsNullOrEmpty(thunderSound) && !UUID.TryParse(thunderSound, out m_thunderSound))
+                m_log.WarnFormat("[WEATHER]: ThunderSound '{0}' is not a valid UUID; thunder audio disabled.", thunderSound);
         }
 
         public void AddRegion(Scene scene)
@@ -216,6 +234,8 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             }
 
             ApplyClouds(weather);
+            if (weather == WeatherKind.Storm)
+                StartStormEffects(ownerId);
 
             m_log.InfoFormat(
                 "[WEATHER]: Started {0} in {1} with {2} emitters",
@@ -308,23 +328,37 @@ namespace OpenSim.Region.OptionalModules.World.Weather
 
         private float JitteredCellPosition(int cell, float spacing, int regionSize)
         {
-            double jitter = (m_random.NextDouble() - 0.5d) * spacing * 0.78d;
+            double jitter = (RandomUnit() - 0.5d) * spacing * 0.78d;
             float position = (float)(spacing * (cell + 0.5d) + jitter);
             return Clamp(position, 1f, regionSize - 1f);
         }
 
         private float JitterHeight()
         {
-            return m_emitterHeight + (float)((m_random.NextDouble() - 0.5d) * m_emitterHeight * 0.35d);
+            return m_emitterHeight + (float)((RandomUnit() - 0.5d) * m_emitterHeight * 0.35d);
         }
 
         private float RandomRange(float min, float max)
         {
-            return min + (float)m_random.NextDouble() * (max - min);
+            return min + (float)RandomUnit() * (max - min);
+        }
+
+        private int RandomRange(int min, int max)
+        {
+            lock (m_randomSync)
+                return m_random.Next(min, max);
+        }
+
+        private double RandomUnit()
+        {
+            lock (m_randomSync)
+                return m_random.NextDouble();
         }
 
         private void ClearWeather(bool log, bool restoreClouds)
         {
+            StopStormEffects();
+
             List<SceneObjectGroup> emitters;
             lock (m_sync)
             {
@@ -340,6 +374,167 @@ namespace OpenSim.Region.OptionalModules.World.Weather
 
             if (log && m_scene != null)
                 m_log.InfoFormat("[WEATHER]: Cleared weather in {0}", m_scene.RegionInfo.RegionName);
+        }
+
+        private void StartStormEffects(UUID ownerId)
+        {
+            if (!m_lightningEnabled && (!m_thunderEnabled || m_thunderSound.IsZero()))
+                return;
+
+            int generation = Interlocked.Increment(ref m_stormEffectGeneration);
+            Util.FireAndForget(
+                o => StormEffectLoop(generation, ownerId),
+                null,
+                "WeatherModule.StormEffects",
+                false);
+        }
+
+        private void StopStormEffects()
+        {
+            Interlocked.Increment(ref m_stormEffectGeneration);
+        }
+
+        private void StormEffectLoop(int generation, UUID ownerId)
+        {
+            while (generation == m_stormEffectGeneration && IsCurrentWeather(WeatherKind.Storm))
+            {
+                Thread.Sleep(RandomRange(m_lightningMinDelayMS, m_lightningMaxDelayMS + 1));
+
+                if (m_scene == null || generation != m_stormEffectGeneration || !IsCurrentWeather(WeatherKind.Storm))
+                    return;
+
+                TriggerLightning(ownerId, generation);
+            }
+        }
+
+        private bool IsCurrentWeather(WeatherKind weather)
+        {
+            lock (m_sync)
+                return m_currentWeather == weather;
+        }
+
+        private void TriggerLightning(UUID ownerId, int generation)
+        {
+            if (m_scene == null)
+                return;
+
+            Vector3 position = GetLightningPosition();
+
+            if (m_lightningEnabled)
+                CreateLightningFlash(ownerId, position);
+
+            if (m_thunderEnabled && !m_thunderSound.IsZero())
+            {
+                Util.FireAndForget(
+                    o =>
+                    {
+                        Thread.Sleep(RandomRange(450, 1900));
+                        if (generation == m_stormEffectGeneration && IsCurrentWeather(WeatherKind.Storm))
+                            SendThunder(position);
+                    },
+                    null,
+                    "WeatherModule.Thunder",
+                    false);
+            }
+        }
+
+        private Vector3 GetLightningPosition()
+        {
+            int sizeX = Math.Max(1, (int)m_scene.RegionInfo.RegionSizeX);
+            int sizeY = Math.Max(1, (int)m_scene.RegionInfo.RegionSizeY);
+            List<ScenePresence> avatars = new List<ScenePresence>();
+
+            m_scene.ForEachRootScenePresence(sp =>
+            {
+                if (sp != null && !sp.IsDeleted)
+                    avatars.Add(sp);
+            });
+
+            float x;
+            float y;
+            if (avatars.Count > 0)
+            {
+                ScenePresence avatar = avatars[RandomRange(0, avatars.Count)];
+                x = Clamp(avatar.AbsolutePosition.X + RandomRange(-52f, 52f), 6f, sizeX - 6f);
+                y = Clamp(avatar.AbsolutePosition.Y + RandomRange(-52f, 52f), 6f, sizeY - 6f);
+            }
+            else
+            {
+                x = RandomRange(6f, sizeX - 6f);
+                y = RandomRange(6f, sizeY - 6f);
+            }
+
+            float ground = m_scene.GetGroundHeight(x, y);
+            return new Vector3(x, y, ground + m_emitterHeight + RandomRange(5f, 13f));
+        }
+
+        private void CreateLightningFlash(UUID ownerId, Vector3 position)
+        {
+            PrimitiveBaseShape shape = PrimitiveBaseShape.CreateCylinder();
+            shape.Scale = new Vector3(0.18f, 0.18f, RandomRange(18f, 34f));
+
+            Primitive.TextureEntry textures = shape.Textures;
+            textures.DefaultTexture.RGBA = new Color4(0.92f, 0.96f, 1f, 0.88f);
+            textures.DefaultTexture.Fullbright = true;
+            textures.DefaultTexture.Glow = 0.45f;
+            shape.Textures = textures;
+
+            SceneObjectPart root = new SceneObjectPart(ownerId, shape, position, Quaternion.Identity, Vector3.Zero);
+            root.Name = "weather lightning flash";
+            root.Scale = shape.Scale;
+            root.AddFlag(PrimFlags.Phantom);
+
+            SceneObjectGroup flash = new SceneObjectGroup(root);
+            flash.SetGroup(UUID.Zero, null);
+
+            if (!m_scene.AddNewSceneObject(flash, false))
+                return;
+
+            flash.RootPart.SendFullUpdateToAllClients();
+            flash.ScheduleGroupForUpdate(PrimUpdateFlags.FullUpdate);
+
+            Util.FireAndForget(
+                o =>
+                {
+                    Thread.Sleep(RandomRange(90, 190));
+                    DeleteLightningFlash(flash);
+                },
+                null,
+                "WeatherModule.LightningFlash",
+                false);
+        }
+
+        private void DeleteLightningFlash(SceneObjectGroup flash)
+        {
+            if (m_scene == null || flash == null || flash.IsDeleted)
+                return;
+
+            try
+            {
+                m_scene.DeleteSceneObject(flash, false, false);
+            }
+            catch (Exception e)
+            {
+                m_log.DebugFormat("[WEATHER]: Failed to delete lightning flash {0}: {1}", flash.UUID, e.Message);
+            }
+        }
+
+        private void SendThunder(Vector3 position)
+        {
+            m_scene.ForEachRootScenePresence(sp =>
+            {
+                if (sp == null || sp.IsDeleted || sp.ControllingClient == null)
+                    return;
+
+                sp.ControllingClient.SendTriggeredSound(
+                    m_thunderSound,
+                    UUID.Zero,
+                    UUID.Zero,
+                    UUID.Zero,
+                    m_scene.RegionInfo.RegionHandle,
+                    position,
+                    m_thunderVolume);
+            });
         }
 
         private void ApplyClouds(WeatherKind weather)
