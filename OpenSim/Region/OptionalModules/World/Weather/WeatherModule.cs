@@ -305,15 +305,15 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             float rainIntensity = storm ? m_intensity * 1.75f : m_intensity;
 
             particles.PartStartColor = storm
-                ? new Color4(0.65f, 0.78f, 0.95f, 0.9f)
-                : new Color4(0.72f, 0.88f, 1f, 0.82f);
+                ? new Color4(0.58f, 0.62f, 0.68f, 0.86f)
+                : new Color4(0.64f, 0.68f, 0.72f, 0.72f);
             particles.PartEndColor = storm
-                ? new Color4(0.5f, 0.65f, 0.82f, 0.08f)
-                : new Color4(0.58f, 0.78f, 1f, 0.06f);
-            particles.PartStartScaleX = storm ? 0.055f : 0.045f;
-            particles.PartStartScaleY = storm ? 0.42f : 0.34f;
-            particles.PartEndScaleX = storm ? 0.035f : 0.03f;
-            particles.PartEndScaleY = storm ? 0.52f : 0.4f;
+                ? new Color4(0.42f, 0.46f, 0.52f, 0.05f)
+                : new Color4(0.48f, 0.54f, 0.6f, 0.04f);
+            particles.PartStartScaleX = storm ? 0.026f : 0.022f;
+            particles.PartStartScaleY = storm ? 0.34f : 0.26f;
+            particles.PartEndScaleX = storm ? 0.018f : 0.016f;
+            particles.PartEndScaleY = storm ? 0.44f : 0.32f;
             particles.BurstSpeedMin = storm ? 0.12f : 0.04f;
             particles.BurstSpeedMax = storm ? 0.58f : 0.28f;
             particles.BurstRate = (storm ? RandomRange(0.024f, 0.045f) : RandomRange(0.032f, 0.06f)) * emitterVariance;
@@ -471,12 +471,12 @@ namespace OpenSim.Region.OptionalModules.World.Weather
         private void CreateLightningFlash(UUID ownerId, Vector3 position)
         {
             PrimitiveBaseShape shape = PrimitiveBaseShape.CreateCylinder();
-            shape.Scale = new Vector3(0.18f, 0.18f, RandomRange(18f, 34f));
+            shape.Scale = new Vector3(0.55f, 0.55f, RandomRange(26f, 46f));
 
             Primitive.TextureEntry textures = shape.Textures;
-            textures.DefaultTexture.RGBA = new Color4(0.92f, 0.96f, 1f, 0.88f);
+            textures.DefaultTexture.RGBA = new Color4(0.96f, 0.98f, 1f, 1f);
             textures.DefaultTexture.Fullbright = true;
-            textures.DefaultTexture.Glow = 0.45f;
+            textures.DefaultTexture.Glow = 1f;
             shape.Textures = textures;
 
             SceneObjectPart root = new SceneObjectPart(ownerId, shape, position, Quaternion.Identity, Vector3.Zero);
@@ -496,7 +496,7 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             Util.FireAndForget(
                 o =>
                 {
-                    Thread.Sleep(RandomRange(90, 190));
+                    Thread.Sleep(RandomRange(420, 820));
                     DeleteLightningFlash(flash);
                 },
                 null,
@@ -526,13 +526,14 @@ namespace OpenSim.Region.OptionalModules.World.Weather
                 if (sp == null || sp.IsDeleted || sp.ControllingClient == null)
                     return;
 
+                Vector3 audiblePosition = sp.AbsolutePosition;
                 sp.ControllingClient.SendTriggeredSound(
                     m_thunderSound,
                     UUID.Zero,
                     UUID.Zero,
                     UUID.Zero,
                     m_scene.RegionInfo.RegionHandle,
-                    position,
+                    audiblePosition,
                     m_thunderVolume);
             });
         }
