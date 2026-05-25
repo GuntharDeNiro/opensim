@@ -185,6 +185,7 @@ namespace OpenSim.Region.Framework.Scenes.Animation
 
 
         UUID aoSitGndAnim = UUID.Zero;
+        UUID m_activeConfiguredWalkAnimation = UUID.Zero;
 
         /// <summary>
         /// The movement animation is reserved for "main" animations
@@ -214,6 +215,8 @@ namespace OpenSim.Region.Framework.Scenes.Animation
 
             if (m_scenePresence.Overrides.TryGetOverriddenAnimation(anim, out UUID overridenAnim))
             {
+                StopConfiguredWalkAnimation();
+
                 if (anim.Equals("SITGROUND"))
                 {
                     UUID defsit = DefaultAvatarAnimations.AnimsUUIDbyName["SIT_GROUND_CONSTRAINED"];
@@ -233,14 +236,20 @@ namespace OpenSim.Region.Framework.Scenes.Animation
                 return true;
             }
 
+            UUID configuredWalkAnimation = UUID.Zero;
+
             // translate sit and sitground state animations
             if (anim.Equals("SIT") || anim.Equals("SITGROUND"))
                 anim = m_scenePresence.sitAnimation;
             else if (anim.Equals("WALK"))
-                anim = GetWalkAnimationAsset();
+                anim = ResolveWalkAnimation(anim, out configuredWalkAnimation);
+            else
+                StopConfiguredWalkAnimation();
 
             if (m_animations.TrySetDefaultAnimation(anim, m_scenePresence.ControllingClient.NextAnimationSequenceNumber, m_scenePresence.UUID))
             {
+                SetConfiguredWalkAnimation(configuredWalkAnimation);
+
                 //m_log.DebugFormat(
                 //    "[SCENE PRESENCE ANIMATOR]: Updating movement animation to {0} for {1}",
                 //       anim, m_scenePresence.Name);
@@ -262,16 +271,49 @@ namespace OpenSim.Region.Framework.Scenes.Animation
         private static bool NeedsMovementAnimHeartbeat(string anim)
         {
             return anim == "WALK" || anim == "RUN" || anim == "CROUCHWALK"
-                || anim == "FEMALE_WALK" || anim == "FLY" || anim == "FLYSLOW"
-                || UUID.TryParse(anim, out UUID id) && !id.IsZero();
+                || anim == "FEMALE_WALK" || anim == "FLY" || anim == "FLYSLOW";
         }
 
-        private string GetWalkAnimationAsset()
+        private string ResolveWalkAnimation(string fallbackAnimation, out UUID configuredWalkAnimation)
         {
-            if (m_scenePresence.Appearance != null && !m_scenePresence.Appearance.IsMale)
-                return m_scenePresence.Scene.m_femaleWalkAnimation;
+            configuredWalkAnimation = UUID.Zero;
+            string configuredAnimation;
 
-            return m_scenePresence.Scene.m_maleWalkAnimation;
+            if (m_scenePresence.Appearance != null && !m_scenePresence.Appearance.IsMale)
+                configuredAnimation = m_scenePresence.Scene.m_femaleWalkAnimation;
+            else
+                configuredAnimation = m_scenePresence.Scene.m_maleWalkAnimation;
+
+            if (DefaultAvatarAnimations.AnimsUUIDbyName.ContainsKey(configuredAnimation))
+                return configuredAnimation;
+
+            if (UUID.TryParse(configuredAnimation, out UUID configuredID) && !configuredID.IsZero())
+                configuredWalkAnimation = configuredID;
+
+            return fallbackAnimation;
+        }
+
+        private void SetConfiguredWalkAnimation(UUID animID)
+        {
+            if (m_activeConfiguredWalkAnimation.Equals(animID))
+                return;
+
+            StopConfiguredWalkAnimation();
+
+            if (animID.IsZero())
+                return;
+
+            if (m_animations.Add(animID, m_scenePresence.ControllingClient.NextAnimationSequenceNumber, UUID.Zero))
+                m_activeConfiguredWalkAnimation = animID;
+        }
+
+        private void StopConfiguredWalkAnimation()
+        {
+            if (m_activeConfiguredWalkAnimation.IsZero())
+                return;
+
+            m_animations.Remove(m_activeConfiguredWalkAnimation, true);
+            m_activeConfiguredWalkAnimation = UUID.Zero;
         }
 
         public enum motionControlStates : byte
