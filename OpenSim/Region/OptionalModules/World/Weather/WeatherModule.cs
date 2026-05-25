@@ -358,37 +358,57 @@ namespace OpenSim.Region.OptionalModules.World.Weather
 
             if (weather == WeatherKind.Storm)
             {
-                clouds.cloudCoverage = 0.86f;
-                clouds.cloudScale = 0.62f;
-                clouds.cloudColor = new Vector4(0.22f, 0.25f, 0.3f, 1f);
-                clouds.cloudXYDensity = new Vector3(1.2f, 0.58f, 1.0f);
-                clouds.cloudDetailXYDensity = new Vector3(1.35f, 0.62f, 0.22f);
-                clouds.cloudScrollX = 0.42f;
-                clouds.cloudScrollY = 0.08f;
-                clouds.hazeDensity = Math.Max(clouds.hazeDensity, 0.8f);
-                clouds.sceneGamma = clouds.sceneGamma <= 0f ? 0.85f : Math.Min(clouds.sceneGamma, 0.85f);
+                clouds.cloudCoverage = 0.94f;
+                clouds.cloudScale = 0.72f;
+                clouds.cloudColor = new Vector4(0.06f, 0.07f, 0.085f, 1f);
+                clouds.cloudXYDensity = new Vector3(1.35f, 0.64f, 1.0f);
+                clouds.cloudDetailXYDensity = new Vector3(1.55f, 0.72f, 0.28f);
+                clouds.cloudScrollX = 0.48f;
+                clouds.cloudScrollY = 0.1f;
+                clouds.horizon = new Vector4(0.08f, 0.09f, 0.11f, 1f);
+                clouds.blueDensity = new Vector4(0.04f, 0.055f, 0.08f, 1f);
+                clouds.ambient = new Vector4(0.08f, 0.085f, 0.095f, 1f);
+                clouds.sunMoonColor = new Vector4(0.12f, 0.13f, 0.15f, 1f);
+                clouds.hazeHorizon = Math.Max(clouds.hazeHorizon, 0.45f);
+                clouds.hazeDensity = Math.Max(clouds.hazeDensity, 0.92f);
+                clouds.densityMultiplier = Math.Max(clouds.densityMultiplier, 0.32f);
+                clouds.sceneGamma = clouds.sceneGamma <= 0f ? 0.72f : Math.Min(clouds.sceneGamma, 0.72f);
             }
             else if (weather == WeatherKind.Snow)
             {
-                clouds.cloudCoverage = 0.78f;
-                clouds.cloudScale = 0.66f;
-                clouds.cloudColor = new Vector4(0.72f, 0.74f, 0.78f, 1f);
-                clouds.cloudXYDensity = new Vector3(1.08f, 0.55f, 0.92f);
-                clouds.cloudDetailXYDensity = new Vector3(1.15f, 0.56f, 0.18f);
-                clouds.cloudScrollX = 0.12f;
-                clouds.cloudScrollY = 0.03f;
-                clouds.hazeDensity = Math.Max(clouds.hazeDensity, 0.55f);
+                clouds.cloudCoverage = 0.86f;
+                clouds.cloudScale = 0.7f;
+                clouds.cloudColor = new Vector4(0.38f, 0.4f, 0.44f, 1f);
+                clouds.cloudXYDensity = new Vector3(1.18f, 0.6f, 0.96f);
+                clouds.cloudDetailXYDensity = new Vector3(1.28f, 0.62f, 0.22f);
+                clouds.cloudScrollX = 0.14f;
+                clouds.cloudScrollY = 0.035f;
+                clouds.horizon = new Vector4(0.26f, 0.28f, 0.32f, 1f);
+                clouds.blueDensity = new Vector4(0.13f, 0.15f, 0.2f, 1f);
+                clouds.ambient = new Vector4(0.22f, 0.23f, 0.25f, 1f);
+                clouds.sunMoonColor = new Vector4(0.3f, 0.31f, 0.34f, 1f);
+                clouds.hazeHorizon = Math.Max(clouds.hazeHorizon, 0.36f);
+                clouds.hazeDensity = Math.Max(clouds.hazeDensity, 0.72f);
+                clouds.densityMultiplier = Math.Max(clouds.densityMultiplier, 0.24f);
+                clouds.sceneGamma = clouds.sceneGamma <= 0f ? 0.86f : Math.Min(clouds.sceneGamma, 0.86f);
             }
             else
             {
-                clouds.cloudCoverage = 0.68f;
-                clouds.cloudScale = 0.56f;
-                clouds.cloudColor = new Vector4(0.36f, 0.39f, 0.44f, 1f);
-                clouds.cloudXYDensity = new Vector3(1.08f, 0.55f, 0.9f);
-                clouds.cloudDetailXYDensity = new Vector3(1.18f, 0.56f, 0.18f);
-                clouds.cloudScrollX = 0.24f;
-                clouds.cloudScrollY = 0.04f;
-                clouds.hazeDensity = Math.Max(clouds.hazeDensity, 0.62f);
+                clouds.cloudCoverage = 0.82f;
+                clouds.cloudScale = 0.64f;
+                clouds.cloudColor = new Vector4(0.16f, 0.18f, 0.22f, 1f);
+                clouds.cloudXYDensity = new Vector3(1.18f, 0.6f, 0.96f);
+                clouds.cloudDetailXYDensity = new Vector3(1.32f, 0.64f, 0.24f);
+                clouds.cloudScrollX = 0.28f;
+                clouds.cloudScrollY = 0.05f;
+                clouds.horizon = new Vector4(0.15f, 0.17f, 0.2f, 1f);
+                clouds.blueDensity = new Vector4(0.07f, 0.09f, 0.13f, 1f);
+                clouds.ambient = new Vector4(0.14f, 0.15f, 0.17f, 1f);
+                clouds.sunMoonColor = new Vector4(0.2f, 0.21f, 0.24f, 1f);
+                clouds.hazeHorizon = Math.Max(clouds.hazeHorizon, 0.4f);
+                clouds.hazeDensity = Math.Max(clouds.hazeDensity, 0.82f);
+                clouds.densityMultiplier = Math.Max(clouds.densityMultiplier, 0.28f);
+                clouds.sceneGamma = clouds.sceneGamma <= 0f ? 0.78f : Math.Min(clouds.sceneGamma, 0.78f);
             }
 
             clouds.drawClassicClouds = true;
