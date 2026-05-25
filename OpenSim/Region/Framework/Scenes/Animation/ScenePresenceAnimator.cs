@@ -60,6 +60,9 @@ namespace OpenSim.Region.Framework.Scenes.Animation
         private int m_animTickFall;
         private int m_animTickLand;
         private int m_animTickJump;
+        private int m_lastMovementAnimPackTick;
+        private string m_lastMovementAnimPackName;
+        private const int MovementAnimPackHeartbeatMS = 2500;
 
         public bool isJumping;
 
@@ -226,6 +229,7 @@ namespace OpenSim.Region.Framework.Scenes.Animation
                 }
                 m_scenePresence.SendScriptChangedEventToAttachments(Changed.ANIMATION);
                 SendAnimPack();
+                NoteMovementAnimPackSent();
                 return true;
             }
 
@@ -241,9 +245,22 @@ namespace OpenSim.Region.Framework.Scenes.Animation
 
                 m_scenePresence.SendScriptChangedEventToAttachments(Changed.ANIMATION);
                 SendAnimPack();
+                NoteMovementAnimPackSent();
                 return true;
             }
             return false;
+        }
+
+        private void NoteMovementAnimPackSent()
+        {
+            m_lastMovementAnimPackTick = Util.EnvironmentTickCount();
+            m_lastMovementAnimPackName = CurrentMovementAnimation;
+        }
+
+        private static bool NeedsMovementAnimHeartbeat(string anim)
+        {
+            return anim == "WALK" || anim == "RUN" || anim == "CROUCHWALK"
+                || anim == "FLY" || anim == "FLYSLOW";
         }
 
         public enum motionControlStates : byte
@@ -604,6 +621,24 @@ namespace OpenSim.Region.Framework.Scenes.Animation
             {
                 CurrentMovementAnimation = DetermineMovementAnimation();
                 return TrySetMovementAnimation(CurrentMovementAnimation);
+            }
+        }
+
+        public void ResendMovementAnimationIfNeeded()
+        {
+            if (m_scenePresence.IsChildAgent || !NeedsMovementAnimHeartbeat(CurrentMovementAnimation))
+                return;
+
+            int now = Util.EnvironmentTickCount();
+
+            lock (m_animations)
+            {
+                if (m_lastMovementAnimPackName != CurrentMovementAnimation ||
+                        Util.EnvironmentTickCountSubtract(now, m_lastMovementAnimPackTick) >= MovementAnimPackHeartbeatMS)
+                {
+                    SendAnimPack();
+                    NoteMovementAnimPackSent();
+                }
             }
         }
 

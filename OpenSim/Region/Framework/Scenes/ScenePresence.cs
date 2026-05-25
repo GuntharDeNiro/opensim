@@ -2879,6 +2879,8 @@ namespace OpenSim.Region.Framework.Scenes
                 }
                 else if((flags & ACFlags.AGENT_CONTROL_FINISH_ANIM) != 0)
                     Animator.UpdateMovementAnimations();
+                else if (MovementFlags != 0)
+                    Animator.ResendMovementAnimationIfNeeded();
                 SendControlsToScripts((uint)allFlags);
             }
         }
