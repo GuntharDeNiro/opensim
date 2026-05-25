@@ -305,15 +305,15 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             float rainIntensity = storm ? m_intensity * 1.75f : m_intensity;
 
             particles.PartStartColor = storm
-                ? new Color4(0.58f, 0.62f, 0.68f, 0.86f)
-                : new Color4(0.64f, 0.68f, 0.72f, 0.72f);
+                ? new Color4(0.66f, 0.69f, 0.74f, 0.94f)
+                : new Color4(0.7f, 0.73f, 0.76f, 0.86f);
             particles.PartEndColor = storm
-                ? new Color4(0.42f, 0.46f, 0.52f, 0.05f)
-                : new Color4(0.48f, 0.54f, 0.6f, 0.04f);
-            particles.PartStartScaleX = storm ? 0.026f : 0.022f;
-            particles.PartStartScaleY = storm ? 0.34f : 0.26f;
-            particles.PartEndScaleX = storm ? 0.018f : 0.016f;
-            particles.PartEndScaleY = storm ? 0.44f : 0.32f;
+                ? new Color4(0.5f, 0.54f, 0.6f, 0.1f)
+                : new Color4(0.56f, 0.6f, 0.65f, 0.08f);
+            particles.PartStartScaleX = storm ? 0.038f : 0.032f;
+            particles.PartStartScaleY = storm ? 0.38f : 0.3f;
+            particles.PartEndScaleX = storm ? 0.024f : 0.022f;
+            particles.PartEndScaleY = storm ? 0.48f : 0.36f;
             particles.BurstSpeedMin = storm ? 0.12f : 0.04f;
             particles.BurstSpeedMax = storm ? 0.58f : 0.28f;
             particles.BurstRate = (storm ? RandomRange(0.024f, 0.045f) : RandomRange(0.032f, 0.06f)) * emitterVariance;
