@@ -445,6 +445,17 @@ namespace OpenSim.Region.Framework.Scenes.Animation
                 if (CurrentMovementAnimation == "WALK" && !heldOnXY && !heldDown && !heldUp)
                     return "STAND";
 
+                if (heldOnXY && !Falling)
+                {
+                    currentControlState = motionControlStates.onsurface;
+
+                    if (heldDown)
+                        return "CROUCHWALK";
+
+                    if (!m_scenePresence.AgentControlStopActive)
+                        return m_scenePresence.SetAlwaysRun ? "RUN" : "WALK";
+                }
+
                 return CurrentMovementAnimation;
             }
 
