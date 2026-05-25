@@ -164,7 +164,7 @@ namespace OpenSim.Region.Framework.Scenes.Animation
         }
 
         /// <summary>
-        /// Set the animation as the default animation if it's known
+        /// Set the animation as the default animation if it's known or passed as an explicit UUID.
         /// </summary>
         public bool TrySetDefaultAnimation(string anim, int sequenceNum, UUID objectID)
         {
@@ -176,6 +176,10 @@ namespace OpenSim.Region.Framework.Scenes.Animation
             {
                 return SetDefaultAnimation(id, sequenceNum, objectID);
             }
+
+            if (UUID.TryParse(anim, out id) && !id.IsZero())
+                return SetDefaultAnimation(id, sequenceNum, objectID);
+
             return false;
         }
 

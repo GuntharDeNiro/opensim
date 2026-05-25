@@ -236,6 +236,8 @@ namespace OpenSim.Region.Framework.Scenes.Animation
             // translate sit and sitground state animations
             if (anim.Equals("SIT") || anim.Equals("SITGROUND"))
                 anim = m_scenePresence.sitAnimation;
+            else if (anim.Equals("WALK"))
+                anim = GetWalkAnimationAsset();
 
             if (m_animations.TrySetDefaultAnimation(anim, m_scenePresence.ControllingClient.NextAnimationSequenceNumber, m_scenePresence.UUID))
             {
@@ -260,10 +262,11 @@ namespace OpenSim.Region.Framework.Scenes.Animation
         private static bool NeedsMovementAnimHeartbeat(string anim)
         {
             return anim == "WALK" || anim == "RUN" || anim == "CROUCHWALK"
-                || anim == "FEMALE_WALK" || anim == "FLY" || anim == "FLYSLOW";
+                || anim == "FEMALE_WALK" || anim == "FLY" || anim == "FLYSLOW"
+                || UUID.TryParse(anim, out UUID id) && !id.IsZero();
         }
 
-        private string GetWalkAnimation()
+        private string GetWalkAnimationAsset()
         {
             if (m_scenePresence.Appearance != null && !m_scenePresence.Appearance.IsMale)
                 return m_scenePresence.Scene.m_femaleWalkAnimation;
@@ -361,7 +364,7 @@ namespace OpenSim.Region.Framework.Scenes.Animation
                 // well what to do?
                 currentControlState = motionControlStates.onsurface;
                 if (heldOnXY)
-                    return GetWalkAnimation();
+                    return "WALK";
 
                 return "STAND";
             }
@@ -469,7 +472,7 @@ namespace OpenSim.Region.Framework.Scenes.Animation
                     if (heldDown)
                         return "CROUCHWALK";
 
-                    return m_scenePresence.SetAlwaysRun ? "RUN" : GetWalkAnimation();
+                    return m_scenePresence.SetAlwaysRun ? "RUN" : "WALK";
                 }
 
                 return CurrentMovementAnimation;
@@ -596,7 +599,7 @@ namespace OpenSim.Region.Framework.Scenes.Animation
                     if (m_scenePresence.SetAlwaysRun)
                         return "RUN";
                     else
-                        return GetWalkAnimation();
+                        return "WALK";
                 }
             }
             else
