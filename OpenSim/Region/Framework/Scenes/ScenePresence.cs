@@ -177,6 +177,7 @@ namespace OpenSim.Region.Framework.Scenes
         private const int AttachmentScriptRestartDelayMS = 2000;
         private int m_attachmentScriptRestartGeneration;
         private bool m_forceMovementAnimationUpdateAfterCrossing;
+        private int m_transferAgentUpdateWaitMS = 30000;
 
         /// <summary>
         /// Experimentally determined "fudge factor" to make sit-target positions
@@ -1193,6 +1194,10 @@ namespace OpenSim.Region.Framework.Scenes
                 string lpb = sconfig.GetString("LandingPointBehavior", "LandingPointBehavior_OS");
                 if (lpb == "LandingPointBehavior_SL")
                     m_LandingPointBehavior = LandingPointBehavior.SL;
+
+                m_transferAgentUpdateWaitMS = Math.Max(
+                    10000,
+                    sconfig.GetInt("TransferAgentUpdateWaitMS", m_transferAgentUpdateWaitMS));
             }
 
             ControllingClient.RefreshGroupMembership();
@@ -2151,7 +2156,7 @@ namespace OpenSim.Region.Framework.Scenes
 
             try
             {
-                if(m_updateAgentReceivedAfterTransferEvent.WaitOne(10000))
+                if(m_updateAgentReceivedAfterTransferEvent.WaitOne(m_transferAgentUpdateWaitMS))
                 {
                     UUID originID = UUID.Zero;
 
@@ -2167,7 +2172,9 @@ namespace OpenSim.Region.Framework.Scenes
                }
                else
                {
-                   m_log.WarnFormat("[SCENE PRESENCE]: Update agent {0} at {1} did not receive agent update ", client.Name, Scene.Name);
+                   m_log.WarnFormat(
+                       "[SCENE PRESENCE]: Update agent {0} at {1} did not receive agent update after {2}ms",
+                       client.Name, Scene.Name, m_transferAgentUpdateWaitMS);
                    return false;
                }
             }
