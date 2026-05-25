@@ -461,8 +461,7 @@ namespace OpenSim.Region.Framework.Scenes.Animation
                     if (heldDown)
                         return "CROUCHWALK";
 
-                    if (!m_scenePresence.AgentControlStopActive)
-                        return m_scenePresence.SetAlwaysRun ? "RUN" : "WALK";
+                    return m_scenePresence.SetAlwaysRun ? "RUN" : "WALK";
                 }
 
                 return CurrentMovementAnimation;
@@ -582,9 +581,9 @@ namespace OpenSim.Region.Framework.Scenes.Animation
                 {
                     return "CROUCHWALK";
                 }
-                // We need to prevent these animations if the user tries to make their avatar walk or run whilst
-                // specifying AGENT_CONTROL_STOP (pressing down space on viewers).
-                else if (!m_scenePresence.AgentControlStopActive)
+                // Some viewers can keep AGENT_CONTROL_STOP set while still sending movement.
+                // If the avatar is actually moving, keep the visual walk/run state in sync.
+                else
                 {
                     if (m_scenePresence.SetAlwaysRun)
                         return "RUN";
