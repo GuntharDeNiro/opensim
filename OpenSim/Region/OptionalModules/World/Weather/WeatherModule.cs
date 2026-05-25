@@ -369,10 +369,10 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             particles.BurstSpeedMin = storm ? 0.12f : 0.04f;
             particles.BurstSpeedMax = storm ? 0.58f : 0.28f;
             particles.BurstRate = (storm ? RandomRange(0.024f, 0.045f) : RandomRange(0.032f, 0.06f)) * emitterVariance;
-            particles.PartMaxAge = storm ? 7.0f : 8.0f;
+            particles.PartMaxAge = storm ? 4.6f : 5.6f;
             particles.BurstPartCount = (byte)Clamp((int)Math.Ceiling(1.4f * rainIntensity * densityVariance), 1, storm ? 10 : 7);
             Vector2 rainWind = WeatherWindVector(weather, driftVariance);
-            particles.PartAcceleration = new Vector3(rainWind.X, rainWind.Y, storm ? -2.8f : -1.8f);
+            particles.PartAcceleration = new Vector3(rainWind.X, rainWind.Y, storm ? -5.2f : -3.8f);
 
             return particles;
         }
