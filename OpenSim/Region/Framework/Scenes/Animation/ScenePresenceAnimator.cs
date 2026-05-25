@@ -353,7 +353,7 @@ namespace OpenSim.Region.Framework.Scenes.Animation
                 // well what to do?
                 currentControlState = motionControlStates.onsurface;
                 if (heldOnXY)
-                    return "WALK";
+                    return m_scenePresence.Scene.m_walkAnimation;
 
                 return "STAND";
             }
@@ -461,7 +461,7 @@ namespace OpenSim.Region.Framework.Scenes.Animation
                     if (heldDown)
                         return "CROUCHWALK";
 
-                    return m_scenePresence.SetAlwaysRun ? "RUN" : "WALK";
+                    return m_scenePresence.SetAlwaysRun ? "RUN" : m_scenePresence.Scene.m_walkAnimation;
                 }
 
                 return CurrentMovementAnimation;
@@ -588,7 +588,7 @@ namespace OpenSim.Region.Framework.Scenes.Animation
                     if (m_scenePresence.SetAlwaysRun)
                         return "RUN";
                     else
-                        return "WALK";
+                        return m_scenePresence.Scene.m_walkAnimation;
                 }
             }
             else
