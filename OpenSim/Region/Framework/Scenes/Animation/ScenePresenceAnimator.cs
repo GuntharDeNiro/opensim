@@ -324,6 +324,7 @@ namespace OpenSim.Region.Framework.Scenes.Animation
             //bool mouselook = (controlFlags & AgentManager.ControlFlags.AGENT_CONTROL_MOUSELOOK) == AgentManager.ControlFlags.AGENT_CONTROL_MOUSELOOK;
 
             bool heldOnXY = ((controlFlags & ANYXYMASK) != 0);
+            bool movingOnXY = heldOnXY;
             bool heldTurnLeft;
             bool heldTurnRight;
             if ((controlFlags & ANYXYZMASK) != 0)
@@ -358,6 +359,14 @@ namespace OpenSim.Region.Framework.Scenes.Animation
             }
 
             bool isColliding = actor.IsColliding;
+            if (!movingOnXY)
+            {
+                Vector3 targetVelocity = m_scenePresence.TargetVelocity;
+                Vector3 velocity = actor.Velocity;
+                movingOnXY =
+                    targetVelocity.X * targetVelocity.X + targetVelocity.Y * targetVelocity.Y > 0.25f ||
+                    velocity.X * velocity.X + velocity.Y * velocity.Y > 0.25f;
+            }
 
             #region Flying
             if (actor.Flying)
@@ -442,10 +451,10 @@ namespace OpenSim.Region.Framework.Scenes.Animation
                 }
 
                 // Check if the user has stopped walking just now
-                if (CurrentMovementAnimation == "WALK" && !heldOnXY && !heldDown && !heldUp)
+                if (CurrentMovementAnimation == "WALK" && !movingOnXY && !heldDown && !heldUp)
                     return "STAND";
 
-                if (heldOnXY && !Falling)
+                if (movingOnXY && !Falling)
                 {
                     currentControlState = motionControlStates.onsurface;
 
@@ -564,7 +573,7 @@ namespace OpenSim.Region.Framework.Scenes.Animation
 
             // next section moved outside paren. and realigned for jumping
 
-            if (heldOnXY)
+            if (movingOnXY)
             {
                 currentControlState = motionControlStates.onsurface;
                 Falling = false;
