@@ -239,7 +239,8 @@ namespace OpenSim.Region.Framework.Scenes
         public bool DisableObjectTransfer { get; set; }
 
         public bool m_useFlySlow;
-        public string m_walkAnimation = "WALK";
+        public string m_maleWalkAnimation = "WALK";
+        public string m_femaleWalkAnimation = "FEMALE_WALK";
         public bool m_useTrashOnDelete = true;
 
          protected float m_defaultDrawDistance = 255f;
@@ -928,7 +929,8 @@ namespace OpenSim.Region.Framework.Scenes
 
                 //Animation states
                 m_useFlySlow = startupConfig.GetBoolean("enableflyslow", false);
-                m_walkAnimation = startupConfig.GetString("walk_animation", m_walkAnimation);
+                m_maleWalkAnimation = startupConfig.GetString("male_walk_animation", m_maleWalkAnimation);
+                m_femaleWalkAnimation = startupConfig.GetString("female_walk_animation", m_femaleWalkAnimation);
 
                 SeeIntoRegion = startupConfig.GetBoolean("see_into_region", SeeIntoRegion);
 

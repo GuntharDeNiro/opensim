@@ -260,7 +260,15 @@ namespace OpenSim.Region.Framework.Scenes.Animation
         private static bool NeedsMovementAnimHeartbeat(string anim)
         {
             return anim == "WALK" || anim == "RUN" || anim == "CROUCHWALK"
-                || anim == "FLY" || anim == "FLYSLOW";
+                || anim == "FEMALE_WALK" || anim == "FLY" || anim == "FLYSLOW";
+        }
+
+        private string GetWalkAnimation()
+        {
+            if (m_scenePresence.Appearance != null && !m_scenePresence.Appearance.IsMale)
+                return m_scenePresence.Scene.m_femaleWalkAnimation;
+
+            return m_scenePresence.Scene.m_maleWalkAnimation;
         }
 
         public enum motionControlStates : byte
@@ -353,7 +361,7 @@ namespace OpenSim.Region.Framework.Scenes.Animation
                 // well what to do?
                 currentControlState = motionControlStates.onsurface;
                 if (heldOnXY)
-                    return m_scenePresence.Scene.m_walkAnimation;
+                    return GetWalkAnimation();
 
                 return "STAND";
             }
@@ -461,7 +469,7 @@ namespace OpenSim.Region.Framework.Scenes.Animation
                     if (heldDown)
                         return "CROUCHWALK";
 
-                    return m_scenePresence.SetAlwaysRun ? "RUN" : m_scenePresence.Scene.m_walkAnimation;
+                    return m_scenePresence.SetAlwaysRun ? "RUN" : GetWalkAnimation();
                 }
 
                 return CurrentMovementAnimation;
@@ -588,7 +596,7 @@ namespace OpenSim.Region.Framework.Scenes.Animation
                     if (m_scenePresence.SetAlwaysRun)
                         return "RUN";
                     else
-                        return m_scenePresence.Scene.m_walkAnimation;
+                        return GetWalkAnimation();
                 }
             }
             else

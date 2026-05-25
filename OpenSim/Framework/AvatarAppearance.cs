@@ -87,6 +87,16 @@ namespace OpenSim.Framework
             set { m_visualparams = value; }
         }
 
+        public bool IsMale
+        {
+            get
+            {
+                return m_visualparams != null
+                    && m_visualparams.Length > (int)VPElement.SHAPE_MALE
+                    && m_visualparams[(int)VPElement.SHAPE_MALE] != 0;
+            }
+        }
+
         public Vector3 AvatarSize
         {
             get { return m_avatarSize; }
