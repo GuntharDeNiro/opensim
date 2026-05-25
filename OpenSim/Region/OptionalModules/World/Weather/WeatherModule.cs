@@ -112,7 +112,7 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             m_estateManagerOnly = config.GetBoolean("EstateManagerOnly", true);
             m_emitterGrid = Math.Max(1, config.GetInt("EmitterGrid", 8));
             m_emitterHeight = Math.Max(4f, config.GetFloat("EmitterHeight", 18f));
-            m_intensity = Clamp(config.GetFloat("Intensity", 1f), 0.1f, 4f);
+            m_intensity = Clamp(config.GetFloat("Intensity", 1f), 0.1f, 10f);
             m_adjustClouds = config.GetBoolean("AdjustClouds", true);
             m_restoreCloudsOnClear = config.GetBoolean("RestoreCloudsOnClear", true);
             m_adjustWind = config.GetBoolean("AdjustWind", true);
@@ -366,13 +366,13 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             particles.PartStartScaleY = storm ? 0.38f : 0.3f;
             particles.PartEndScaleX = storm ? 0.024f : 0.022f;
             particles.PartEndScaleY = storm ? 0.48f : 0.36f;
-            particles.BurstSpeedMin = storm ? 0.12f : 0.04f;
-            particles.BurstSpeedMax = storm ? 0.58f : 0.28f;
+            particles.BurstSpeedMin = storm ? 0.65f : 0.38f;
+            particles.BurstSpeedMax = storm ? 2.2f : 1.45f;
             particles.BurstRate = (storm ? RandomRange(0.024f, 0.045f) : RandomRange(0.032f, 0.06f)) * emitterVariance;
-            particles.PartMaxAge = storm ? 4.6f : 5.6f;
-            particles.BurstPartCount = (byte)Clamp((int)Math.Ceiling(1.4f * rainIntensity * densityVariance), 1, storm ? 10 : 7);
+            particles.PartMaxAge = storm ? 1.9f : 2.35f;
+            particles.BurstPartCount = (byte)Clamp((int)Math.Ceiling(1.4f * rainIntensity * densityVariance), 1, storm ? 28 : 20);
             Vector2 rainWind = WeatherWindVector(weather, driftVariance);
-            particles.PartAcceleration = new Vector3(rainWind.X, rainWind.Y, storm ? -5.2f : -3.8f);
+            particles.PartAcceleration = new Vector3(rainWind.X, rainWind.Y, storm ? -18f : -12f);
 
             return particles;
         }

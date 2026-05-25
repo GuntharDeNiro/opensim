@@ -220,6 +220,12 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         public float maximumMassObject = 10000.01f;
         public float geomDefaultDensity = 10.0f;
 
+        internal bool BoatTurnBankingEnabled = false;
+        internal float BoatTurnBankingDegrees = 8.0f;
+        internal float BoatTurnBankingTimescale = 0.35f;
+        internal bool BoatTurnBankingInvert = false;
+        internal float BoatTurnBankingMaxYaw = 1.0f;
+
         public float maximumAngularVelocity = 12.0f; // default 12rad/s
         public float maxAngVelocitySQ = 144f;   // squared value
 
@@ -449,6 +455,12 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
                     minimumGroundFlightOffset = physicsconfig.GetFloat("minimum_ground_flight_offset", minimumGroundFlightOffset);
                     maximumMassObject = physicsconfig.GetFloat("maximum_mass_object", maximumMassObject);
+
+                    BoatTurnBankingEnabled = physicsconfig.GetBoolean("boat_turn_banking_enabled", BoatTurnBankingEnabled);
+                    BoatTurnBankingDegrees = physicsconfig.GetFloat("boat_turn_banking_degrees", BoatTurnBankingDegrees);
+                    BoatTurnBankingTimescale = physicsconfig.GetFloat("boat_turn_banking_timescale", BoatTurnBankingTimescale);
+                    BoatTurnBankingInvert = physicsconfig.GetBoolean("boat_turn_banking_invert", BoatTurnBankingInvert);
+                    BoatTurnBankingMaxYaw = physicsconfig.GetFloat("boat_turn_banking_max_yaw", BoatTurnBankingMaxYaw);
 
                     avDensity *= 3f / 80f;  // scale other engines density option to this
                 }
