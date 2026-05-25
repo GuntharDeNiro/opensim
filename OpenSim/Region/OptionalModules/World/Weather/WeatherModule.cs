@@ -54,13 +54,13 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             1u |    // PSYS_PART_INTERP_COLOR_MASK
             2u |    // PSYS_PART_INTERP_SCALE_MASK
             8u |    // PSYS_PART_WIND_MASK
-            32u |   // PSYS_PART_FOLLOW_VELOCITY_MASK
             256u;   // PSYS_PART_EMISSIVE_MASK
 
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
         private readonly object m_sync = new object();
         private readonly List<SceneObjectGroup> m_emitters = new List<SceneObjectGroup>();
+        private readonly Random m_random = new Random();
 
         private Scene m_scene;
         private bool m_enabled;
@@ -84,7 +84,7 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             m_enabled = config.GetBoolean("Enabled", false);
             m_commandChannel = config.GetInt("CommandChannel", 89);
             m_estateManagerOnly = config.GetBoolean("EstateManagerOnly", true);
-            m_emitterGrid = Math.Max(1, config.GetInt("EmitterGrid", 4));
+            m_emitterGrid = Math.Max(1, config.GetInt("EmitterGrid", 8));
             m_emitterHeight = Math.Max(4f, config.GetFloat("EmitterHeight", 18f));
             m_intensity = Clamp(config.GetFloat("Intensity", 1f), 0.1f, 4f);
         }
@@ -173,16 +173,16 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             int sizeY = Math.Max(1, (int)m_scene.RegionInfo.RegionSizeY);
             float spacingX = sizeX / (float)m_emitterGrid;
             float spacingY = sizeY / (float)m_emitterGrid;
-            float radius = Math.Max(spacingX, spacingY) * 0.58f;
+            float radius = Math.Max(spacingX, spacingY) * 0.62f;
 
             for (int x = 0; x < m_emitterGrid; x++)
             {
                 for (int y = 0; y < m_emitterGrid; y++)
                 {
-                    float posX = spacingX * (x + 0.5f);
-                    float posY = spacingY * (y + 0.5f);
+                    float posX = JitteredCellPosition(x, spacingX, sizeX);
+                    float posY = JitteredCellPosition(y, spacingY, sizeY);
                     float ground = m_scene.GetGroundHeight(posX, posY);
-                    Vector3 position = new Vector3(posX, posY, ground + m_emitterHeight);
+                    Vector3 position = new Vector3(posX, posY, ground + JitterHeight());
 
                     SceneObjectGroup emitter = CreateEmitter(ownerId, weather, position, radius);
                     if (!m_scene.AddNewSceneObject(emitter, false))
@@ -237,7 +237,7 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             {
                 CRC = 1,
                 PartDataFlags = (Primitive.ParticleSystem.ParticleDataFlags)ParticleFlags,
-                Pattern = (Primitive.ParticleSystem.SourcePattern)1, // PSYS_SRC_PATTERN_DROP
+                Pattern = (Primitive.ParticleSystem.SourcePattern)2, // PSYS_SRC_PATTERN_EXPLODE
                 Texture = Util.BLANK_TEXTURE_UUID,
                 BurstRadius = radius,
                 MaxAge = 0f,
@@ -256,11 +256,11 @@ namespace OpenSim.Region.OptionalModules.World.Weather
                 particles.PartEndScaleX = 0.24f;
                 particles.PartEndScaleY = 0.24f;
                 particles.BurstSpeedMin = 0.05f;
-                particles.BurstSpeedMax = 0.35f;
-                particles.BurstRate = 0.05f;
-                particles.PartMaxAge = 10.0f;
-                particles.BurstPartCount = (byte)Clamp((int)(12 * m_intensity), 1, 60);
-                particles.PartAcceleration = new Vector3(0.1f, 0.05f, -0.9f);
+                particles.BurstSpeedMax = 0.22f;
+                particles.BurstRate = 0.11f;
+                particles.PartMaxAge = 12.0f;
+                particles.BurstPartCount = (byte)Clamp((int)(2 * m_intensity), 1, 8);
+                particles.PartAcceleration = new Vector3(0.12f, 0.05f, -0.55f);
                 return particles;
             }
 
@@ -274,19 +274,31 @@ namespace OpenSim.Region.OptionalModules.World.Weather
                 ? new Color4(0.5f, 0.65f, 0.82f, 0.08f)
                 : new Color4(0.58f, 0.78f, 1f, 0.06f);
             particles.PartStartScaleX = storm ? 0.055f : 0.045f;
-            particles.PartStartScaleY = storm ? 1.15f : 0.95f;
+            particles.PartStartScaleY = storm ? 0.42f : 0.34f;
             particles.PartEndScaleX = storm ? 0.035f : 0.03f;
-            particles.PartEndScaleY = storm ? 1.35f : 1.05f;
-            particles.BurstSpeedMin = storm ? 5.0f : 3.0f;
-            particles.BurstSpeedMax = storm ? 9.0f : 6.0f;
-            particles.BurstRate = storm ? 0.018f : 0.028f;
-            particles.PartMaxAge = storm ? 5.0f : 6.0f;
-            particles.BurstPartCount = (byte)Clamp((int)(16 * rainIntensity), 1, 120);
+            particles.PartEndScaleY = storm ? 0.52f : 0.4f;
+            particles.BurstSpeedMin = storm ? 0.2f : 0.08f;
+            particles.BurstSpeedMax = storm ? 0.85f : 0.45f;
+            particles.BurstRate = storm ? 0.055f : 0.075f;
+            particles.PartMaxAge = storm ? 7.0f : 8.0f;
+            particles.BurstPartCount = (byte)Clamp((int)(3 * rainIntensity), 1, 14);
             particles.PartAcceleration = storm
-                ? new Vector3(1.2f, 0.4f, -7f)
-                : new Vector3(0.45f, 0.15f, -4.5f);
+                ? new Vector3(0.85f, 0.25f, -2.8f)
+                : new Vector3(0.28f, 0.1f, -1.8f);
 
             return particles;
+        }
+
+        private float JitteredCellPosition(int cell, float spacing, int regionSize)
+        {
+            double jitter = (m_random.NextDouble() - 0.5d) * spacing * 0.78d;
+            float position = (float)(spacing * (cell + 0.5d) + jitter);
+            return Clamp(position, 1f, regionSize - 1f);
+        }
+
+        private float JitterHeight()
+        {
+            return m_emitterHeight + (float)((m_random.NextDouble() - 0.5d) * m_emitterHeight * 0.35d);
         }
 
         private void ClearWeather(bool log)
