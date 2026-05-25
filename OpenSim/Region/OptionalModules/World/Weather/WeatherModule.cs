@@ -37,6 +37,7 @@ using OpenMetaverse;
 using OpenSim.Framework;
 using OpenSim.Region.Framework.Interfaces;
 using OpenSim.Region.Framework.Scenes;
+using OpenSim.Region.PhysicsModules.SharedBase;
 
 namespace OpenSim.Region.OptionalModules.World.Weather
 {
@@ -87,6 +88,8 @@ namespace OpenSim.Region.OptionalModules.World.Weather
         private float m_rainWindStrength;
         private float m_stormWindStrength;
         private float m_snowWindStrength;
+        private bool m_avoidCoveredAreas;
+        private float m_coverProbeHeight;
         private bool m_lightningEnabled;
         private int m_lightningMinDelayMS;
         private int m_lightningMaxDelayMS;
@@ -119,6 +122,8 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             m_rainWindStrength = Math.Max(0f, config.GetFloat("RainWindStrength", 0.45f));
             m_stormWindStrength = Math.Max(0f, config.GetFloat("StormWindStrength", 1.35f));
             m_snowWindStrength = Math.Max(0f, config.GetFloat("SnowWindStrength", 0.22f));
+            m_avoidCoveredAreas = config.GetBoolean("AvoidCoveredAreas", true);
+            m_coverProbeHeight = Math.Max(8f, config.GetFloat("CoverProbeHeight", 96f));
             m_lightningEnabled = config.GetBoolean("LightningEnabled", true);
             m_lightningMinDelayMS = Math.Max(1000, config.GetInt("LightningMinDelayMS", 7000));
             m_lightningMaxDelayMS = Math.Max(m_lightningMinDelayMS, config.GetInt("LightningMaxDelayMS", 18000));
@@ -234,6 +239,8 @@ namespace OpenSim.Region.OptionalModules.World.Weather
                     float posY = JitteredCellPosition(y, spacingY, sizeY);
                     float ground = m_scene.GetGroundHeight(posX, posY);
                     Vector3 position = new Vector3(posX, posY, ground + JitterHeight());
+                    if (IsCoveredFromSky(posX, posY, ground, position.Z))
+                        continue;
 
                     SceneObjectGroup emitter = CreateEmitter(ownerId, weather, position, radius);
                     if (!m_scene.AddNewSceneObject(emitter, false))
@@ -266,6 +273,28 @@ namespace OpenSim.Region.OptionalModules.World.Weather
                 created.Count);
 
             return true;
+        }
+
+        private bool IsCoveredFromSky(float x, float y, float ground, float emitterZ)
+        {
+            if (!m_avoidCoveredAreas || m_scene == null || !m_scene.SupportsRayCastFiltered())
+                return false;
+
+            float startZ = Math.Max(emitterZ + 2f, ground + m_coverProbeHeight);
+            float length = Math.Max(1f, startZ - ground - 0.2f);
+            Vector3 start = new Vector3(x, y, startZ);
+
+            try
+            {
+                RayFilterFlags filter = RayFilterFlags.AllPrims | RayFilterFlags.ClosestHit;
+                List<ContactResult> hits = (List<ContactResult>)m_scene.RayCastFiltered(start, -Vector3.UnitZ, length, 1, filter);
+                return hits != null && hits.Count > 0;
+            }
+            catch (Exception e)
+            {
+                m_log.DebugFormat("[WEATHER]: Cover probe failed in {0}: {1}", m_scene.RegionInfo.RegionName, e.Message);
+                return false;
+            }
         }
 
         private SceneObjectGroup CreateEmitter(UUID ownerId, WeatherKind weather, Vector3 position, float radius)
