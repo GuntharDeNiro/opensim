@@ -69,6 +69,10 @@ namespace OpenSim.Region.OptionalModules.World.Weather
         private int m_emitterGrid;
         private float m_emitterHeight;
         private float m_intensity;
+        private bool m_adjustClouds;
+        private bool m_restoreCloudsOnClear;
+        private IEnvironmentModule m_environmentModule;
+        private RegionLightShareData m_savedEnvironment;
         private WeatherKind m_currentWeather = WeatherKind.Clear;
 
         public string Name { get { return "Weather Module"; } }
@@ -87,6 +91,8 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             m_emitterGrid = Math.Max(1, config.GetInt("EmitterGrid", 8));
             m_emitterHeight = Math.Max(4f, config.GetFloat("EmitterHeight", 18f));
             m_intensity = Clamp(config.GetFloat("Intensity", 1f), 0.1f, 4f);
+            m_adjustClouds = config.GetBoolean("AdjustClouds", true);
+            m_restoreCloudsOnClear = config.GetBoolean("RestoreCloudsOnClear", true);
         }
 
         public void AddRegion(Scene scene)
@@ -107,17 +113,23 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             if (m_scene != null)
                 m_scene.EventManager.OnChatFromClient -= OnChatFromClient;
 
-            ClearWeather(false);
+            ClearWeather(false, true);
             m_scene = null;
         }
 
         public void RegionLoaded(Scene scene)
         {
+            if (!m_enabled)
+                return;
+
+            m_environmentModule = scene.RequestModuleInterface<IEnvironmentModule>();
+            if (m_adjustClouds && m_environmentModule == null)
+                m_log.WarnFormat("[WEATHER]: Cloud changes disabled in {0}; EnvironmentModule is not available.", scene.RegionInfo.RegionName);
         }
 
         public void Close()
         {
-            ClearWeather(false);
+            ClearWeather(false, true);
         }
 
         private void OnChatFromClient(object sender, OSChatMessage chat)
@@ -150,7 +162,7 @@ namespace OpenSim.Region.OptionalModules.World.Weather
 
             if (weather == WeatherKind.Clear)
             {
-                ClearWeather(true);
+                ClearWeather(true, true);
                 SendReply(client, "Weather: clear.");
                 return;
             }
@@ -163,7 +175,7 @@ namespace OpenSim.Region.OptionalModules.World.Weather
 
         private bool ApplyWeather(WeatherKind weather, UUID ownerId)
         {
-            ClearWeather(false);
+            ClearWeather(false, false);
 
             if (m_scene == null)
                 return false;
@@ -203,6 +215,8 @@ namespace OpenSim.Region.OptionalModules.World.Weather
                 m_currentWeather = weather;
             }
 
+            ApplyClouds(weather);
+
             m_log.InfoFormat(
                 "[WEATHER]: Started {0} in {1} with {2} emitters",
                 WeatherName(weather),
@@ -224,15 +238,18 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             root.Name = "weather " + WeatherName(weather) + " emitter";
             root.Scale = shape.Scale;
             root.AddFlag(PrimFlags.Phantom);
-            root.AddNewParticleSystem(CreateParticleSystem(weather, radius), false);
+            root.AddNewParticleSystem(CreateParticleSystem(weather, radius, RandomRange(0.72f, 1.32f)), false);
 
             SceneObjectGroup group = new SceneObjectGroup(root);
             group.SetGroup(UUID.Zero, null);
             return group;
         }
 
-        private Primitive.ParticleSystem CreateParticleSystem(WeatherKind weather, float radius)
+        private Primitive.ParticleSystem CreateParticleSystem(WeatherKind weather, float radius, float emitterVariance)
         {
+            float densityVariance = RandomRange(0.65f, 1.35f);
+            float driftVariance = RandomRange(0.75f, 1.25f);
+
             Primitive.ParticleSystem particles = new Primitive.ParticleSystem
             {
                 CRC = 1,
@@ -257,10 +274,10 @@ namespace OpenSim.Region.OptionalModules.World.Weather
                 particles.PartEndScaleY = 0.24f;
                 particles.BurstSpeedMin = 0.05f;
                 particles.BurstSpeedMax = 0.22f;
-                particles.BurstRate = 0.11f;
+                particles.BurstRate = RandomRange(0.045f, 0.085f) * emitterVariance;
                 particles.PartMaxAge = 12.0f;
-                particles.BurstPartCount = (byte)Clamp((int)(2 * m_intensity), 1, 8);
-                particles.PartAcceleration = new Vector3(0.12f, 0.05f, -0.55f);
+                particles.BurstPartCount = (byte)Clamp((int)Math.Ceiling(1.2f * m_intensity * densityVariance), 1, 5);
+                particles.PartAcceleration = new Vector3(0.12f * driftVariance, 0.05f * driftVariance, -0.55f);
                 return particles;
             }
 
@@ -277,14 +294,14 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             particles.PartStartScaleY = storm ? 0.42f : 0.34f;
             particles.PartEndScaleX = storm ? 0.035f : 0.03f;
             particles.PartEndScaleY = storm ? 0.52f : 0.4f;
-            particles.BurstSpeedMin = storm ? 0.2f : 0.08f;
-            particles.BurstSpeedMax = storm ? 0.85f : 0.45f;
-            particles.BurstRate = storm ? 0.055f : 0.075f;
+            particles.BurstSpeedMin = storm ? 0.12f : 0.04f;
+            particles.BurstSpeedMax = storm ? 0.58f : 0.28f;
+            particles.BurstRate = (storm ? RandomRange(0.024f, 0.045f) : RandomRange(0.032f, 0.06f)) * emitterVariance;
             particles.PartMaxAge = storm ? 7.0f : 8.0f;
-            particles.BurstPartCount = (byte)Clamp((int)(3 * rainIntensity), 1, 14);
+            particles.BurstPartCount = (byte)Clamp((int)Math.Ceiling(1.4f * rainIntensity * densityVariance), 1, storm ? 10 : 7);
             particles.PartAcceleration = storm
-                ? new Vector3(0.85f, 0.25f, -2.8f)
-                : new Vector3(0.28f, 0.1f, -1.8f);
+                ? new Vector3(0.85f * driftVariance, 0.25f * driftVariance, -2.8f)
+                : new Vector3(0.28f * driftVariance, 0.1f * driftVariance, -1.8f);
 
             return particles;
         }
@@ -301,7 +318,12 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             return m_emitterHeight + (float)((m_random.NextDouble() - 0.5d) * m_emitterHeight * 0.35d);
         }
 
-        private void ClearWeather(bool log)
+        private float RandomRange(float min, float max)
+        {
+            return min + (float)m_random.NextDouble() * (max - min);
+        }
+
+        private void ClearWeather(bool log, bool restoreClouds)
         {
             List<SceneObjectGroup> emitters;
             lock (m_sync)
@@ -313,8 +335,119 @@ namespace OpenSim.Region.OptionalModules.World.Weather
 
             DeleteEmitters(emitters);
 
+            if (restoreClouds)
+                RestoreClouds();
+
             if (log && m_scene != null)
                 m_log.InfoFormat("[WEATHER]: Cleared weather in {0}", m_scene.RegionInfo.RegionName);
+        }
+
+        private void ApplyClouds(WeatherKind weather)
+        {
+            if (!m_adjustClouds || m_environmentModule == null)
+                return;
+
+            RegionLightShareData current = m_savedEnvironment ?? m_environmentModule.ToLightShare();
+            if (current == null)
+                return;
+
+            if (m_savedEnvironment == null)
+                m_savedEnvironment = CloneLightShare(current);
+
+            RegionLightShareData clouds = CloneLightShare(current);
+
+            if (weather == WeatherKind.Storm)
+            {
+                clouds.cloudCoverage = 0.86f;
+                clouds.cloudScale = 0.62f;
+                clouds.cloudColor = new Vector4(0.22f, 0.25f, 0.3f, 1f);
+                clouds.cloudXYDensity = new Vector3(1.2f, 0.58f, 1.0f);
+                clouds.cloudDetailXYDensity = new Vector3(1.35f, 0.62f, 0.22f);
+                clouds.cloudScrollX = 0.42f;
+                clouds.cloudScrollY = 0.08f;
+                clouds.hazeDensity = Math.Max(clouds.hazeDensity, 0.8f);
+                clouds.sceneGamma = clouds.sceneGamma <= 0f ? 0.85f : Math.Min(clouds.sceneGamma, 0.85f);
+            }
+            else if (weather == WeatherKind.Snow)
+            {
+                clouds.cloudCoverage = 0.78f;
+                clouds.cloudScale = 0.66f;
+                clouds.cloudColor = new Vector4(0.72f, 0.74f, 0.78f, 1f);
+                clouds.cloudXYDensity = new Vector3(1.08f, 0.55f, 0.92f);
+                clouds.cloudDetailXYDensity = new Vector3(1.15f, 0.56f, 0.18f);
+                clouds.cloudScrollX = 0.12f;
+                clouds.cloudScrollY = 0.03f;
+                clouds.hazeDensity = Math.Max(clouds.hazeDensity, 0.55f);
+            }
+            else
+            {
+                clouds.cloudCoverage = 0.68f;
+                clouds.cloudScale = 0.56f;
+                clouds.cloudColor = new Vector4(0.36f, 0.39f, 0.44f, 1f);
+                clouds.cloudXYDensity = new Vector3(1.08f, 0.55f, 0.9f);
+                clouds.cloudDetailXYDensity = new Vector3(1.18f, 0.56f, 0.18f);
+                clouds.cloudScrollX = 0.24f;
+                clouds.cloudScrollY = 0.04f;
+                clouds.hazeDensity = Math.Max(clouds.hazeDensity, 0.62f);
+            }
+
+            clouds.drawClassicClouds = true;
+            clouds.cloudScrollXLock = false;
+            clouds.cloudScrollYLock = false;
+            m_environmentModule.FromLightShare(clouds);
+        }
+
+        private void RestoreClouds()
+        {
+            if (!m_restoreCloudsOnClear || m_environmentModule == null || m_savedEnvironment == null)
+                return;
+
+            m_environmentModule.FromLightShare(m_savedEnvironment);
+            m_savedEnvironment = null;
+        }
+
+        private static RegionLightShareData CloneLightShare(RegionLightShareData source)
+        {
+            return new RegionLightShareData
+            {
+                waterColor = source.waterColor,
+                waterFogDensityExponent = source.waterFogDensityExponent,
+                underwaterFogModifier = source.underwaterFogModifier,
+                reflectionWaveletScale = source.reflectionWaveletScale,
+                fresnelScale = source.fresnelScale,
+                fresnelOffset = source.fresnelOffset,
+                refractScaleAbove = source.refractScaleAbove,
+                refractScaleBelow = source.refractScaleBelow,
+                blurMultiplier = source.blurMultiplier,
+                bigWaveDirection = source.bigWaveDirection,
+                littleWaveDirection = source.littleWaveDirection,
+                normalMapTexture = source.normalMapTexture,
+                horizon = source.horizon,
+                hazeHorizon = source.hazeHorizon,
+                blueDensity = source.blueDensity,
+                hazeDensity = source.hazeDensity,
+                densityMultiplier = source.densityMultiplier,
+                distanceMultiplier = source.distanceMultiplier,
+                maxAltitude = source.maxAltitude,
+                sunMoonColor = source.sunMoonColor,
+                sunMoonPosition = source.sunMoonPosition,
+                ambient = source.ambient,
+                eastAngle = source.eastAngle,
+                sunGlowFocus = source.sunGlowFocus,
+                sunGlowSize = source.sunGlowSize,
+                sceneGamma = source.sceneGamma,
+                starBrightness = source.starBrightness,
+                cloudColor = source.cloudColor,
+                cloudXYDensity = source.cloudXYDensity,
+                cloudCoverage = source.cloudCoverage,
+                cloudScale = source.cloudScale,
+                cloudDetailXYDensity = source.cloudDetailXYDensity,
+                cloudScrollX = source.cloudScrollX,
+                cloudScrollXLock = source.cloudScrollXLock,
+                cloudScrollY = source.cloudScrollY,
+                cloudScrollYLock = source.cloudScrollYLock,
+                drawClassicClouds = source.drawClassicClouds
+            };
         }
 
         private void DeleteEmitters(List<SceneObjectGroup> emitters)
