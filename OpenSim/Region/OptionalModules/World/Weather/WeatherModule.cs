@@ -75,8 +75,18 @@ namespace OpenSim.Region.OptionalModules.World.Weather
         private bool m_restoreCloudsOnClear;
         private IEnvironmentModule m_environmentModule;
         private RegionLightShareData m_savedEnvironment;
+        private IWindModule m_windModule;
+        private string m_savedWindPlugin;
+        private Dictionary<string, float> m_savedWindParams;
         private WeatherKind m_currentWeather = WeatherKind.Clear;
         private int m_stormEffectGeneration;
+        private bool m_adjustWind;
+        private bool m_restoreWindOnClear;
+        private float m_windDirectionDegrees;
+        private float m_windDirectionVarianceDegrees;
+        private float m_rainWindStrength;
+        private float m_stormWindStrength;
+        private float m_snowWindStrength;
         private bool m_lightningEnabled;
         private int m_lightningMinDelayMS;
         private int m_lightningMaxDelayMS;
@@ -102,6 +112,13 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             m_intensity = Clamp(config.GetFloat("Intensity", 1f), 0.1f, 4f);
             m_adjustClouds = config.GetBoolean("AdjustClouds", true);
             m_restoreCloudsOnClear = config.GetBoolean("RestoreCloudsOnClear", true);
+            m_adjustWind = config.GetBoolean("AdjustWind", true);
+            m_restoreWindOnClear = config.GetBoolean("RestoreWindOnClear", true);
+            m_windDirectionDegrees = config.GetFloat("WindDirectionDegrees", 70f);
+            m_windDirectionVarianceDegrees = Math.Max(0f, config.GetFloat("WindDirectionVarianceDegrees", 18f));
+            m_rainWindStrength = Math.Max(0f, config.GetFloat("RainWindStrength", 0.45f));
+            m_stormWindStrength = Math.Max(0f, config.GetFloat("StormWindStrength", 1.35f));
+            m_snowWindStrength = Math.Max(0f, config.GetFloat("SnowWindStrength", 0.22f));
             m_lightningEnabled = config.GetBoolean("LightningEnabled", true);
             m_lightningMinDelayMS = Math.Max(1000, config.GetInt("LightningMinDelayMS", 7000));
             m_lightningMaxDelayMS = Math.Max(m_lightningMinDelayMS, config.GetInt("LightningMaxDelayMS", 18000));
@@ -143,6 +160,10 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             m_environmentModule = scene.RequestModuleInterface<IEnvironmentModule>();
             if (m_adjustClouds && m_environmentModule == null)
                 m_log.WarnFormat("[WEATHER]: Cloud changes disabled in {0}; EnvironmentModule is not available.", scene.RegionInfo.RegionName);
+
+            m_windModule = scene.RequestModuleInterface<IWindModule>();
+            if (m_adjustWind && m_windModule == null)
+                m_log.WarnFormat("[WEATHER]: Region wind changes disabled in {0}; WindModule is not available.", scene.RegionInfo.RegionName);
         }
 
         public void Close()
@@ -234,6 +255,7 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             }
 
             ApplyClouds(weather);
+            ApplyWind(weather);
             if (weather == WeatherKind.Storm)
                 StartStormEffects(ownerId);
 
@@ -297,7 +319,8 @@ namespace OpenSim.Region.OptionalModules.World.Weather
                 particles.BurstRate = RandomRange(0.045f, 0.085f) * emitterVariance;
                 particles.PartMaxAge = 12.0f;
                 particles.BurstPartCount = (byte)Clamp((int)Math.Ceiling(1.2f * m_intensity * densityVariance), 1, 5);
-                particles.PartAcceleration = new Vector3(0.12f * driftVariance, 0.05f * driftVariance, -0.55f);
+                Vector2 snowWind = WeatherWindVector(weather, driftVariance);
+                particles.PartAcceleration = new Vector3(snowWind.X, snowWind.Y, -0.55f);
                 return particles;
             }
 
@@ -319,11 +342,38 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             particles.BurstRate = (storm ? RandomRange(0.024f, 0.045f) : RandomRange(0.032f, 0.06f)) * emitterVariance;
             particles.PartMaxAge = storm ? 7.0f : 8.0f;
             particles.BurstPartCount = (byte)Clamp((int)Math.Ceiling(1.4f * rainIntensity * densityVariance), 1, storm ? 10 : 7);
-            particles.PartAcceleration = storm
-                ? new Vector3(0.85f * driftVariance, 0.25f * driftVariance, -2.8f)
-                : new Vector3(0.28f * driftVariance, 0.1f * driftVariance, -1.8f);
+            Vector2 rainWind = WeatherWindVector(weather, driftVariance);
+            particles.PartAcceleration = new Vector3(rainWind.X, rainWind.Y, storm ? -2.8f : -1.8f);
 
             return particles;
+        }
+
+        private Vector2 WeatherWindVector(WeatherKind weather, float variance)
+        {
+            float strength = WeatherWindStrength(weather);
+            if (strength <= 0f)
+                return Vector2.Zero;
+
+            float angle = m_windDirectionDegrees + RandomRange(-m_windDirectionVarianceDegrees, m_windDirectionVarianceDegrees);
+            double radians = angle * Math.PI / 180d;
+            return new Vector2(
+                (float)Math.Cos(radians) * strength * variance,
+                (float)Math.Sin(radians) * strength * variance);
+        }
+
+        private float WeatherWindStrength(WeatherKind weather)
+        {
+            switch (weather)
+            {
+                case WeatherKind.Storm:
+                    return m_stormWindStrength;
+                case WeatherKind.Snow:
+                    return m_snowWindStrength;
+                case WeatherKind.Rain:
+                    return m_rainWindStrength;
+                default:
+                    return 0f;
+            }
         }
 
         private float JitteredCellPosition(int cell, float spacing, int regionSize)
@@ -371,6 +421,8 @@ namespace OpenSim.Region.OptionalModules.World.Weather
 
             if (restoreClouds)
                 RestoreClouds();
+            if (restoreClouds)
+                RestoreWind();
 
             if (log && m_scene != null)
                 m_log.InfoFormat("[WEATHER]: Cleared weather in {0}", m_scene.RegionInfo.RegionName);
@@ -611,6 +663,87 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             clouds.cloudScrollXLock = false;
             clouds.cloudScrollYLock = false;
             m_environmentModule.FromLightShare(clouds);
+        }
+
+        private void ApplyWind(WeatherKind weather)
+        {
+            if (!m_adjustWind || m_windModule == null)
+                return;
+
+            string plugin = m_windModule.WindActiveModelPluginName;
+            if (string.IsNullOrEmpty(plugin))
+                return;
+
+            try
+            {
+                SaveWindParams(plugin);
+
+                float strength = WeatherWindStrength(weather);
+                if (plugin == "SimpleRandomWind")
+                {
+                    m_windModule.WindParamSet(plugin, "strength", strength * 4f);
+                }
+                else if (plugin == "ConfigurableWind")
+                {
+                    m_windModule.WindParamSet(plugin, "avgStrength", strength * 4f);
+                    m_windModule.WindParamSet(plugin, "avgDirection", m_windDirectionDegrees);
+                    m_windModule.WindParamSet(plugin, "varStrength", Math.Max(0.5f, strength * 1.6f));
+                    m_windModule.WindParamSet(plugin, "varDirection", m_windDirectionVarianceDegrees);
+                    m_windModule.WindParamSet(plugin, "rateChange", weather == WeatherKind.Storm ? 1.8f : 0.8f);
+                }
+            }
+            catch (Exception e)
+            {
+                string regionName = m_scene == null ? "unknown region" : m_scene.RegionInfo.RegionName;
+                m_log.DebugFormat("[WEATHER]: Could not apply weather wind in {0}: {1}", regionName, e.Message);
+            }
+        }
+
+        private void SaveWindParams(string plugin)
+        {
+            if (m_savedWindParams != null)
+                return;
+
+            Dictionary<string, float> saved = new Dictionary<string, float>();
+
+            if (plugin == "SimpleRandomWind")
+            {
+                saved["strength"] = m_windModule.WindParamGet(plugin, "strength");
+            }
+            else if (plugin == "ConfigurableWind")
+            {
+                saved["avgStrength"] = m_windModule.WindParamGet(plugin, "avgStrength");
+                saved["avgDirection"] = m_windModule.WindParamGet(plugin, "avgDirection");
+                saved["varStrength"] = m_windModule.WindParamGet(plugin, "varStrength");
+                saved["varDirection"] = m_windModule.WindParamGet(plugin, "varDirection");
+                saved["rateChange"] = m_windModule.WindParamGet(plugin, "rateChange");
+            }
+
+            if (saved.Count == 0)
+                return;
+
+            m_savedWindPlugin = plugin;
+            m_savedWindParams = saved;
+        }
+
+        private void RestoreWind()
+        {
+            if (!m_restoreWindOnClear || m_windModule == null || m_savedWindParams == null || string.IsNullOrEmpty(m_savedWindPlugin))
+                return;
+
+            try
+            {
+                foreach (KeyValuePair<string, float> windParam in m_savedWindParams)
+                    m_windModule.WindParamSet(m_savedWindPlugin, windParam.Key, windParam.Value);
+            }
+            catch (Exception e)
+            {
+                string regionName = m_scene == null ? "unknown region" : m_scene.RegionInfo.RegionName;
+                m_log.DebugFormat("[WEATHER]: Could not restore weather wind in {0}: {1}", regionName, e.Message);
+            }
+
+            m_savedWindPlugin = null;
+            m_savedWindParams = null;
         }
 
         private void RestoreClouds()
