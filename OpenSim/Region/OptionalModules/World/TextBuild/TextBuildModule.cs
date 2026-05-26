@@ -29,6 +29,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using log4net;
 using Mono.Addins;
 using Nini.Config;
@@ -247,10 +248,37 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 || lower.Contains("flat")
                 || lower.Contains("piatto")
                 || lower.Contains("erboso")
-                || lower.Contains("grass");
+                || lower.Contains("grass")
+                || lower.Contains("ring")
+                || lower.Contains("anello")
+                || lower.Contains("atoll")
+                || lower.Contains("atollo")
+                || lower.Contains("hole")
+                || lower.Contains("buco")
+                || lower.Contains("lagoon")
+                || lower.Contains("laguna")
+                || lower.Contains("volcano")
+                || lower.Contains("vulcano")
+                || lower.Contains("crater")
+                || lower.Contains("cratere")
+                || lower.Contains("archipelago")
+                || lower.Contains("arcipelago")
+                || lower.Contains("canyon");
 
             if (!mentionsTerrain)
                 return null;
+
+            if (lower.Contains("ring") || lower.Contains("anello") || lower.Contains("atoll") || lower.Contains("atollo") || lower.Contains("hole") || lower.Contains("buco") || lower.Contains("lagoon") || lower.Contains("laguna"))
+                return new TerrainRecipe("ring island", TerrainStyle.RingIsland, ExtractMeterValue(lower, 100f));
+
+            if (lower.Contains("volcano") || lower.Contains("vulcano") || lower.Contains("crater") || lower.Contains("cratere"))
+                return new TerrainRecipe("volcanic island", TerrainStyle.VolcanicIsland, ExtractMeterValue(lower, 62f));
+
+            if (lower.Contains("archipelago") || lower.Contains("arcipelago"))
+                return new TerrainRecipe("tropical archipelago", TerrainStyle.Archipelago);
+
+            if (lower.Contains("canyon"))
+                return new TerrainRecipe("canyon landscape", TerrainStyle.Canyon);
 
             if (lower.Contains("mountain") || lower.Contains("montagna") || lower.Contains("montagne") || lower.Contains("snow") || lower.Contains("neve"))
                 return new TerrainRecipe("snowy mountains", TerrainStyle.SnowyMountains);
@@ -262,6 +290,19 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 return new TerrainRecipe("flat grassy terrain", TerrainStyle.FlatGrass);
 
             return null;
+        }
+
+        private static float ExtractMeterValue(string lower, float fallback)
+        {
+            Match match = Regex.Match(lower, @"(\d+(?:[\.,]\d+)?)\s*(?:m|meter|meters|metro|metri)\b");
+            if (!match.Success)
+                return fallback;
+
+            string value = match.Groups[1].Value.Replace(',', '.');
+            if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float meters))
+                return Math.Max(5f, meters);
+
+            return fallback;
         }
 
         private void ApplyTerrainRecipe(IClientAPI client, TerrainRecipe recipe)
@@ -287,7 +328,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             {
                 for (int y = 0; y < height; y++)
                 {
-                    m_scene.Heightmap[x, y] = GenerateTerrainHeight(recipe.Style, x, y, width, height);
+                    m_scene.Heightmap[x, y] = GenerateTerrainHeight(recipe, x, y, width, height);
                 }
             }
 
@@ -301,21 +342,21 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             m_scene.EventManager.TriggerTerrainCheckUpdates();
             m_scene.EventManager.TriggerTerrainUpdate();
 
-            SendReply(client, string.Format("TextBuild: shaped terrain as {0}.", recipe.Name));
+            SendReply(client, string.Format("TextBuild: shaped terrain as {0}.", recipe.GetDescription()));
         }
 
         private void ApplyTerrainTextureHeights(TerrainStyle style)
         {
             RegionSettings settings = m_scene.RegionInfo.RegionSettings;
 
-            if (style == TerrainStyle.SnowyMountains)
+            if (style == TerrainStyle.SnowyMountains || style == TerrainStyle.VolcanicIsland || style == TerrainStyle.Canyon)
             {
                 settings.Elevation1NW = settings.Elevation1NE = settings.Elevation1SE = settings.Elevation1SW = 24.0;
                 settings.Elevation2NW = settings.Elevation2NE = settings.Elevation2SE = settings.Elevation2SW = 78.0;
                 return;
             }
 
-            if (style == TerrainStyle.TropicalIsland)
+            if (style == TerrainStyle.TropicalIsland || style == TerrainStyle.RingIsland || style == TerrainStyle.Archipelago)
             {
                 settings.Elevation1NW = settings.Elevation1NE = settings.Elevation1SE = settings.Elevation1SW = 20.5;
                 settings.Elevation2NW = settings.Elevation2NE = settings.Elevation2SE = settings.Elevation2SW = 42.0;
@@ -326,15 +367,27 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             settings.Elevation2NW = settings.Elevation2NE = settings.Elevation2SE = settings.Elevation2SW = 35.0;
         }
 
-        private float GenerateTerrainHeight(TerrainStyle style, int x, int y, int width, int height)
+        private float GenerateTerrainHeight(TerrainRecipe recipe, int x, int y, int width, int height)
         {
             float water = (float)m_scene.RegionInfo.RegionSettings.WaterHeight;
 
-            if (style == TerrainStyle.SnowyMountains)
+            if (recipe.Style == TerrainStyle.SnowyMountains)
                 return GenerateSnowyMountainHeight(x, y, width, height, water);
 
-            if (style == TerrainStyle.TropicalIsland)
+            if (recipe.Style == TerrainStyle.TropicalIsland)
                 return GenerateTropicalIslandHeight(x, y, width, height, water);
+
+            if (recipe.Style == TerrainStyle.RingIsland)
+                return GenerateRingIslandHeight(x, y, width, height, water, recipe.MeterValue);
+
+            if (recipe.Style == TerrainStyle.VolcanicIsland)
+                return GenerateVolcanicIslandHeight(x, y, width, height, water, recipe.MeterValue);
+
+            if (recipe.Style == TerrainStyle.Archipelago)
+                return GenerateArchipelagoHeight(x, y, width, height, water);
+
+            if (recipe.Style == TerrainStyle.Canyon)
+                return GenerateCanyonHeight(x, y, width, height, water);
 
             return ClampTerrainHeight(water + 1.6f + FractalNoise(x * 0.035f, y * 0.035f, 2001) * 0.18f);
         }
@@ -352,6 +405,88 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
 
             if (beach > 0f)
                 heightValue = Lerp(heightValue, water + 0.85f + ridges * 0.25f, beach * 0.72f);
+
+            return ClampTerrainHeight(heightValue);
+        }
+
+        private static float GenerateRingIslandHeight(int x, int y, int width, int height, float water, float holeDiameterMeters)
+        {
+            float nx = ((x + 0.5f) / width) * 2f - 1f;
+            float ny = ((y + 0.5f) / height) * 2f - 1f;
+            float distance = (float)Math.Sqrt(nx * nx + ny * ny);
+            float holeRadius = Math.Min(0.78f, Math.Max(0.08f, holeDiameterMeters / Math.Min(width, height)));
+            float outer = SmoothStep(1.04f, 0.72f, distance);
+            float inner = SmoothStep(holeRadius * 0.82f, holeRadius * 1.18f, distance);
+            float ring = outer * inner;
+            float beachOuter = SmoothStep(1.02f, 0.88f, distance) * inner;
+            float beachInner = SmoothStep(holeRadius * 1.35f, holeRadius * 1.05f, distance) * outer;
+            float ridges = FractalNoise(x * 0.045f, y * 0.045f, 8111) * 2.2f * ring;
+            float palmsGround = FractalNoise(x * 0.018f, y * 0.018f, 9127) * 3.0f * ring;
+            float heightValue = water - 2.4f + ring * 10.5f + ridges + palmsGround;
+
+            heightValue = Lerp(heightValue, water + 0.65f + ridges * 0.18f, Math.Max(beachOuter, beachInner) * 0.72f);
+
+            if (distance < holeRadius)
+                heightValue = Lerp(heightValue, water - 1.8f, SmoothStep(holeRadius, holeRadius * 0.55f, distance));
+
+            return ClampTerrainHeight(heightValue);
+        }
+
+        private static float GenerateVolcanicIslandHeight(int x, int y, int width, int height, float water, float craterDiameterMeters)
+        {
+            float nx = ((x + 0.5f) / width) * 2f - 1f;
+            float ny = ((y + 0.5f) / height) * 2f - 1f;
+            float distance = (float)Math.Sqrt(nx * nx + ny * ny);
+            float island = SmoothStep(1.02f, 0.2f, distance);
+            float craterRadius = Math.Min(0.55f, Math.Max(0.07f, craterDiameterMeters / Math.Min(width, height)));
+            float cone = Math.Max(0f, 1f - distance / 0.82f);
+            float crater = SmoothStep(craterRadius * 1.65f, craterRadius * 0.75f, distance);
+            float lavaRoughness = Math.Abs(FractalNoise(x * 0.055f, y * 0.055f, 3331)) * 5.5f * island;
+            float heightValue = water - 2.0f + island * 7.0f + cone * 52f + lavaRoughness;
+
+            heightValue -= crater * 36f;
+            if (distance < craterRadius)
+                heightValue = Lerp(heightValue, water + 2.0f, SmoothStep(craterRadius, craterRadius * 0.35f, distance));
+
+            return ClampTerrainHeight(heightValue);
+        }
+
+        private static float GenerateArchipelagoHeight(int x, int y, int width, int height, float water)
+        {
+            float nx = ((x + 0.5f) / width) * 2f - 1f;
+            float ny = ((y + 0.5f) / height) * 2f - 1f;
+            float islands =
+                Peak(nx, ny, -0.46f, 0.20f, 0.34f, 1.0f) +
+                Peak(nx, ny, 0.18f, -0.28f, 0.30f, 1.0f) +
+                Peak(nx, ny, 0.50f, 0.38f, 0.22f, 1.0f) +
+                Peak(nx, ny, -0.05f, 0.58f, 0.20f, 0.85f) +
+                Peak(nx, ny, -0.62f, -0.48f, 0.18f, 0.72f);
+            islands = Math.Min(1.35f, islands);
+            float land = SmoothStep(0.10f, 0.72f, islands);
+            float beaches = SmoothStep(0.28f, 0.48f, islands) - SmoothStep(0.58f, 0.82f, islands);
+            float hills = FractalNoise(x * 0.031f, y * 0.031f, 6407) * 5.2f * land;
+            float heightValue = water - 2.6f + land * 15.0f + hills;
+
+            if (beaches > 0f)
+                heightValue = Lerp(heightValue, water + 0.75f, beaches * 0.65f);
+
+            return ClampTerrainHeight(heightValue);
+        }
+
+        private static float GenerateCanyonHeight(int x, int y, int width, int height, float water)
+        {
+            float nx = ((x + 0.5f) / width) * 2f - 1f;
+            float ny = ((y + 0.5f) / height) * 2f - 1f;
+            float riverCenter = 0.22f * (float)Math.Sin(nx * 4.2f) + 0.08f * (float)Math.Sin(nx * 11.0f);
+            float riverDistance = Math.Abs(ny - riverCenter);
+            float canyonCut = SmoothStep(0.36f, 0.04f, riverDistance);
+            float rim = SmoothStep(0.12f, 0.32f, riverDistance);
+            float strata = (float)Math.Sin((x + y * 0.42f) * 0.19f) * 1.4f;
+            float rough = FractalNoise(x * 0.027f, y * 0.027f, 2609) * 6.5f;
+            float heightValue = water + 28.0f + rim * 18.0f + rough + strata - canyonCut * 34.0f;
+
+            if (riverDistance < 0.035f)
+                heightValue = water + 0.35f;
 
             return ClampTerrainHeight(heightValue);
         }
@@ -741,18 +876,37 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
         {
             FlatGrass,
             TropicalIsland,
-            SnowyMountains
+            SnowyMountains,
+            RingIsland,
+            VolcanicIsland,
+            Archipelago,
+            Canyon
         }
 
         private class TerrainRecipe
         {
             public readonly string Name;
             public readonly TerrainStyle Style;
+            public readonly float MeterValue;
 
             public TerrainRecipe(string name, TerrainStyle style)
+                : this(name, style, 0f)
+            {
+            }
+
+            public TerrainRecipe(string name, TerrainStyle style, float meterValue)
             {
                 Name = name;
                 Style = style;
+                MeterValue = meterValue;
+            }
+
+            public string GetDescription()
+            {
+                if (MeterValue > 0f && (Style == TerrainStyle.RingIsland || Style == TerrainStyle.VolcanicIsland))
+                    return string.Format(CultureInfo.InvariantCulture, "{0} ({1:0.#}m center feature)", Name, MeterValue);
+
+                return Name;
             }
         }
 
