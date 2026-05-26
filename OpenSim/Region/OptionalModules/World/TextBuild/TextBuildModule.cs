@@ -114,10 +114,17 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             if (sp == null || sp.IsChildAgent)
                 return;
 
+            TerrainRecipe terrainRecipe = ResolveTerrainRecipe(request);
+            if (terrainRecipe != null)
+            {
+                ApplyTerrainRecipe(client, terrainRecipe);
+                return;
+            }
+
             BuildTemplate template = ResolveTemplate(request);
             if (template == null)
             {
-                SendReply(client, "TextBuild: I can build car, boat, house, gazebo, portal, fountain, lamp, sofa, dock, table.");
+                SendReply(client, "TextBuild: I can build car, boat, house, gazebo, portal, fountain, lamp, sofa, dock, table, flat terrain, tropical island, snowy mountains.");
                 return;
             }
 
@@ -203,6 +210,225 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 return CreateTableTemplate();
 
             return null;
+        }
+
+        private static TerrainRecipe ResolveTerrainRecipe(string request)
+        {
+            string lower = request.ToLower(CultureInfo.InvariantCulture);
+
+            bool mentionsTerrain = lower.Contains("terrain")
+                || lower.Contains("terreno")
+                || lower.Contains("landscape")
+                || lower.Contains("paesaggio")
+                || lower.Contains("island")
+                || lower.Contains("isola")
+                || lower.Contains("tropical")
+                || lower.Contains("tropicale")
+                || lower.Contains("mountain")
+                || lower.Contains("montagna")
+                || lower.Contains("montagne")
+                || lower.Contains("snow")
+                || lower.Contains("neve")
+                || lower.Contains("flat")
+                || lower.Contains("piatto")
+                || lower.Contains("erboso")
+                || lower.Contains("grass");
+
+            if (!mentionsTerrain)
+                return null;
+
+            if (lower.Contains("mountain") || lower.Contains("montagna") || lower.Contains("montagne") || lower.Contains("snow") || lower.Contains("neve"))
+                return new TerrainRecipe("snowy mountains", TerrainStyle.SnowyMountains);
+
+            if (lower.Contains("island") || lower.Contains("isola") || lower.Contains("tropical") || lower.Contains("tropicale"))
+                return new TerrainRecipe("tropical island", TerrainStyle.TropicalIsland);
+
+            if (lower.Contains("flat") || lower.Contains("piatto") || lower.Contains("erboso") || lower.Contains("grass") || lower.Contains("terrain") || lower.Contains("terreno"))
+                return new TerrainRecipe("flat grassy terrain", TerrainStyle.FlatGrass);
+
+            return null;
+        }
+
+        private void ApplyTerrainRecipe(IClientAPI client, TerrainRecipe recipe)
+        {
+            if (m_scene.Heightmap == null)
+            {
+                SendReply(client, "TextBuild: terrain is not available in this region.");
+                return;
+            }
+
+            int width = m_scene.Heightmap.Width;
+            int height = m_scene.Heightmap.Height;
+
+            if (width <= 0 || height <= 0)
+            {
+                SendReply(client, "TextBuild: terrain has invalid dimensions.");
+                return;
+            }
+
+            ApplyTerrainTextureHeights(recipe.Style);
+
+            for (int x = 0; x < width; x++)
+            {
+                for (int y = 0; y < height; y++)
+                {
+                    m_scene.Heightmap[x, y] = GenerateTerrainHeight(recipe.Style, x, y, width, height);
+                }
+            }
+
+            m_scene.Heightmap.GetTerrainData().TaintAllTerrain();
+            if (m_scene.PhysicsScene != null)
+                m_scene.PhysicsScene.SetTerrain(m_scene.Heightmap.GetFloatsSerialised());
+
+            m_scene.SaveTerrain();
+            m_scene.RegionInfo.RegionSettings.Save();
+            m_scene.EventManager.TriggerTerrainTainted();
+            m_scene.EventManager.TriggerTerrainCheckUpdates();
+            m_scene.EventManager.TriggerTerrainUpdate();
+
+            SendReply(client, string.Format("TextBuild: shaped terrain as {0}.", recipe.Name));
+        }
+
+        private void ApplyTerrainTextureHeights(TerrainStyle style)
+        {
+            RegionSettings settings = m_scene.RegionInfo.RegionSettings;
+
+            if (style == TerrainStyle.SnowyMountains)
+            {
+                settings.Elevation1NW = settings.Elevation1NE = settings.Elevation1SE = settings.Elevation1SW = 24.0;
+                settings.Elevation2NW = settings.Elevation2NE = settings.Elevation2SE = settings.Elevation2SW = 78.0;
+                return;
+            }
+
+            if (style == TerrainStyle.TropicalIsland)
+            {
+                settings.Elevation1NW = settings.Elevation1NE = settings.Elevation1SE = settings.Elevation1SW = 20.5;
+                settings.Elevation2NW = settings.Elevation2NE = settings.Elevation2SE = settings.Elevation2SW = 42.0;
+                return;
+            }
+
+            settings.Elevation1NW = settings.Elevation1NE = settings.Elevation1SE = settings.Elevation1SW = 18.0;
+            settings.Elevation2NW = settings.Elevation2NE = settings.Elevation2SE = settings.Elevation2SW = 35.0;
+        }
+
+        private float GenerateTerrainHeight(TerrainStyle style, int x, int y, int width, int height)
+        {
+            float water = (float)m_scene.RegionInfo.RegionSettings.WaterHeight;
+
+            if (style == TerrainStyle.SnowyMountains)
+                return GenerateSnowyMountainHeight(x, y, width, height, water);
+
+            if (style == TerrainStyle.TropicalIsland)
+                return GenerateTropicalIslandHeight(x, y, width, height, water);
+
+            return ClampTerrainHeight(water + 1.6f + FractalNoise(x * 0.035f, y * 0.035f, 2001) * 0.18f);
+        }
+
+        private static float GenerateTropicalIslandHeight(int x, int y, int width, int height, float water)
+        {
+            float nx = ((x + 0.5f) / width) * 2f - 1f;
+            float ny = ((y + 0.5f) / height) * 2f - 1f;
+            float distance = (float)Math.Sqrt(nx * nx + ny * ny);
+            float island = SmoothStep(0.98f, 0.18f, distance);
+            float beach = SmoothStep(0.92f, 0.72f, distance) - SmoothStep(0.72f, 0.48f, distance);
+            float hills = FractalNoise(x * 0.026f, y * 0.026f, 5107) * 4.8f * island;
+            float ridges = FractalNoise(x * 0.073f, y * 0.073f, 1109) * 1.4f * island;
+            float heightValue = water - 2.2f + island * 18.5f + hills + ridges;
+
+            if (beach > 0f)
+                heightValue = Lerp(heightValue, water + 0.85f + ridges * 0.25f, beach * 0.72f);
+
+            return ClampTerrainHeight(heightValue);
+        }
+
+        private static float GenerateSnowyMountainHeight(int x, int y, int width, int height, float water)
+        {
+            float nx = ((x + 0.5f) / width) * 2f - 1f;
+            float ny = ((y + 0.5f) / height) * 2f - 1f;
+            float edgeFade = SmoothStep(1.18f, 0.72f, Math.Max(Math.Abs(nx), Math.Abs(ny)));
+
+            float peaks =
+                Peak(nx, ny, -0.34f, 0.26f, 0.30f, 38f) +
+                Peak(nx, ny, 0.18f, -0.12f, 0.22f, 48f) +
+                Peak(nx, ny, 0.42f, 0.36f, 0.26f, 34f) +
+                Peak(nx, ny, -0.05f, 0.52f, 0.20f, 28f);
+
+            float foothills = FractalNoise(x * 0.018f, y * 0.018f, 7301) * 8.0f;
+            float rough = Math.Abs(FractalNoise(x * 0.062f, y * 0.062f, 4103)) * 6.5f;
+            float heightValue = water + 4.0f + (peaks + foothills + rough) * edgeFade;
+
+            return ClampTerrainHeight(heightValue);
+        }
+
+        private static float Peak(float nx, float ny, float cx, float cy, float radius, float amplitude)
+        {
+            float dx = nx - cx;
+            float dy = ny - cy;
+            float d2 = dx * dx + dy * dy;
+            return (float)Math.Exp(-d2 / (radius * radius)) * amplitude;
+        }
+
+        private static float FractalNoise(float x, float y, int seed)
+        {
+            float total = 0f;
+            float amplitude = 1f;
+            float frequency = 1f;
+            float normalizer = 0f;
+
+            for (int octave = 0; octave < 4; octave++)
+            {
+                total += SmoothNoise(x * frequency, y * frequency, seed + octave * 1013) * amplitude;
+                normalizer += amplitude;
+                amplitude *= 0.52f;
+                frequency *= 2.03f;
+            }
+
+            return total / normalizer;
+        }
+
+        private static float SmoothNoise(float x, float y, int seed)
+        {
+            int ix = (int)Math.Floor(x);
+            int iy = (int)Math.Floor(y);
+            float fx = x - ix;
+            float fy = y - iy;
+            fx = fx * fx * (3f - 2f * fx);
+            fy = fy * fy * (3f - 2f * fy);
+
+            float a = HashNoise(ix, iy, seed);
+            float b = HashNoise(ix + 1, iy, seed);
+            float c = HashNoise(ix, iy + 1, seed);
+            float d = HashNoise(ix + 1, iy + 1, seed);
+
+            return Lerp(Lerp(a, b, fx), Lerp(c, d, fx), fy);
+        }
+
+        private static float HashNoise(int x, int y, int seed)
+        {
+            unchecked
+            {
+                int n = x * 374761393 + y * 668265263 + seed * 1442695041;
+                n = (n ^ (n >> 13)) * 1274126177;
+                n ^= n >> 16;
+                return ((n & 0x7fffffff) / 1073741824f) - 1f;
+            }
+        }
+
+        private static float SmoothStep(float edge0, float edge1, float value)
+        {
+            float t = (value - edge0) / (edge1 - edge0);
+            t = Math.Max(0f, Math.Min(1f, t));
+            return t * t * (3f - 2f * t);
+        }
+
+        private static float Lerp(float from, float to, float amount)
+        {
+            return from + (to - from) * amount;
+        }
+
+        private static float ClampTerrainHeight(float value)
+        {
+            return Math.Max(Constants.MinTerrainHeightmap, Math.Min(Constants.MaxTerrainHeightmap, value));
         }
 
         private SceneObjectGroup CreateObject(UUID ownerId, UUID groupId, BuildTemplate template, Vector3 position, Quaternion avatarRotation)
@@ -494,6 +720,25 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             Cylinder,
             Prism,
             Torus
+        }
+
+        private enum TerrainStyle
+        {
+            FlatGrass,
+            TropicalIsland,
+            SnowyMountains
+        }
+
+        private class TerrainRecipe
+        {
+            public readonly string Name;
+            public readonly TerrainStyle Style;
+
+            public TerrainRecipe(string name, TerrainStyle style)
+            {
+                Name = name;
+                Style = style;
+            }
         }
 
         private class BuildTemplate
