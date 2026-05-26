@@ -57,7 +57,7 @@ namespace OpenSim.Region.CoreModules.Avatar.AvatarFactory
 
         private int m_savetime = 5; // seconds to wait before saving changed appearance
         private int m_sendtime = 2; // seconds to wait before sending changed appearance
-        private bool m_temporaryDefaultAppearanceFallback = true;
+        private bool m_temporaryDefaultAppearanceFallback = false;
         private int m_temporaryDefaultAppearanceRetrySeconds = 15;
         private int m_temporaryDefaultAppearanceVerifySeconds = 10;
         private int m_temporaryDefaultAppearanceRetryAttempts = 8;
