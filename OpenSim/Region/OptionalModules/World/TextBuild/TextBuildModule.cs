@@ -34,6 +34,7 @@ using log4net;
 using Mono.Addins;
 using Nini.Config;
 using OpenMetaverse;
+using OpenMetaverse.StructuredData;
 using OpenSim.Framework;
 using OpenSim.Region.Framework.Interfaces;
 using OpenSim.Region.Framework.Scenes;
@@ -51,6 +52,9 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
         private bool m_estateManagerOnly;
         private int m_maxParts;
         private float m_spawnDistance;
+        private bool m_aiEnabled;
+        private string m_aiEndpoint;
+        private int m_aiTimeoutMs;
 
         public string Name { get { return "Text Build Module"; } }
 
@@ -67,6 +71,9 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             m_estateManagerOnly = config.GetBoolean("EstateManagerOnly", true);
             m_maxParts = Math.Max(1, config.GetInt("MaxParts", 64));
             m_spawnDistance = Math.Max(1.0f, config.GetFloat("SpawnDistance", 4.0f));
+            m_aiEnabled = config.GetBoolean("AIEnabled", false);
+            m_aiEndpoint = config.GetString("AIEndpoint", string.Empty);
+            m_aiTimeoutMs = Math.Max(500, config.GetInt("AITimeoutMs", 6000));
         }
 
         public void AddRegion(Scene scene)
@@ -228,9 +235,12 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             return null;
         }
 
-        private static TerrainRecipe ResolveTerrainRecipe(string request)
+        private TerrainRecipe ResolveTerrainRecipe(string request)
         {
             string lower = request.ToLower(CultureInfo.InvariantCulture);
+
+            if (TryResolveAITerrainRecipe(request, lower, out TerrainRecipe aiRecipe))
+                return aiRecipe;
 
             bool mentionsTerrain = lower.Contains("terrain")
                 || lower.Contains("terreno")
@@ -290,6 +300,210 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 return new TerrainRecipe("flat grassy terrain", TerrainStyle.FlatGrass);
 
             return null;
+        }
+
+        private bool TryResolveAITerrainRecipe(string request, string lower, out TerrainRecipe recipe)
+        {
+            recipe = null;
+
+            if (!m_aiEnabled || string.IsNullOrWhiteSpace(m_aiEndpoint))
+                return false;
+
+            if (!CouldBeTerrainRequest(lower))
+                return false;
+
+            OSDMap aiRequest = new OSDMap(8);
+            aiRequest["prompt"] = OSD.FromString(request);
+            aiRequest["region_size_x"] = OSD.FromInteger((int)m_scene.RegionInfo.RegionSizeX);
+            aiRequest["region_size_y"] = OSD.FromInteger((int)m_scene.RegionInfo.RegionSizeY);
+            aiRequest["water_height"] = OSD.FromReal(m_scene.RegionInfo.RegionSettings.WaterHeight);
+            aiRequest["available_styles"] = OSD.FromString("flat_grass,tropical_island,snowy_mountains,ring_island,volcanic_island,archipelago,canyon");
+            aiRequest["schema"] = OSD.FromString("Return JSON: {\"style\":\"ring_island\",\"feature_meters\":100,\"name\":\"optional label\"}. Supported styles: flat_grass, tropical_island, snowy_mountains, ring_island, volcanic_island, archipelago, canyon.");
+
+            try
+            {
+                OSDMap response = WebUtil.PostToService(m_aiEndpoint, aiRequest, m_aiTimeoutMs, false);
+                if (response == null || !response.ContainsKey("success") || !response["success"].AsBoolean())
+                    return false;
+
+                OSDMap result = response.ContainsKey("_Result") ? response["_Result"] as OSDMap : null;
+                if ((result == null || result.Count == 0) && response.ContainsKey("_RawResult"))
+                {
+                    OSD raw = OSDParser.DeserializeJson(response["_RawResult"].AsString());
+                    result = raw as OSDMap;
+                }
+
+                if (result == null)
+                    return false;
+
+                recipe = TerrainRecipeFromAIResult(result);
+                if (recipe == null)
+                    return false;
+
+                m_log.InfoFormat("[TEXT BUILD]: AI terrain plan accepted: {0}", recipe.GetDescription());
+                return true;
+            }
+            catch (Exception e)
+            {
+                m_log.DebugFormat("[TEXT BUILD]: AI terrain plan failed, falling back to local parser: {0}", e.Message);
+                return false;
+            }
+        }
+
+        private static bool CouldBeTerrainRequest(string lower)
+        {
+            return lower.Contains("terrain")
+                || lower.Contains("terreno")
+                || lower.Contains("landscape")
+                || lower.Contains("paesaggio")
+                || lower.Contains("island")
+                || lower.Contains("isola")
+                || lower.Contains("mountain")
+                || lower.Contains("montagna")
+                || lower.Contains("montagne")
+                || lower.Contains("snow")
+                || lower.Contains("neve")
+                || lower.Contains("flat")
+                || lower.Contains("piatto")
+                || lower.Contains("grass")
+                || lower.Contains("erboso")
+                || lower.Contains("ring")
+                || lower.Contains("anello")
+                || lower.Contains("atoll")
+                || lower.Contains("atollo")
+                || lower.Contains("hole")
+                || lower.Contains("buco")
+                || lower.Contains("lagoon")
+                || lower.Contains("laguna")
+                || lower.Contains("volcano")
+                || lower.Contains("vulcano")
+                || lower.Contains("crater")
+                || lower.Contains("cratere")
+                || lower.Contains("archipelago")
+                || lower.Contains("arcipelago")
+                || lower.Contains("canyon")
+                || lower.Contains("valley")
+                || lower.Contains("valle")
+                || lower.Contains("lake")
+                || lower.Contains("lago")
+                || lower.Contains("beach")
+                || lower.Contains("spiaggia");
+        }
+
+        private static TerrainRecipe TerrainRecipeFromAIResult(OSDMap result)
+        {
+            string style = GetOSDString(result, "style");
+            if (string.IsNullOrEmpty(style))
+                style = GetOSDString(result, "terrain_style");
+
+            style = NormalizeAIStyle(style);
+            TerrainStyle terrainStyle;
+
+            switch (style)
+            {
+                case "flat_grass":
+                    terrainStyle = TerrainStyle.FlatGrass;
+                    break;
+                case "tropical_island":
+                    terrainStyle = TerrainStyle.TropicalIsland;
+                    break;
+                case "snowy_mountains":
+                    terrainStyle = TerrainStyle.SnowyMountains;
+                    break;
+                case "ring_island":
+                    terrainStyle = TerrainStyle.RingIsland;
+                    break;
+                case "volcanic_island":
+                    terrainStyle = TerrainStyle.VolcanicIsland;
+                    break;
+                case "archipelago":
+                    terrainStyle = TerrainStyle.Archipelago;
+                    break;
+                case "canyon":
+                    terrainStyle = TerrainStyle.Canyon;
+                    break;
+                default:
+                    return null;
+            }
+
+            float meters = GetOSDFloat(result, "feature_meters", 0f);
+            if (meters <= 0f)
+                meters = GetOSDFloat(result, "center_hole_diameter", 0f);
+            if (meters <= 0f)
+                meters = GetOSDFloat(result, "hole_diameter", 0f);
+            if (meters <= 0f)
+                meters = GetOSDFloat(result, "lagoon_diameter", 0f);
+            if (meters <= 0f)
+                meters = GetOSDFloat(result, "crater_diameter", 0f);
+
+            string name = GetOSDString(result, "name");
+            if (string.IsNullOrEmpty(name))
+                name = DefaultTerrainRecipeName(terrainStyle);
+
+            if (meters > 0f)
+                return new TerrainRecipe(name, terrainStyle, Math.Max(5f, meters));
+
+            return new TerrainRecipe(name, terrainStyle);
+        }
+
+        private static string NormalizeAIStyle(string style)
+        {
+            if (style == null)
+                return string.Empty;
+
+            style = style.Trim().ToLower(CultureInfo.InvariantCulture).Replace('-', '_').Replace(' ', '_');
+
+            if (style == "flat" || style == "grass" || style == "grassy" || style == "flat_terrain")
+                return "flat_grass";
+            if (style == "island" || style == "tropical" || style == "tropical_isle")
+                return "tropical_island";
+            if (style == "mountains" || style == "snow" || style == "snowy" || style == "alpine")
+                return "snowy_mountains";
+            if (style == "ring" || style == "atoll" || style == "atollo" || style == "lagoon" || style == "ring_isle")
+                return "ring_island";
+            if (style == "volcano" || style == "volcanic" || style == "crater")
+                return "volcanic_island";
+
+            return style;
+        }
+
+        private static string DefaultTerrainRecipeName(TerrainStyle style)
+        {
+            switch (style)
+            {
+                case TerrainStyle.FlatGrass:
+                    return "flat grassy terrain";
+                case TerrainStyle.TropicalIsland:
+                    return "tropical island";
+                case TerrainStyle.SnowyMountains:
+                    return "snowy mountains";
+                case TerrainStyle.RingIsland:
+                    return "ring island";
+                case TerrainStyle.VolcanicIsland:
+                    return "volcanic island";
+                case TerrainStyle.Archipelago:
+                    return "tropical archipelago";
+                case TerrainStyle.Canyon:
+                    return "canyon landscape";
+                default:
+                    return "terrain";
+            }
+        }
+
+        private static string GetOSDString(OSDMap map, string key)
+        {
+            if (map != null && map.ContainsKey(key))
+                return map[key].AsString();
+
+            return string.Empty;
+        }
+
+        private static float GetOSDFloat(OSDMap map, string key, float fallback)
+        {
+            if (map != null && map.ContainsKey(key))
+                return (float)map[key].AsReal();
+
+            return fallback;
         }
 
         private static float ExtractMeterValue(string lower, float fallback)
