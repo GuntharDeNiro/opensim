@@ -343,7 +343,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
 
         private OSDMap RequestOpenAITerrainPlan(string request)
         {
-            OSDMap payload = CreateOpenAIRequestPayload(request);
+            string payload = CreateOpenAIRequestPayload(request);
             string responseBody = PostJsonToOpenAI(payload);
             OSDMap response = OSDParser.DeserializeJson(responseBody) as OSDMap;
             if (response == null)
@@ -356,28 +356,29 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             return OSDParser.DeserializeJson(outputText) as OSDMap;
         }
 
-        private OSDMap CreateOpenAIRequestPayload(string request)
+        private string CreateOpenAIRequestPayload(string request)
         {
-            OSDMap payload = new OSDMap(5);
-            payload["model"] = OSD.FromString(m_openAIModel);
-            payload["instructions"] = OSD.FromString(GetTerrainAIDeveloperInstructions());
-            payload["input"] = OSD.FromString(string.Format(
+            string input = string.Format(
                 CultureInfo.InvariantCulture,
                 "Prompt: {0}\nRegion size: {1} x {2} meters\nWater height: {3:0.###}\n",
                 request,
                 m_scene.RegionInfo.RegionSizeX,
                 m_scene.RegionInfo.RegionSizeY,
-                m_scene.RegionInfo.RegionSettings.WaterHeight));
-            payload["max_output_tokens"] = OSD.FromInteger(600);
-            payload["text"] = CreateOpenAITextFormat();
+                m_scene.RegionInfo.RegionSettings.WaterHeight);
 
-            return payload;
+            StringBuilder json = new StringBuilder(4096);
+            json.Append("{\"model\":").Append(JsonQuote(m_openAIModel));
+            json.Append(",\"instructions\":").Append(JsonQuote(GetTerrainAIDeveloperInstructions()));
+            json.Append(",\"input\":").Append(JsonQuote(input));
+            json.Append(",\"max_output_tokens\":600");
+            json.Append(",\"text\":{\"format\":{\"type\":\"json_schema\",\"name\":\"terrain_plan\",\"strict\":true,\"schema\":");
+            json.Append(GetTerrainPlanJsonSchema());
+            json.Append("}}}");
+            return json.ToString();
         }
 
-        private string PostJsonToOpenAI(OSDMap payload)
+        private string PostJsonToOpenAI(string json)
         {
-            string json = OSDParser.SerializeJsonString(payload);
-
             using (HttpClient client = WebUtil.GetNewGlobalHttpClient(m_aiTimeoutMs))
             using (StringContent content = new StringContent(json, Encoding.UTF8, "application/json"))
             {
@@ -443,113 +444,64 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 + "Leave terrain_textures values as empty strings when no UUIDs are supplied. Return JSON only.";
         }
 
-        private static OSDMap CreateOpenAITextFormat()
+        private static string GetTerrainPlanJsonSchema()
         {
-            OSDMap jsonSchema = new OSDMap(4);
-            jsonSchema["type"] = OSD.FromString("json_schema");
-            jsonSchema["name"] = OSD.FromString("terrain_plan");
-            jsonSchema["strict"] = OSD.FromBoolean(true);
-            jsonSchema["schema"] = CreateTerrainPlanSchema();
-
-            OSDMap text = new OSDMap(1);
-            text["format"] = jsonSchema;
-            return text;
+            return "{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{"
+                + "\"style\":{\"type\":\"string\",\"enum\":[\"flat_grass\",\"tropical_island\",\"snowy_mountains\",\"ring_island\",\"volcanic_island\",\"archipelago\",\"canyon\"]},"
+                + "\"feature_meters\":{\"type\":\"number\"},"
+                + "\"name\":{\"type\":\"string\"},"
+                + "\"height_scale\":{\"type\":\"number\"},"
+                + "\"roughness\":{\"type\":\"number\"},"
+                + "\"flat_area\":{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"side\":{\"type\":\"string\",\"enum\":[\"north\",\"south\",\"east\",\"west\",\"center\",\"\"]},\"size_meters\":{\"type\":\"number\"}},\"required\":[\"side\",\"size_meters\"]},"
+                + "\"slope_bias\":{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"side\":{\"type\":\"string\",\"enum\":[\"north\",\"south\",\"east\",\"west\",\"center\",\"\"]},\"strength\":{\"type\":\"number\"}},\"required\":[\"side\",\"strength\"]},"
+                + "\"beach_color\":{\"type\":\"string\",\"enum\":[\"\",\"black\",\"white\",\"gold\",\"sand\",\"rocky\"]},"
+                + "\"terrain_textures\":{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"low\":{\"type\":\"string\"},\"mid\":{\"type\":\"string\"},\"high\":{\"type\":\"string\"},\"snow\":{\"type\":\"string\"}},\"required\":[\"low\",\"mid\",\"high\",\"snow\"]}"
+                + "},\"required\":[\"style\",\"feature_meters\",\"name\",\"height_scale\",\"roughness\",\"flat_area\",\"slope_bias\",\"beach_color\",\"terrain_textures\"]}";
         }
 
-        private static OSDMap CreateTerrainPlanSchema()
+        private static string JsonQuote(string text)
         {
-            OSDMap schema = new OSDMap(4);
-            schema["type"] = OSD.FromString("object");
-            schema["additionalProperties"] = OSD.FromBoolean(false);
+            if (text == null)
+                return "\"\"";
 
-            OSDMap properties = new OSDMap(9);
-            properties["style"] = StringEnum("flat_grass", "tropical_island", "snowy_mountains", "ring_island", "volcanic_island", "archipelago", "canyon");
-            properties["feature_meters"] = NumberSchema(0, 220);
-            properties["name"] = StringSchema(80);
-            properties["height_scale"] = NumberSchema(0.35, 2.5);
-            properties["roughness"] = NumberSchema(0, 2.5);
-            properties["flat_area"] = SideNumberBlockSchema("size_meters", 0, 220);
-            properties["slope_bias"] = SideNumberBlockSchema("strength", -1.5, 1.5);
-            properties["beach_color"] = StringEnum(string.Empty, "black", "white", "gold", "sand", "rocky");
-            properties["terrain_textures"] = TerrainTexturesSchema();
+            StringBuilder sb = new StringBuilder(text.Length + 8);
+            sb.Append('"');
+            foreach (char c in text)
+            {
+                switch (c)
+                {
+                    case '\\':
+                        sb.Append("\\\\");
+                        break;
+                    case '"':
+                        sb.Append("\\\"");
+                        break;
+                    case '\b':
+                        sb.Append("\\b");
+                        break;
+                    case '\f':
+                        sb.Append("\\f");
+                        break;
+                    case '\n':
+                        sb.Append("\\n");
+                        break;
+                    case '\r':
+                        sb.Append("\\r");
+                        break;
+                    case '\t':
+                        sb.Append("\\t");
+                        break;
+                    default:
+                        if (c < 32)
+                            sb.Append("\\u").Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
+                        else
+                            sb.Append(c);
+                        break;
+                }
+            }
 
-            schema["properties"] = properties;
-            schema["required"] = Required("style", "feature_meters", "name", "height_scale", "roughness", "flat_area", "slope_bias", "beach_color", "terrain_textures");
-
-            return schema;
-        }
-
-        private static OSDMap StringSchema(int maxLength)
-        {
-            OSDMap schema = new OSDMap(2);
-            schema["type"] = OSD.FromString("string");
-            schema["maxLength"] = OSD.FromInteger(maxLength);
-            return schema;
-        }
-
-        private static OSDMap StringEnum(params string[] values)
-        {
-            OSDMap schema = new OSDMap(2);
-            schema["type"] = OSD.FromString("string");
-
-            OSDArray enumValues = new OSDArray(values.Length);
-            foreach (string value in values)
-                enumValues.Add(OSD.FromString(value));
-
-            schema["enum"] = enumValues;
-            return schema;
-        }
-
-        private static OSDMap NumberSchema(double minimum, double maximum)
-        {
-            OSDMap schema = new OSDMap(3);
-            schema["type"] = OSD.FromString("number");
-            schema["minimum"] = OSD.FromReal(minimum);
-            schema["maximum"] = OSD.FromReal(maximum);
-            return schema;
-        }
-
-        private static OSDMap SideNumberBlockSchema(string numberKey, double minimum, double maximum)
-        {
-            OSDMap schema = new OSDMap(4);
-            schema["type"] = OSD.FromString("object");
-            schema["additionalProperties"] = OSD.FromBoolean(false);
-
-            OSDMap properties = new OSDMap(2);
-            properties["side"] = StringEnum("north", "south", "east", "west", "center", string.Empty);
-            properties[numberKey] = NumberSchema(minimum, maximum);
-
-            schema["properties"] = properties;
-            schema["required"] = Required("side", numberKey);
-
-            return schema;
-        }
-
-        private static OSDMap TerrainTexturesSchema()
-        {
-            OSDMap schema = new OSDMap(4);
-            schema["type"] = OSD.FromString("object");
-            schema["additionalProperties"] = OSD.FromBoolean(false);
-
-            OSDMap properties = new OSDMap(4);
-            properties["low"] = StringSchema(64);
-            properties["mid"] = StringSchema(64);
-            properties["high"] = StringSchema(64);
-            properties["snow"] = StringSchema(64);
-
-            schema["properties"] = properties;
-            schema["required"] = Required("low", "mid", "high", "snow");
-
-            return schema;
-        }
-
-        private static OSDArray Required(params string[] values)
-        {
-            OSDArray required = new OSDArray(values.Length);
-            foreach (string value in values)
-                required.Add(OSD.FromString(value));
-
-            return required;
+            sb.Append('"');
+            return sb.ToString();
         }
 
         private static string TrimForLog(string text, int maxLength)
