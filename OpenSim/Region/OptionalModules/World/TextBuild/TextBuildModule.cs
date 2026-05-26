@@ -440,6 +440,11 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 + "Use slope_bias when one side should be steeper, taller, gentler, or more dramatic. "
                 + "Use roughness below 1 for soft terrain and above 1 for rugged terrain. "
                 + "Use height_scale above 1 for taller terrain and below 1 for lower terrain. "
+                + "Use operations for custom requested geography. Coordinates are meters in the region, with x and y from 0 to region size. "
+                + "Supported operations: raise_hill, lower_basin, flatten_area, cut_lake, carve_river, carve_bay, raise_ridge, crater, roughen. "
+                + "Use x,y,radius for point features. Use x,y,x2,y2,width for linear features like rivers and ridges. "
+                + "Use height for raised or flattened land, depth for water cuts, and strength for roughen or soft effects. "
+                + "Return up to 16 strong operations that best match the user request. "
                 + "If the user asks for black beaches, set beach_color to black. Only set terrain_textures UUIDs if the prompt explicitly provides UUIDs. "
                 + "Leave terrain_textures values as empty strings when no UUIDs are supplied. Return JSON only.";
         }
@@ -455,8 +460,9 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 + "\"flat_area\":{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"side\":{\"type\":\"string\",\"enum\":[\"north\",\"south\",\"east\",\"west\",\"center\",\"\"]},\"size_meters\":{\"type\":\"number\"}},\"required\":[\"side\",\"size_meters\"]},"
                 + "\"slope_bias\":{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"side\":{\"type\":\"string\",\"enum\":[\"north\",\"south\",\"east\",\"west\",\"center\",\"\"]},\"strength\":{\"type\":\"number\"}},\"required\":[\"side\",\"strength\"]},"
                 + "\"beach_color\":{\"type\":\"string\",\"enum\":[\"\",\"black\",\"white\",\"gold\",\"sand\",\"rocky\"]},"
-                + "\"terrain_textures\":{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"low\":{\"type\":\"string\"},\"mid\":{\"type\":\"string\"},\"high\":{\"type\":\"string\"},\"snow\":{\"type\":\"string\"}},\"required\":[\"low\",\"mid\",\"high\",\"snow\"]}"
-                + "},\"required\":[\"style\",\"feature_meters\",\"name\",\"height_scale\",\"roughness\",\"flat_area\",\"slope_bias\",\"beach_color\",\"terrain_textures\"]}";
+                + "\"terrain_textures\":{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"low\":{\"type\":\"string\"},\"mid\":{\"type\":\"string\"},\"high\":{\"type\":\"string\"},\"snow\":{\"type\":\"string\"}},\"required\":[\"low\",\"mid\",\"high\",\"snow\"]},"
+                + "\"operations\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"type\":{\"type\":\"string\",\"enum\":[\"raise_hill\",\"lower_basin\",\"flatten_area\",\"cut_lake\",\"carve_river\",\"carve_bay\",\"raise_ridge\",\"crater\",\"roughen\"]},\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"},\"x2\":{\"type\":\"number\"},\"y2\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"width\":{\"type\":\"number\"},\"height\":{\"type\":\"number\"},\"depth\":{\"type\":\"number\"},\"strength\":{\"type\":\"number\"},\"noise_scale\":{\"type\":\"number\"}},\"required\":[\"type\",\"x\",\"y\",\"x2\",\"y2\",\"radius\",\"width\",\"height\",\"depth\",\"strength\",\"noise_scale\"]}}"
+                + "},\"required\":[\"style\",\"feature_meters\",\"name\",\"height_scale\",\"roughness\",\"flat_area\",\"slope_bias\",\"beach_color\",\"terrain_textures\",\"operations\"]}";
         }
 
         private static string JsonQuote(string text)
@@ -614,6 +620,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             recipe.Roughness = Clamp(GetOSDFloat(result, "roughness", 1f), 0f, 2.5f);
             recipe.BeachColor = GetOSDString(result, "beach_color");
             ApplyAITextureFields(recipe, result);
+            ApplyAITerrainOperations(recipe, result);
 
             OSDMap flatArea = GetOSDMap(result, "flat_area");
             if (flatArea != null)
@@ -630,6 +637,71 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             }
 
             return recipe;
+        }
+
+        private static void ApplyAITerrainOperations(TerrainRecipe recipe, OSDMap result)
+        {
+            OSDArray operations = result != null && result.ContainsKey("operations") ? result["operations"] as OSDArray : null;
+            if (operations == null)
+                return;
+
+            int count = 0;
+            foreach (OSD item in operations)
+            {
+                OSDMap map = item as OSDMap;
+                if (map == null)
+                    continue;
+
+                string type = NormalizeOperationType(GetOSDString(map, "type"));
+                if (string.IsNullOrEmpty(type))
+                    continue;
+
+                TerrainOperation operation = new TerrainOperation(type)
+                {
+                    X = GetOSDFloat(map, "x", 128f),
+                    Y = GetOSDFloat(map, "y", 128f),
+                    X2 = GetOSDFloat(map, "x2", 128f),
+                    Y2 = GetOSDFloat(map, "y2", 128f),
+                    Radius = Clamp(GetOSDFloat(map, "radius", 35f), 1f, 512f),
+                    Width = Clamp(GetOSDFloat(map, "width", 12f), 1f, 256f),
+                    Height = Clamp(GetOSDFloat(map, "height", 8f), -128f, 128f),
+                    Depth = Clamp(GetOSDFloat(map, "depth", 3f), 0f, 128f),
+                    Strength = Clamp(GetOSDFloat(map, "strength", 1f), -4f, 4f),
+                    NoiseScale = Clamp(GetOSDFloat(map, "noise_scale", 0.055f), 0.005f, 0.25f)
+                };
+
+                recipe.Operations.Add(operation);
+                count++;
+                if (count >= 16)
+                    break;
+            }
+        }
+
+        private static string NormalizeOperationType(string type)
+        {
+            if (type == null)
+                return string.Empty;
+
+            type = type.Trim().ToLower(CultureInfo.InvariantCulture).Replace('-', '_').Replace(' ', '_');
+
+            if (type == "hill" || type == "mountain" || type == "raise")
+                return "raise_hill";
+            if (type == "lake" || type == "pond")
+                return "cut_lake";
+            if (type == "river" || type == "stream")
+                return "carve_river";
+            if (type == "ridge" || type == "cliff")
+                return "raise_ridge";
+            if (type == "flat" || type == "plateau" || type == "village_area")
+                return "flatten_area";
+            if (type == "bay" || type == "harbor")
+                return "carve_bay";
+
+            if (type == "raise_hill" || type == "lower_basin" || type == "flatten_area" || type == "cut_lake"
+                || type == "carve_river" || type == "carve_bay" || type == "raise_ridge" || type == "crater" || type == "roughen")
+                return type;
+
+            return string.Empty;
         }
 
         private static void ApplyAITextureFields(TerrainRecipe recipe, OSDMap result)
@@ -878,7 +950,10 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             else
                 heightValue = water + 1.6f + FractalNoise(x * 0.035f, y * 0.035f, 2001) * 0.18f;
 
-            return ApplyTerrainRecipeModifiers(recipe, x, y, width, height, water, heightValue);
+            heightValue = ApplyTerrainRecipeModifiers(recipe, x, y, width, height, water, heightValue);
+            heightValue = ApplyTerrainOperations(recipe, x, y, width, height, water, heightValue);
+
+            return ClampTerrainHeight(heightValue);
         }
 
         private static float ApplyTerrainRecipeModifiers(TerrainRecipe recipe, int x, int y, int width, int height, float water, float heightValue)
@@ -928,6 +1003,90 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             }
 
             return ClampTerrainHeight(heightValue);
+        }
+
+        private static float ApplyTerrainOperations(TerrainRecipe recipe, int x, int y, int width, int height, float water, float heightValue)
+        {
+            if (recipe.Operations.Count == 0)
+                return heightValue;
+
+            float px = x + 0.5f;
+            float py = y + 0.5f;
+
+            foreach (TerrainOperation operation in recipe.Operations)
+            {
+                float ox = Clamp(operation.X, 0f, width);
+                float oy = Clamp(operation.Y, 0f, height);
+                float radius = Math.Max(1f, operation.Radius);
+                float distance = Distance(px, py, ox, oy);
+                float pointInfluence = SmoothStep(radius, radius * 0.08f, distance);
+
+                if (operation.Type == "raise_hill")
+                {
+                    float heightAmount = operation.Height == 0f ? 12f : operation.Height;
+                    heightValue += heightAmount * pointInfluence;
+                }
+                else if (operation.Type == "lower_basin")
+                {
+                    float depth = operation.Depth == 0f ? 5f : operation.Depth;
+                    heightValue -= depth * pointInfluence;
+                }
+                else if (operation.Type == "flatten_area")
+                {
+                    float target = water + (operation.Height == 0f ? 3.0f : operation.Height);
+                    float flattenInfluence = SmoothStep(radius, radius * 0.58f, distance);
+                    float micro = FractalNoise(px * 0.055f, py * 0.055f, 7717) * 0.10f;
+                    heightValue = Lerp(heightValue, target + micro, flattenInfluence * 0.96f);
+                }
+                else if (operation.Type == "cut_lake")
+                {
+                    float target = water - Math.Max(0.35f, operation.Depth == 0f ? 1.6f : operation.Depth);
+                    float shore = SmoothStep(radius, radius * 0.78f, distance);
+                    float center = SmoothStep(radius * 0.84f, radius * 0.20f, distance);
+                    heightValue = Lerp(heightValue, water + 0.35f, shore * 0.34f);
+                    heightValue = Lerp(heightValue, target, center);
+                }
+                else if (operation.Type == "carve_bay")
+                {
+                    float target = water - Math.Max(0.25f, operation.Depth == 0f ? 1.0f : operation.Depth);
+                    float bay = SmoothStep(radius, radius * 0.12f, distance);
+                    heightValue = Lerp(heightValue, target, bay * 0.92f);
+                }
+                else if (operation.Type == "crater")
+                {
+                    float craterRadius = Math.Max(2f, radius);
+                    float ring = SmoothStep(craterRadius * 1.18f, craterRadius * 0.84f, distance)
+                        - SmoothStep(craterRadius * 0.72f, craterRadius * 0.36f, distance);
+                    float center = SmoothStep(craterRadius * 0.62f, craterRadius * 0.12f, distance);
+                    float rimHeight = operation.Height == 0f ? 10f : operation.Height;
+                    float basinTarget = water + 1.5f - Math.Max(0f, operation.Depth);
+                    heightValue += rimHeight * ring;
+                    heightValue = Lerp(heightValue, basinTarget, center * 0.88f);
+                }
+                else if (operation.Type == "roughen")
+                {
+                    float strength = operation.Strength == 0f ? 1f : operation.Strength;
+                    heightValue += FractalNoise(px * operation.NoiseScale, py * operation.NoiseScale, 11939) * 5.0f * strength * pointInfluence;
+                }
+                else if (operation.Type == "carve_river")
+                {
+                    float lineDistance = DistanceToSegment(px, py, operation.X, operation.Y, operation.X2, operation.Y2);
+                    float riverWidth = Math.Max(1f, operation.Width);
+                    float river = SmoothStep(riverWidth * 2.2f, riverWidth * 0.42f, lineDistance);
+                    float target = water - Math.Max(0.2f, operation.Depth == 0f ? 0.7f : operation.Depth);
+                    heightValue = Lerp(heightValue, target, river * 0.94f);
+                }
+                else if (operation.Type == "raise_ridge")
+                {
+                    float lineDistance = DistanceToSegment(px, py, operation.X, operation.Y, operation.X2, operation.Y2);
+                    float ridgeWidth = Math.Max(1f, operation.Width);
+                    float ridge = SmoothStep(ridgeWidth * 2.4f, ridgeWidth * 0.22f, lineDistance);
+                    float amount = operation.Height == 0f ? 14f : operation.Height;
+                    heightValue += amount * ridge;
+                }
+            }
+
+            return heightValue;
         }
 
         private static float SideInfluence(string side, float nx, float ny)
@@ -1085,6 +1244,30 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             float dy = ny - cy;
             float d2 = dx * dx + dy * dy;
             return (float)Math.Exp(-d2 / (radius * radius)) * amplitude;
+        }
+
+        private static float Distance(float x1, float y1, float x2, float y2)
+        {
+            float dx = x1 - x2;
+            float dy = y1 - y2;
+            return (float)Math.Sqrt(dx * dx + dy * dy);
+        }
+
+        private static float DistanceToSegment(float px, float py, float x1, float y1, float x2, float y2)
+        {
+            float vx = x2 - x1;
+            float vy = y2 - y1;
+            float lengthSquared = vx * vx + vy * vy;
+
+            if (lengthSquared < 0.001f)
+                return Distance(px, py, x1, y1);
+
+            float t = ((px - x1) * vx + (py - y1) * vy) / lengthSquared;
+            t = Clamp(t, 0f, 1f);
+
+            float cx = x1 + vx * t;
+            float cy = y1 + vy * t;
+            return Distance(px, py, cx, cy);
         }
 
         private static float FractalNoise(float x, float y, int seed)
@@ -1473,6 +1656,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             public UUID TerrainTexture2 = UUID.Zero;
             public UUID TerrainTexture3 = UUID.Zero;
             public UUID TerrainTexture4 = UUID.Zero;
+            public readonly List<TerrainOperation> Operations = new List<TerrainOperation>();
 
             public TerrainRecipe(string name, TerrainStyle style)
                 : this(name, style, 0f)
@@ -1505,10 +1689,33 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 if (!TerrainTexture1.IsZero())
                     details.Add("custom low terrain texture");
 
+                if (Operations.Count > 0)
+                    details.Add(string.Format(CultureInfo.InvariantCulture, "{0} AI terrain operations", Operations.Count));
+
                 if (details.Count > 0)
                     return string.Format(CultureInfo.InvariantCulture, "{0} ({1})", Name, string.Join(", ", details.ToArray()));
 
                 return Name;
+            }
+        }
+
+        private class TerrainOperation
+        {
+            public readonly string Type;
+            public float X;
+            public float Y;
+            public float X2;
+            public float Y2;
+            public float Radius;
+            public float Width;
+            public float Height;
+            public float Depth;
+            public float Strength;
+            public float NoiseScale;
+
+            public TerrainOperation(string type)
+            {
+                Type = type;
             }
         }
 
