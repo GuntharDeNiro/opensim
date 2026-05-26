@@ -57,15 +57,28 @@ namespace OpenSim.Region.CoreModules.Avatar.AvatarFactory
 
         private int m_savetime = 5; // seconds to wait before saving changed appearance
         private int m_sendtime = 2; // seconds to wait before sending changed appearance
+        private bool m_temporaryDefaultAppearanceFallback = true;
+        private int m_temporaryDefaultAppearanceRetrySeconds = 15;
+        private int m_temporaryDefaultAppearanceVerifySeconds = 10;
+        private int m_temporaryDefaultAppearanceRetryAttempts = 8;
 
         private int m_checkTime = 500; // milliseconds to wait between checks for appearance updates
         private System.Timers.Timer m_updateTimer = new System.Timers.Timer();
         private ConcurrentDictionary<UUID,long> m_savequeue = new ConcurrentDictionary<UUID,long>();
         private ConcurrentDictionary<UUID,long> m_sendqueue = new ConcurrentDictionary<UUID,long>();
+        private ConcurrentDictionary<UUID, TemporaryAppearanceFallback> m_temporaryFallbacks = new ConcurrentDictionary<UUID, TemporaryAppearanceFallback>();
         private object m_updatesLock = new object();
         private int m_updatesbusy = 0;
 
         private object m_setAppearanceLock = new object();
+
+        private class TemporaryAppearanceFallback
+        {
+            public AvatarAppearance RealAppearance;
+            public int AttemptsLeft;
+            public bool ShowingTemporary;
+            public long NextAction;
+        }
 
         #region Region Module interface
 
@@ -77,6 +90,10 @@ namespace OpenSim.Region.CoreModules.Avatar.AvatarFactory
             {
                 m_savetime = appearanceConfig.GetInt("DelayBeforeAppearanceSave", m_savetime);
                 m_sendtime = appearanceConfig.GetInt("DelayBeforeAppearanceSend", m_sendtime);
+                m_temporaryDefaultAppearanceFallback = appearanceConfig.GetBoolean("TemporaryDefaultAppearanceFallback", m_temporaryDefaultAppearanceFallback);
+                m_temporaryDefaultAppearanceRetrySeconds = appearanceConfig.GetInt("TemporaryDefaultAppearanceRetrySeconds", m_temporaryDefaultAppearanceRetrySeconds);
+                m_temporaryDefaultAppearanceVerifySeconds = appearanceConfig.GetInt("TemporaryDefaultAppearanceVerifySeconds", m_temporaryDefaultAppearanceVerifySeconds);
+                m_temporaryDefaultAppearanceRetryAttempts = appearanceConfig.GetInt("TemporaryDefaultAppearanceRetryAttempts", m_temporaryDefaultAppearanceRetryAttempts);
                 // m_log.InfoFormat("[AVFACTORY] configured for {0} save and {1} send",m_savetime,m_sendtime);
             }
 
@@ -216,8 +233,8 @@ namespace OpenSim.Region.CoreModules.Avatar.AvatarFactory
                     SendAppearance((ScenePresence)sp);
                     return;
                 }
-                // save only if there were changes
-                if (changed)
+                // save only if there were changes, and never persist the temporary default fallback
+                if (changed && ShouldSaveAppearance(sp))
                     QueueAppearanceSave(sp.ControllingClient.AgentId);
                 QueueAppearanceSend(sp.ControllingClient.AgentId);
             }
@@ -346,6 +363,114 @@ namespace OpenSim.Region.CoreModules.Avatar.AvatarFactory
             long timestamp = DateTime.Now.Ticks + Convert.ToInt64(m_savetime * 1000 * 10000);
             m_savequeue[agentid] = timestamp;
             m_updateTimer.Start();
+        }
+
+        private static long SecondsFromNow(int seconds)
+        {
+            return DateTime.Now.Ticks + Convert.ToInt64(Math.Max(1, seconds) * 1000L * 10000L);
+        }
+
+        private static AvatarAppearance CreateTemporaryDefaultAppearance(AvatarAppearance realAppearance)
+        {
+            AvatarAppearance temporary = new AvatarAppearance
+            {
+                AvatarPreferencesHoverZ = realAppearance.AvatarPreferencesHoverZ,
+                Serial = realAppearance.Serial + 1
+            };
+            temporary.SetSize(realAppearance.AvatarSize);
+            return temporary;
+        }
+
+        private bool ShouldSaveAppearance(IScenePresence sp)
+        {
+            if (!m_temporaryFallbacks.TryGetValue(sp.UUID, out TemporaryAppearanceFallback fallback))
+                return true;
+
+            if (WearablesMatch(sp.Appearance.Wearables, fallback.RealAppearance.Wearables))
+            {
+                m_temporaryFallbacks.TryRemove(sp.UUID, out _);
+                m_log.InfoFormat(
+                    "[AVFACTORY]: Saved outfit restored for {0} in {1}; temporary appearance fallback is done.",
+                    sp.Name, m_scene.RegionInfo.RegionName);
+                return true;
+            }
+
+            m_log.DebugFormat(
+                "[AVFACTORY]: Skipping appearance save for {0} in {1}; temporary default fallback is active.",
+                sp.Name, m_scene.RegionInfo.RegionName);
+            return false;
+        }
+
+        private static bool WearablesMatch(AvatarWearable[] left, AvatarWearable[] right)
+        {
+            if (left == null || right == null || left.Length != right.Length)
+                return false;
+
+            for (int i = 0; i < left.Length; i++)
+            {
+                AvatarWearable leftWearable = left[i];
+                AvatarWearable rightWearable = right[i];
+
+                if (leftWearable == null || rightWearable == null)
+                {
+                    if (leftWearable != rightWearable)
+                        return false;
+                    continue;
+                }
+
+                if (leftWearable.Count != rightWearable.Count)
+                    return false;
+
+                for (int j = 0; j < leftWearable.Count; j++)
+                {
+                    WearableItem leftItem = leftWearable[j];
+                    WearableItem rightItem = rightWearable[j];
+                    if (leftItem.ItemID != rightItem.ItemID || leftItem.AssetID != rightItem.AssetID)
+                        return false;
+                }
+            }
+
+            return true;
+        }
+
+        public bool ApplyTemporaryDefaultAppearanceFallback(IScenePresence isp)
+        {
+            if (!m_temporaryDefaultAppearanceFallback || isp == null)
+                return false;
+
+            ScenePresence sp = isp as ScenePresence;
+            if (sp == null || sp.IsDeleted || sp.IsNPC || sp.IsChildAgent || sp.ControllingClient == null)
+                return false;
+
+            UUID agentId = sp.UUID;
+            if (m_temporaryFallbacks.ContainsKey(agentId))
+                return true;
+
+            TemporaryAppearanceFallback fallback = new TemporaryAppearanceFallback
+            {
+                RealAppearance = new AvatarAppearance(sp.Appearance, true, true),
+                AttemptsLeft = Math.Max(1, m_temporaryDefaultAppearanceRetryAttempts),
+                ShowingTemporary = true,
+                NextAction = SecondsFromNow(m_temporaryDefaultAppearanceRetrySeconds)
+            };
+
+            AvatarAppearance temporary = CreateTemporaryDefaultAppearance(fallback.RealAppearance);
+
+            lock (m_setAppearanceLock)
+            {
+                sp.Appearance = temporary;
+                sp.ControllingClient.SendWearables(temporary.Wearables, temporary.Serial);
+                SendAppearance(sp);
+            }
+
+            m_temporaryFallbacks[agentId] = fallback;
+            m_updateTimer.Start();
+
+            m_log.InfoFormat(
+                "[AVFACTORY]: Applied temporary default appearance fallback for {0} in {1}; will retry the saved outfit.",
+                sp.Name, m_scene.RegionInfo.RegionName);
+
+            return true;
         }
 
         // called on textures update
@@ -779,6 +904,8 @@ namespace OpenSim.Region.CoreModules.Avatar.AvatarFactory
                     SendAppearance(id);
                 }
 
+                ProcessTemporaryAppearanceFallbacks(now);
+
                 if(m_updatesbusy == 0)
                 {
                     m_updatesbusy = -1;
@@ -808,11 +935,95 @@ namespace OpenSim.Region.CoreModules.Avatar.AvatarFactory
                     }
                 }
 
-                if (m_savequeue.Count == 0 && m_sendqueue.Count == 0)
+                if (m_savequeue.Count == 0 && m_sendqueue.Count == 0 && m_temporaryFallbacks.Count == 0)
                     m_updateTimer.Stop();
 
                  Monitor.Exit(m_updatesLock);
             }
+        }
+
+        private void ProcessTemporaryAppearanceFallbacks(long now)
+        {
+            foreach (KeyValuePair<UUID, TemporaryAppearanceFallback> kvp in m_temporaryFallbacks)
+            {
+                TemporaryAppearanceFallback fallback = kvp.Value;
+                if (fallback.NextAction > now)
+                    continue;
+
+                UUID id = kvp.Key;
+                ScenePresence sp = m_scene.GetScenePresence(id);
+                if (sp == null || sp.IsDeleted || sp.IsNPC || sp.IsChildAgent || sp.ControllingClient == null)
+                {
+                    m_temporaryFallbacks.TryRemove(id, out _);
+                    continue;
+                }
+
+                if (fallback.ShowingTemporary)
+                {
+                    RestoreRealAppearanceForRetry(sp, fallback);
+                    continue;
+                }
+
+                if (ValidateBakedTextureCache(sp))
+                {
+                    m_temporaryFallbacks.TryRemove(id, out _);
+                    m_log.InfoFormat(
+                        "[AVFACTORY]: Temporary appearance fallback completed for {0} in {1}.",
+                        sp.Name, m_scene.RegionInfo.RegionName);
+                    continue;
+                }
+
+                if (fallback.AttemptsLeft <= 0)
+                {
+                    m_temporaryFallbacks.TryRemove(id, out _);
+                    m_log.WarnFormat(
+                        "[AVFACTORY]: Temporary appearance fallback exhausted retries for {0} in {1}; leaving the saved outfit active.",
+                        sp.Name, m_scene.RegionInfo.RegionName);
+                    continue;
+                }
+
+                ApplyTemporaryDefaultAppearance(sp, fallback);
+            }
+        }
+
+        private void RestoreRealAppearanceForRetry(ScenePresence sp, TemporaryAppearanceFallback fallback)
+        {
+            AvatarAppearance realAppearance = new AvatarAppearance(fallback.RealAppearance, true, true);
+
+            lock (m_setAppearanceLock)
+            {
+                sp.Appearance = realAppearance;
+                sp.ControllingClient.SendWearables(realAppearance.Wearables, realAppearance.Serial);
+                SendAppearance(sp);
+                RequestRebake(sp, false);
+            }
+
+            fallback.AttemptsLeft--;
+            fallback.ShowingTemporary = false;
+            fallback.NextAction = SecondsFromNow(m_temporaryDefaultAppearanceVerifySeconds);
+
+            m_log.InfoFormat(
+                "[AVFACTORY]: Retrying saved outfit for {0} in {1}; attempts left {2}.",
+                sp.Name, m_scene.RegionInfo.RegionName, fallback.AttemptsLeft);
+        }
+
+        private void ApplyTemporaryDefaultAppearance(ScenePresence sp, TemporaryAppearanceFallback fallback)
+        {
+            AvatarAppearance temporary = CreateTemporaryDefaultAppearance(fallback.RealAppearance);
+
+            lock (m_setAppearanceLock)
+            {
+                sp.Appearance = temporary;
+                sp.ControllingClient.SendWearables(temporary.Wearables, temporary.Serial);
+                SendAppearance(sp);
+            }
+
+            fallback.ShowingTemporary = true;
+            fallback.NextAction = SecondsFromNow(m_temporaryDefaultAppearanceRetrySeconds);
+
+            m_log.InfoFormat(
+                "[AVFACTORY]: Re-applied temporary default appearance for {0} in {1}; saved outfit is still incomplete.",
+                sp.Name, m_scene.RegionInfo.RegionName);
         }
 
         private void SaveAppearance(List<UUID> ids)
@@ -824,6 +1035,15 @@ namespace OpenSim.Region.CoreModules.Avatar.AvatarFactory
                 ScenePresence sp = m_scene.GetScenePresence(id);
                 if(sp == null)
                     continue;
+
+                if (m_temporaryFallbacks.ContainsKey(id))
+                {
+                    m_log.DebugFormat(
+                        "[AVFACTORY]: Skipping queued appearance save for {0} in {1}; temporary default fallback is active.",
+                        sp.Name, m_scene.RegionInfo.RegionName);
+                    continue;
+                }
+
                 // This could take awhile since it needs to pull inventory
                 // We need to do it at the point of save so that there is a sufficient delay for any upload of new body part/shape
                 // assets and item asset id changes to complete.
@@ -1236,7 +1456,12 @@ namespace OpenSim.Region.CoreModules.Avatar.AvatarFactory
                 sp.Appearance.Wearables = avatAppearance.Wearables;
                 // We don't need to send the appearance here since the "iswearing" will trigger a new set
                 // of visual param and baked texture changes. When those complete, the new appearance will be sent
-                QueueAppearanceSave(client.AgentId);
+                if (!m_temporaryFallbacks.ContainsKey(client.AgentId))
+                    QueueAppearanceSave(client.AgentId);
+                else
+                    m_log.DebugFormat(
+                        "[AVFACTORY]: Skipping AvatarIsWearing save for {0} in {1}; temporary default fallback is active.",
+                        sp.Name, m_scene.RegionInfo.RegionName);
             }
         }
 

@@ -2343,7 +2343,10 @@ namespace OpenSim.Region.Framework.Scenes
                     if (m_scene.AvatarFactory != null && !isHGTP)
                     {
                         if (!m_scene.AvatarFactory.ValidateBakedTextureCache(this))
-                            m_scene.AvatarFactory.QueueAppearanceSave(UUID);
+                        {
+                            if (!m_scene.AvatarFactory.ApplyTemporaryDefaultAppearanceFallback(this))
+                                m_scene.AvatarFactory.QueueAppearanceSave(UUID);
+                        }
                     }
                 }
 

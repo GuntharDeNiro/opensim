@@ -75,6 +75,14 @@ namespace OpenSim.Region.Framework.Interfaces
         bool ValidateBakedTextureCache(IScenePresence sp);
 
         /// <summary>
+        /// Temporarily show the built-in default wearables while the viewer/grid recovers a broken baked appearance.
+        /// The original appearance is retried later and must not be overwritten by the temporary defaults.
+        /// </summary>
+        /// <param name="sp"></param>
+        /// <returns>true if a temporary fallback was applied or is already pending.</returns>
+        bool ApplyTemporaryDefaultAppearanceFallback(IScenePresence sp);
+
+        /// <summary>
         /// Request a rebake of textures for an avatar.
         /// </summary>
         /// <remarks>
