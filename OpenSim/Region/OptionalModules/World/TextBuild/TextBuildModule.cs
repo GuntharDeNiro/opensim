@@ -318,7 +318,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             aiRequest["region_size_y"] = OSD.FromInteger((int)m_scene.RegionInfo.RegionSizeY);
             aiRequest["water_height"] = OSD.FromReal(m_scene.RegionInfo.RegionSettings.WaterHeight);
             aiRequest["available_styles"] = OSD.FromString("flat_grass,tropical_island,snowy_mountains,ring_island,volcanic_island,archipelago,canyon");
-            aiRequest["schema"] = OSD.FromString("Return JSON: {\"style\":\"ring_island\",\"feature_meters\":100,\"name\":\"optional label\"}. Supported styles: flat_grass, tropical_island, snowy_mountains, ring_island, volcanic_island, archipelago, canyon.");
+            aiRequest["schema"] = OSD.FromString("Return JSON only. Example: {\"style\":\"volcanic_island\",\"feature_meters\":75,\"name\":\"volcanic island with village shore\",\"height_scale\":1.0,\"roughness\":0.8,\"flat_area\":{\"side\":\"south\",\"size_meters\":45},\"slope_bias\":{\"side\":\"north\",\"strength\":0.8},\"beach_color\":\"black\",\"terrain_textures\":{\"low\":\"uuid-for-black-sand\"}}. Supported styles: flat_grass, tropical_island, snowy_mountains, ring_island, volcanic_island, archipelago, canyon. Supported sides: north, south, east, west, center.");
 
             try
             {
@@ -441,9 +441,83 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 name = DefaultTerrainRecipeName(terrainStyle);
 
             if (meters > 0f)
-                return new TerrainRecipe(name, terrainStyle, Math.Max(5f, meters));
+                return ApplyAIRecipeModifiers(new TerrainRecipe(name, terrainStyle, Math.Max(5f, meters)), result);
 
-            return new TerrainRecipe(name, terrainStyle);
+            return ApplyAIRecipeModifiers(new TerrainRecipe(name, terrainStyle), result);
+        }
+
+        private static TerrainRecipe ApplyAIRecipeModifiers(TerrainRecipe recipe, OSDMap result)
+        {
+            recipe.HeightScale = Clamp(GetOSDFloat(result, "height_scale", 1f), 0.35f, 2.5f);
+            recipe.Roughness = Clamp(GetOSDFloat(result, "roughness", 1f), 0f, 2.5f);
+            recipe.BeachColor = GetOSDString(result, "beach_color");
+            ApplyAITextureFields(recipe, result);
+
+            OSDMap flatArea = GetOSDMap(result, "flat_area");
+            if (flatArea != null)
+            {
+                recipe.FlatAreaSide = NormalizeSide(GetOSDString(flatArea, "side"));
+                recipe.FlatAreaMeters = Clamp(GetOSDFloat(flatArea, "size_meters", 45f), 8f, 220f);
+            }
+
+            OSDMap slopeBias = GetOSDMap(result, "slope_bias");
+            if (slopeBias != null)
+            {
+                recipe.SlopeBiasSide = NormalizeSide(GetOSDString(slopeBias, "side"));
+                recipe.SlopeBiasStrength = Clamp(GetOSDFloat(slopeBias, "strength", 0.65f), -1.5f, 1.5f);
+            }
+
+            return recipe;
+        }
+
+        private static void ApplyAITextureFields(TerrainRecipe recipe, OSDMap result)
+        {
+            OSDMap textures = GetOSDMap(result, "terrain_textures");
+            if (textures == null)
+                textures = GetOSDMap(result, "textures");
+
+            if (textures != null)
+            {
+                recipe.TerrainTexture1 = GetTextureUUID(textures, "low");
+                if (recipe.TerrainTexture1.IsZero())
+                    recipe.TerrainTexture1 = GetTextureUUID(textures, "beach");
+                if (recipe.TerrainTexture1.IsZero())
+                    recipe.TerrainTexture1 = GetTextureUUID(textures, "sand");
+                if (recipe.TerrainTexture1.IsZero())
+                    recipe.TerrainTexture1 = GetTextureUUID(textures, "texture1");
+
+                recipe.TerrainTexture2 = GetTextureUUID(textures, "mid");
+                if (recipe.TerrainTexture2.IsZero())
+                    recipe.TerrainTexture2 = GetTextureUUID(textures, "grass");
+                if (recipe.TerrainTexture2.IsZero())
+                    recipe.TerrainTexture2 = GetTextureUUID(textures, "texture2");
+
+                recipe.TerrainTexture3 = GetTextureUUID(textures, "high");
+                if (recipe.TerrainTexture3.IsZero())
+                    recipe.TerrainTexture3 = GetTextureUUID(textures, "rock");
+                if (recipe.TerrainTexture3.IsZero())
+                    recipe.TerrainTexture3 = GetTextureUUID(textures, "texture3");
+
+                recipe.TerrainTexture4 = GetTextureUUID(textures, "snow");
+                if (recipe.TerrainTexture4.IsZero())
+                    recipe.TerrainTexture4 = GetTextureUUID(textures, "texture4");
+            }
+
+            if (recipe.TerrainTexture1.IsZero())
+                recipe.TerrainTexture1 = GetTextureUUID(result, "terrain_texture_low");
+            if (recipe.TerrainTexture1.IsZero())
+                recipe.TerrainTexture1 = GetTextureUUID(result, "beach_texture");
+        }
+
+        private static UUID GetTextureUUID(OSDMap map, string key)
+        {
+            if (map == null || !map.ContainsKey(key))
+                return UUID.Zero;
+
+            if (UUID.TryParse(map[key].AsString(), out UUID textureID))
+                return textureID;
+
+            return UUID.Zero;
         }
 
         private static string NormalizeAIStyle(string style)
@@ -506,6 +580,37 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             return fallback;
         }
 
+        private static OSDMap GetOSDMap(OSDMap map, string key)
+        {
+            if (map != null && map.ContainsKey(key))
+                return map[key] as OSDMap;
+
+            return null;
+        }
+
+        private static string NormalizeSide(string side)
+        {
+            if (side == null)
+                return string.Empty;
+
+            side = side.Trim().ToLower(CultureInfo.InvariantCulture);
+            if (side == "n" || side == "nord")
+                return "north";
+            if (side == "s" || side == "sud")
+                return "south";
+            if (side == "e" || side == "est")
+                return "east";
+            if (side == "w" || side == "ovest")
+                return "west";
+            if (side == "middle" || side == "centre" || side == "centro")
+                return "center";
+
+            if (side == "north" || side == "south" || side == "east" || side == "west" || side == "center")
+                return side;
+
+            return string.Empty;
+        }
+
         private static float ExtractMeterValue(string lower, float fallback)
         {
             Match match = Regex.Match(lower, @"(\d+(?:[\.,]\d+)?)\s*(?:m|meter|meters|metro|metri)\b");
@@ -536,7 +641,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 return;
             }
 
-            ApplyTerrainTextureHeights(recipe.Style);
+            ApplyTerrainTextureHeights(recipe);
 
             for (int x = 0; x < width; x++)
             {
@@ -559,9 +664,19 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             SendReply(client, string.Format("TextBuild: shaped terrain as {0}.", recipe.GetDescription()));
         }
 
-        private void ApplyTerrainTextureHeights(TerrainStyle style)
+        private void ApplyTerrainTextureHeights(TerrainRecipe recipe)
         {
             RegionSettings settings = m_scene.RegionInfo.RegionSettings;
+            TerrainStyle style = recipe.Style;
+
+            if (!recipe.TerrainTexture1.IsZero())
+                settings.TerrainTexture1 = recipe.TerrainTexture1;
+            if (!recipe.TerrainTexture2.IsZero())
+                settings.TerrainTexture2 = recipe.TerrainTexture2;
+            if (!recipe.TerrainTexture3.IsZero())
+                settings.TerrainTexture3 = recipe.TerrainTexture3;
+            if (!recipe.TerrainTexture4.IsZero())
+                settings.TerrainTexture4 = recipe.TerrainTexture4;
 
             if (style == TerrainStyle.SnowyMountains || style == TerrainStyle.VolcanicIsland || style == TerrainStyle.Canyon)
             {
@@ -584,26 +699,104 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
         private float GenerateTerrainHeight(TerrainRecipe recipe, int x, int y, int width, int height)
         {
             float water = (float)m_scene.RegionInfo.RegionSettings.WaterHeight;
+            float heightValue;
 
             if (recipe.Style == TerrainStyle.SnowyMountains)
-                return GenerateSnowyMountainHeight(x, y, width, height, water);
+                heightValue = GenerateSnowyMountainHeight(x, y, width, height, water);
+            else if (recipe.Style == TerrainStyle.TropicalIsland)
+                heightValue = GenerateTropicalIslandHeight(x, y, width, height, water);
+            else if (recipe.Style == TerrainStyle.RingIsland)
+                heightValue = GenerateRingIslandHeight(x, y, width, height, water, recipe.MeterValue);
+            else if (recipe.Style == TerrainStyle.VolcanicIsland)
+                heightValue = GenerateVolcanicIslandHeight(x, y, width, height, water, recipe.MeterValue);
+            else if (recipe.Style == TerrainStyle.Archipelago)
+                heightValue = GenerateArchipelagoHeight(x, y, width, height, water);
+            else if (recipe.Style == TerrainStyle.Canyon)
+                heightValue = GenerateCanyonHeight(x, y, width, height, water);
+            else
+                heightValue = water + 1.6f + FractalNoise(x * 0.035f, y * 0.035f, 2001) * 0.18f;
 
-            if (recipe.Style == TerrainStyle.TropicalIsland)
-                return GenerateTropicalIslandHeight(x, y, width, height, water);
+            return ApplyTerrainRecipeModifiers(recipe, x, y, width, height, water, heightValue);
+        }
 
-            if (recipe.Style == TerrainStyle.RingIsland)
-                return GenerateRingIslandHeight(x, y, width, height, water, recipe.MeterValue);
+        private static float ApplyTerrainRecipeModifiers(TerrainRecipe recipe, int x, int y, int width, int height, float water, float heightValue)
+        {
+            float nx = ((x + 0.5f) / width) * 2f - 1f;
+            float ny = ((y + 0.5f) / height) * 2f - 1f;
 
-            if (recipe.Style == TerrainStyle.VolcanicIsland)
-                return GenerateVolcanicIslandHeight(x, y, width, height, water, recipe.MeterValue);
+            if (recipe.HeightScale > 0f && Math.Abs(recipe.HeightScale - 1f) > 0.001f)
+                heightValue = water + (heightValue - water) * recipe.HeightScale;
 
-            if (recipe.Style == TerrainStyle.Archipelago)
-                return GenerateArchipelagoHeight(x, y, width, height, water);
+            if (recipe.Roughness > 0f && Math.Abs(recipe.Roughness - 1f) > 0.001f)
+            {
+                float extraRoughness = recipe.Roughness - 1f;
+                heightValue += FractalNoise(x * 0.084f, y * 0.084f, 9917) * 3.2f * extraRoughness;
+            }
 
-            if (recipe.Style == TerrainStyle.Canyon)
-                return GenerateCanyonHeight(x, y, width, height, water);
+            if (!string.IsNullOrEmpty(recipe.SlopeBiasSide) && Math.Abs(recipe.SlopeBiasStrength) > 0.001f)
+            {
+                float side = SideInfluence(recipe.SlopeBiasSide, nx, ny);
+                float scale = 1f + recipe.SlopeBiasStrength * 0.55f * side;
+                heightValue = water + (heightValue - water) * Math.Max(0.15f, scale);
+            }
 
-            return ClampTerrainHeight(water + 1.6f + FractalNoise(x * 0.035f, y * 0.035f, 2001) * 0.18f);
+            if (!string.IsNullOrEmpty(recipe.FlatAreaSide) && recipe.FlatAreaMeters > 0f)
+            {
+                SideCenter(recipe.FlatAreaSide, out float cx, out float cy);
+                float size = Clamp(recipe.FlatAreaMeters / Math.Min(width, height), 0.06f, 0.9f);
+                float rx = recipe.FlatAreaSide == "north" || recipe.FlatAreaSide == "south" ? size * 1.45f : size * 0.82f;
+                float ry = recipe.FlatAreaSide == "east" || recipe.FlatAreaSide == "west" ? size * 1.45f : size * 0.82f;
+                if (recipe.FlatAreaSide == "center")
+                {
+                    rx = size;
+                    ry = size;
+                }
+
+                float dx = Math.Abs(nx - cx) / Math.Max(0.001f, rx);
+                float dy = Math.Abs(ny - cy) / Math.Max(0.001f, ry);
+                float boxDistance = Math.Max(dx, dy);
+                float influence = SmoothStep(1.22f, 0.58f, boxDistance);
+                float padHeight = water + 2.4f;
+
+                if (recipe.Style == TerrainStyle.VolcanicIsland || recipe.Style == TerrainStyle.SnowyMountains || recipe.Style == TerrainStyle.Canyon)
+                    padHeight = water + 4.0f;
+
+                float micro = FractalNoise(x * 0.05f, y * 0.05f, 1709) * 0.12f;
+                heightValue = Lerp(heightValue, padHeight + micro, influence * 0.96f);
+            }
+
+            return ClampTerrainHeight(heightValue);
+        }
+
+        private static float SideInfluence(string side, float nx, float ny)
+        {
+            if (side == "north")
+                return SmoothStep(-0.15f, 1f, ny);
+            if (side == "south")
+                return SmoothStep(0.15f, -1f, ny);
+            if (side == "east")
+                return SmoothStep(-0.15f, 1f, nx);
+            if (side == "west")
+                return SmoothStep(0.15f, -1f, nx);
+            if (side == "center")
+                return SmoothStep(0.9f, 0.0f, (float)Math.Sqrt(nx * nx + ny * ny));
+
+            return 0f;
+        }
+
+        private static void SideCenter(string side, out float cx, out float cy)
+        {
+            cx = 0f;
+            cy = 0f;
+
+            if (side == "north")
+                cy = 0.72f;
+            else if (side == "south")
+                cy = -0.72f;
+            else if (side == "east")
+                cx = 0.72f;
+            else if (side == "west")
+                cx = -0.72f;
         }
 
         private static float GenerateTropicalIslandHeight(int x, int y, int width, int height, float water)
@@ -788,6 +981,11 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
         private static float Lerp(float from, float to, float amount)
         {
             return from + (to - from) * amount;
+        }
+
+        private static float Clamp(float value, float min, float max)
+        {
+            return Math.Max(min, Math.Min(max, value));
         }
 
         private static float ClampTerrainHeight(float value)
@@ -1102,6 +1300,17 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             public readonly string Name;
             public readonly TerrainStyle Style;
             public readonly float MeterValue;
+            public float HeightScale = 1f;
+            public float Roughness = 1f;
+            public string FlatAreaSide = string.Empty;
+            public float FlatAreaMeters;
+            public string SlopeBiasSide = string.Empty;
+            public float SlopeBiasStrength;
+            public string BeachColor = string.Empty;
+            public UUID TerrainTexture1 = UUID.Zero;
+            public UUID TerrainTexture2 = UUID.Zero;
+            public UUID TerrainTexture3 = UUID.Zero;
+            public UUID TerrainTexture4 = UUID.Zero;
 
             public TerrainRecipe(string name, TerrainStyle style)
                 : this(name, style, 0f)
@@ -1117,8 +1326,25 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
 
             public string GetDescription()
             {
+                List<string> details = new List<string>();
+
                 if (MeterValue > 0f && (Style == TerrainStyle.RingIsland || Style == TerrainStyle.VolcanicIsland))
-                    return string.Format(CultureInfo.InvariantCulture, "{0} ({1:0.#}m center feature)", Name, MeterValue);
+                    details.Add(string.Format(CultureInfo.InvariantCulture, "{0:0.#}m center feature", MeterValue));
+
+                if (!string.IsNullOrEmpty(FlatAreaSide) && FlatAreaMeters > 0f)
+                    details.Add(string.Format(CultureInfo.InvariantCulture, "{0:0.#}m flat area {1}", FlatAreaMeters, FlatAreaSide));
+
+                if (!string.IsNullOrEmpty(SlopeBiasSide) && Math.Abs(SlopeBiasStrength) > 0.001f)
+                    details.Add(string.Format(CultureInfo.InvariantCulture, "{0} slope bias {1:0.##}", SlopeBiasSide, SlopeBiasStrength));
+
+                if (!string.IsNullOrEmpty(BeachColor))
+                    details.Add(BeachColor + " beaches requested");
+
+                if (!TerrainTexture1.IsZero())
+                    details.Add("custom low terrain texture");
+
+                if (details.Count > 0)
+                    return string.Format(CultureInfo.InvariantCulture, "{0} ({1})", Name, string.Join(", ", details.ToArray()));
 
                 return Name;
             }
