@@ -1119,11 +1119,6 @@ namespace OpenSim.Region.Framework.Scenes
             get { return Util.GetViewerName(m_scene.AuthenticateHandler.GetAgentCircuitData(ControllingClient.CircuitCode)); }
         }
 
-        public bool HasEstateRoleNameHighlight
-        {
-            get { return m_scene != null && m_scene.RegionInfo.EstateSettings.IsEstateManagerOrOwner(UUID); }
-        }
-
         #endregion
 
         #region Constructor(s)
