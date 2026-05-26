@@ -7193,11 +7193,7 @@ namespace OpenSim.Region.ClientStack.LindenUDP
             dest[pos++] = (byte)(len >> 8);
             Buffer.BlockCopy(nv, 0, dest, pos, len); pos += len;
 
-            // data(2), text(1), text color(4), media url(1), PBblock(1), ExtramParams(1),
-            // sound id(16), sound owner(16) gain (4), flags (1), radius (4)
-            //  jointtype(1) joint pivot(12) joint offset(12)
-            const int lastzeros = 2 + 1 + 4 + 1 + 1 + 1 + 16 + 16 + 4 + 1 + 4 + 1 + 12 + 12;
-            Array.Clear(dest, pos, lastzeros); pos += lastzeros;
+            AddAvatarNameHighlightBlock(data, dest, ref pos);
         }
 
         protected static void CreateAvatarUpdateBlock(ScenePresence data, LLUDPZeroEncoder zc)
@@ -7257,11 +7253,65 @@ namespace OpenSim.Region.ClientStack.LindenUDP
             zc.AddByte((byte)(len >> 8));
             zc.AddBytes(nv, len);
 
-            // data(2), text(1), text color(4), media url(1), PBblock(1), ExtramParams(1),
-            // sound id(16), sound owner(16) gain (4), flags (1), radius (4)
-            //  jointtype(1) joint pivot(12) joint offset(12)
-            const int lastzeros = 2 + 1 + 4 + 1 + 1 + 1 + 16 + 16 + 4 + 1 + 4 + 1 + 12 + 12;
-            zc.AddZeros(lastzeros);
+            AddAvatarNameHighlightBlock(data, zc);
+        }
+
+        private const int AvatarNameHighlightColorArgb = unchecked((int)0xffffe000);
+        private const int AvatarUpdateTailAfterTextColorZeros = 1 + 1 + 1 + 16 + 16 + 4 + 1 + 4 + 1 + 12 + 12;
+
+        private static void AddAvatarNameHighlightBlock(ScenePresence data, byte[] dest, ref int pos)
+        {
+            // Data variable
+            dest[pos++] = 0;
+            dest[pos++] = 0;
+
+            string highlightName = data.HasEstateRoleNameHighlight ? data.Name : string.Empty;
+            if (string.IsNullOrEmpty(highlightName))
+            {
+                Array.Clear(dest, pos, 1 + 4 + AvatarUpdateTailAfterTextColorZeros);
+                pos += 1 + 4 + AvatarUpdateTailAfterTextColorZeros;
+                return;
+            }
+
+            byte[] text = Utils.StringToBytes(highlightName);
+            int len = Math.Min(text.Length, 254);
+            dest[pos++] = (byte)(len + 1);
+            Buffer.BlockCopy(text, 0, dest, pos, len);
+            pos += len;
+            dest[pos++] = 0;
+            AddColorArgb(AvatarNameHighlightColorArgb, dest, ref pos);
+            Array.Clear(dest, pos, AvatarUpdateTailAfterTextColorZeros);
+            pos += AvatarUpdateTailAfterTextColorZeros;
+        }
+
+        private static void AddAvatarNameHighlightBlock(ScenePresence data, LLUDPZeroEncoder zc)
+        {
+            // Data variable
+            zc.AddZeros(2);
+
+            string highlightName = data.HasEstateRoleNameHighlight ? data.Name : string.Empty;
+            if (string.IsNullOrEmpty(highlightName))
+            {
+                zc.AddZeros(1 + 4 + AvatarUpdateTailAfterTextColorZeros);
+                return;
+            }
+
+            byte[] text = Utils.StringToBytes(highlightName);
+            int len = Math.Min(text.Length, 254);
+            zc.AddByte((byte)(len + 1));
+            zc.AddBytes(text, len);
+            zc.AddZeros(1);
+            zc.AddColorArgb(AvatarNameHighlightColorArgb);
+            zc.AddZeros(AvatarUpdateTailAfterTextColorZeros);
+        }
+
+        private static void AddColorArgb(int argb, byte[] dest, ref int pos)
+        {
+            uint ua = (uint)argb ^ 0xff000000;
+            dest[pos++] = (byte)(ua >> 16);
+            dest[pos++] = (byte)(ua >> 8);
+            dest[pos++] = (byte)ua;
+            dest[pos++] = (byte)(ua >> 24);
         }
 
         protected void CreatePrimUpdateBlock(SceneObjectPart part, ScenePresence sp, LLUDPZeroEncoder zc)
