@@ -96,12 +96,17 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
 
         private void OnChatFromClient(object sender, OSChatMessage chat)
         {
-            if (chat == null || chat.Sender == null || chat.Channel != m_commandChannel)
+            if (chat == null || chat.Sender == null)
                 return;
 
             string request = chat.Message == null ? string.Empty : chat.Message.Trim();
             if (!IsBuildCommand(request))
                 return;
+
+            if (chat.Channel != m_commandChannel && chat.Channel != 0)
+                return;
+
+            request = NormalizeBuildRequest(request);
 
             IClientAPI client = chat.Sender;
             if (m_estateManagerOnly && !m_scene.Permissions.IsEstateManager(client.AgentId))
@@ -163,13 +168,23 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
 
         private static bool IsBuildCommand(string request)
         {
-            string lower = request.ToLower(CultureInfo.InvariantCulture);
+            string lower = NormalizeBuildRequest(request).ToLower(CultureInfo.InvariantCulture);
+
             return lower.StartsWith("build ")
                 || lower.StartsWith("create ")
                 || lower.StartsWith("make ")
                 || lower.StartsWith("costruisci ")
                 || lower.StartsWith("costruiscimi ")
                 || lower.StartsWith("crea ");
+        }
+
+        private static string NormalizeBuildRequest(string request)
+        {
+            request = request == null ? string.Empty : request.Trim();
+            if (request.StartsWith("/"))
+                request = request.Substring(1).TrimStart();
+
+            return request;
         }
 
         private static BuildTemplate ResolveTemplate(string request)
