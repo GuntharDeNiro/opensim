@@ -586,6 +586,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 "Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects.");
             EnsureFeature(content.Features, "Viewer polish",
                 "Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.");
+            EnsureFeature(content.Features, "Experience-Lite script permissions",
+                "Trusted estate scripts can receive selected persistent permissions without repeatedly interrupting visitors with viewer popups.");
 
             return content;
         }
@@ -725,6 +727,16 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Usage.Add("Set SendSimulatorVersionToViewer and ViewerSimulatorVersionOverride in [ClientStack.LindenUDP].");
                     content.Usage.Add("Use the same override string across estate regions that should feel like one coherent grid experience.");
                     content.Notes.Add("This is presentation polish only; keep the actual simulator binaries compatible for crossings and shared services.");
+                    break;
+
+                case "experience-lite-script-permissions":
+                    content.Overview = "Experience-Lite adds an estate-controlled trust layer for script runtime permissions. Trusted owners or objects can auto-grant selected permissions such as controls, animations, camera, teleport and animation override, so visitors are not repeatedly interrupted by permission dialogs for estate systems they already trust.";
+                    content.Usage.Add("Enable [ScriptExperiences] only in trusted estate environments.");
+                    content.Usage.Add("Add trusted script owner UUIDs to TrustedOwners, or specific root object/prim UUIDs to TrustedObjects.");
+                    content.Usage.Add("Keep AutoGrantPermissions limited to the permissions your estate systems actually need.");
+                    content.Usage.Add("Use llRequestPermissions normally from scripts; trusted requests are granted automatically when covered by the configured bitmask.");
+                    content.Notes.Add("The default bitmask excludes PERMISSION_DEBIT and ownership changes.");
+                    content.Notes.Add("Untrusted scripts keep the normal viewer permission prompt behavior.");
                     break;
             }
 
@@ -949,7 +961,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 + "Feature7 = \"AI-connected text build tools|Estate builders can use text commands connected to AI to plan, generate and refine terrain or building ideas directly from the simulator workflow.\"\n"
                 + "Feature8 = \"Automatic cloud avatar recovery|If an avatar becomes a cloud, the server automatically handles the recovery and restores the normal appearance within a few seconds.\"\n"
                 + "Feature9 = \"Group auto invite|Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects.\"\n"
-                + "Feature10 = \"Viewer polish|Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.\"\n",
+                + "Feature10 = \"Viewer polish|Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.\"\n"
+                + "Feature11 = \"Experience-Lite script permissions|Trusted estate scripts can receive selected persistent permissions without repeatedly interrupting visitors with viewer popups.\"\n",
                 new UTF8Encoding(false));
         }
 
@@ -1272,6 +1285,11 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             {
                 Title = "Viewer polish",
                 Body = "Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent."
+            });
+            features.Add(new FeatureItem
+            {
+                Title = "Experience-Lite script permissions",
+                Body = "Trusted estate scripts can receive selected persistent permissions without repeatedly interrupting visitors with viewer popups."
             });
         }
 

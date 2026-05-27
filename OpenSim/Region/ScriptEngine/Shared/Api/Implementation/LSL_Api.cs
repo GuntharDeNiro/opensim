@@ -124,6 +124,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         protected int m_scriptConsoleChannel = 0;
         protected bool m_scriptConsoleChannelEnabled = false;
         protected bool m_debuggerSafe = false;
+        protected bool m_scriptExperiencesEnabled = false;
+        protected bool m_scriptExperiencesAllowEstateManagers = false;
+        protected int m_scriptExperienceAutoGrantPermissions = 0;
+        protected readonly HashSet<UUID> m_scriptExperienceTrustedOwners = new();
+        protected readonly HashSet<UUID> m_scriptExperienceTrustedObjects = new();
 
         protected AsyncCommandManager m_AsyncCommands = null;
         protected IUrlModule m_UrlModule = null;
@@ -516,6 +521,16 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     m_useMeshCacheInCastRay = lslConfig.GetBoolean("UseMeshCacheInLlCastRay", m_useMeshCacheInCastRay);
                 }
 
+                IConfig experiencesConfig = seConfigSource.Configs["ScriptExperiences"];
+                if (experiencesConfig != null)
+                {
+                    m_scriptExperiencesEnabled = experiencesConfig.GetBoolean("Enabled", m_scriptExperiencesEnabled);
+                    m_scriptExperiencesAllowEstateManagers = experiencesConfig.GetBoolean("AllowEstateManagers", m_scriptExperiencesAllowEstateManagers);
+                    m_scriptExperienceAutoGrantPermissions = experiencesConfig.GetInt("AutoGrantPermissions", DefaultExperienceAutoGrantPermissions());
+                    LoadExperienceTrustedUUIDs(experiencesConfig.GetString("TrustedOwners", string.Empty), m_scriptExperienceTrustedOwners);
+                    LoadExperienceTrustedUUIDs(experiencesConfig.GetString("TrustedObjects", string.Empty), m_scriptExperienceTrustedObjects);
+                }
+
                 IConfig smtpConfig = seConfigSource.Configs["SMTP"];
                 if (smtpConfig != null)
                 {
@@ -534,6 +549,67 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 }
             }
             m_sleepMsOnEmail = EMAIL_PAUSE_TIME * 1000;
+        }
+
+        private static int DefaultExperienceAutoGrantPermissions()
+        {
+            return ScriptBaseClass.PERMISSION_TAKE_CONTROLS
+                | ScriptBaseClass.PERMISSION_TRIGGER_ANIMATION
+                | ScriptBaseClass.PERMISSION_CONTROL_CAMERA
+                | ScriptBaseClass.PERMISSION_TRACK_CAMERA
+                | ScriptBaseClass.PERMISSION_TELEPORT
+                | ScriptBaseClass.PERMISSION_OVERRIDE_ANIMATIONS;
+        }
+
+        private static void LoadExperienceTrustedUUIDs(string uuids, HashSet<UUID> target)
+        {
+            target.Clear();
+            if (string.IsNullOrEmpty(uuids))
+                return;
+
+            foreach (string entry in uuids.Split(new[] { ',', ';', '|', ' ' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (UUID.TryParse(entry.Trim(), out UUID id) && id.IsNotZero())
+                    target.Add(id);
+            }
+        }
+
+        private bool IsScriptExperienceTrusted()
+        {
+            if (!m_scriptExperiencesEnabled || m_scriptExperienceAutoGrantPermissions == 0)
+                return false;
+
+            if (m_scriptExperienceTrustedObjects.Contains(m_host.ParentGroup.UUID)
+                || m_scriptExperienceTrustedObjects.Contains(m_host.UUID))
+                return true;
+
+            if (m_scriptExperienceTrustedOwners.Contains(m_host.OwnerID))
+                return true;
+
+            return m_scriptExperiencesAllowEstateManagers
+                && World.Permissions != null
+                && World.Permissions.IsEstateManager(m_host.OwnerID);
+        }
+
+        private int GetExperienceAutoGrantPermissions(int requestedPermissions)
+        {
+            if (!IsScriptExperienceTrusted())
+                return 0;
+
+            return requestedPermissions & m_scriptExperienceAutoGrantPermissions;
+        }
+
+        private void GrantScriptPermissions(UUID agentID, int permissions)
+        {
+            m_host.TaskInventory.LockItemsForWrite(true);
+            m_host.TaskInventory[m_item.ItemID].PermsGranter = agentID;
+            m_host.TaskInventory[m_item.ItemID].PermsMask = permissions;
+            m_host.TaskInventory.LockItemsForWrite(false);
+
+            m_ScriptEngine.PostScriptEvent(m_item.ItemID, new EventParams(
+                    "run_time_permissions", new Object[] {
+                    new LSL_Integer(permissions) },
+                    Array.Empty<DetectParams>()));
         }
 
         protected SceneObjectPart MonitoringObject()
@@ -4524,22 +4600,16 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 }
             }
 
-            if ((perm & (~implicitPerms)) == 0) // Requested only implicit perms
+            ScenePresence presence = World.GetScenePresence(agentID);
+            int automaticPerms = implicitPerms;
+            if (presence != null)
+                automaticPerms |= GetExperienceAutoGrantPermissions(perm);
+
+            if ((perm & (~automaticPerms)) == 0) // Requested only automatic perms
             {
-                m_host.TaskInventory.LockItemsForWrite(true);
-                m_host.TaskInventory[m_item.ItemID].PermsGranter = agentID;
-                m_host.TaskInventory[m_item.ItemID].PermsMask = perm;
-                m_host.TaskInventory.LockItemsForWrite(false);
-
-                m_ScriptEngine.PostScriptEvent(m_item.ItemID, new EventParams(
-                        "run_time_permissions", new Object[] {
-                        new LSL_Integer(perm) },
-                        Array.Empty<DetectParams>()));
-
+                GrantScriptPermissions(agentID, perm);
                 return;
             }
-
-            ScenePresence presence = World.GetScenePresence(agentID);
 
             if (presence != null)
             {
@@ -4550,16 +4620,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 {
                     if (npcModule.CheckPermissions(agentID, m_host.OwnerID))
                     {
-                        lock (m_host.TaskInventory)
-                        {
-                            m_host.TaskInventory[m_item.ItemID].PermsGranter = agentID;
-                            m_host.TaskInventory[m_item.ItemID].PermsMask = perm;
-                        }
-
-                        m_ScriptEngine.PostScriptEvent(
-                            m_item.ItemID,
-                            new EventParams(
-                                "run_time_permissions", new Object[] { new LSL_Integer(perm) }, Array.Empty<DetectParams>()));
+                        GrantScriptPermissions(agentID, perm);
                     }
 
                     // it is an NPC, exit even if the permissions werent granted above, they are not going to answer

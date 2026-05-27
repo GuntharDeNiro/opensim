@@ -1179,6 +1179,25 @@
     ;; Default is ./bin/ScriptEngines
     ; ScriptEnginesPath = "ScriptEngines"
 
+[ScriptExperiences]
+    ;; OpenSim Experience-Lite auto grants for trusted estate scripts.
+    ;; This is disabled by default. Enable only for trusted estate environments.
+    ; Enabled = false
+
+    ;; If true, scripts owned by estate managers are trusted for auto grants.
+    ; AllowEstateManagers = false
+
+    ;; Comma, semicolon, pipe or space separated UUIDs of trusted script owners.
+    ; TrustedOwners =
+
+    ;; Comma, semicolon, pipe or space separated UUIDs of trusted root objects or prims.
+    ; TrustedObjects =
+
+    ;; Runtime permission bitmask trusted experiences may auto grant.
+    ;; Default 39956 grants controls, animations, camera, teleport and animation override.
+    ;; It intentionally excludes PERMISSION_DEBIT and ownership changes.
+    ; AutoGrantPermissions = 39956
+
 
 [OSSL]
     ;# {Include-osslDefaultEnable} {} {Include file for enabling and permissions for OSSL functions} {}
