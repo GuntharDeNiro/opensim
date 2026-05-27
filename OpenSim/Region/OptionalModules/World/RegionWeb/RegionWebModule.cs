@@ -524,7 +524,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             if (configuredFeatures.Count > 0)
             {
                 content.Features.Clear();
-                content.Features.AddRange(configuredFeatures);
+                content.Features.AddRange(NormalizeFeatures(configuredFeatures));
             }
 
             return content;
@@ -736,16 +736,12 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 + "Description = \"A public estate portal for regions, maps, news and technical improvements. This build keeps OpenSim's flexibility while adding a cleaner visitor experience, better cartography, richer presentation pages and smoother simulator startup behavior.\"\n"
                 + "HeroImage = \"\"\n"
                 + "; Feature entries use title|description.\n"
-                + "Feature1 = \"High quality world map|Terrain textures, water depth shading, land detail, aerial tone mapping and sharper object overlays make map tiles more readable and less cartoon-like.\"\n"
-                + "Feature2 = \"Mesh and sculpt aware map rendering|The map renderer can project mesh and sculpt geometry instead of reducing everything to huge flat prim boxes.\"\n"
-                + "Feature3 = \"Cleaner water and alpha handling|Transparent or animated water overlays are filtered so wave planes do not become grey rectangles on the map, while solid large builds still render.\"\n"
-                + "Feature4 = \"Background map generation|Initial map tiles can render after region registration so startup is not blocked by high quality image work.\"\n"
-                + "Feature5 = \"Cooperative heavy rendering|Expensive map rendering yields during long object passes to avoid starving simulator watchdog and packet threads.\"\n"
-                + "Feature6 = \"RegionWeb estate portal|Every region can have a public web page with photos, blog posts, map tile, parcels and live region statistics.\"\n"
-                + "Feature7 = \"Weather module|Regions can run rain, storm, snow or sunny presets, with wind, clouds, lightning, thunder and automatic forecast cycling.\"\n"
-                + "Feature8 = \"Text build tools|Estate builders can generate or manage terrain and building assistance from in-world text commands.\"\n"
-                + "Feature9 = \"Group auto invite|Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects.\"\n"
-                + "Feature10 = \"Viewer polish|Simulator version branding and appearance fallback options reduce noisy viewer warnings and clouded-avatar edge cases.\"\n",
+                + "Feature1 = \"High quality world map|Terrain textures, water depth shading, land detail, aerial tone mapping, mesh/sculpt geometry projection, cleaner water alpha handling, background generation and cooperative rendering make map tiles sharper, more geographic and safer for simulator responsiveness.\"\n"
+                + "Feature2 = \"RegionWeb estate portal|Every region can have a public web page with photos, blog posts, map tile, parcels and live region statistics.\"\n"
+                + "Feature3 = \"Weather module|Regions can run rain, storm, snow or sunny presets, with wind, clouds, lightning, thunder and automatic forecast cycling.\"\n"
+                + "Feature4 = \"Text build tools|Estate builders can generate or manage terrain and building assistance from in-world text commands.\"\n"
+                + "Feature5 = \"Group auto invite|Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects.\"\n"
+                + "Feature6 = \"Viewer polish|Simulator version branding and appearance fallback options reduce noisy viewer warnings and clouded-avatar edge cases.\"\n",
                 new UTF8Encoding(false));
         }
 
@@ -896,22 +892,55 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             return items;
         }
 
+        private static List<FeatureItem> NormalizeFeatures(List<FeatureItem> features)
+        {
+            List<FeatureItem> normalized = new List<FeatureItem>();
+            bool mapFeatureAdded = false;
+
+            foreach (FeatureItem feature in features)
+            {
+                if (IsWorldMapFeature(feature.Title))
+                {
+                    if (!mapFeatureAdded)
+                    {
+                        normalized.Add(new FeatureItem
+                        {
+                            Title = "High quality world map",
+                            Body = "Terrain textures, water depth shading, land detail, aerial tone mapping, mesh/sculpt geometry projection, cleaner water alpha handling, background generation and cooperative rendering make map tiles sharper, more geographic and safer for simulator responsiveness."
+                        });
+                        mapFeatureAdded = true;
+                    }
+
+                    continue;
+                }
+
+                normalized.Add(feature);
+            }
+
+            return normalized;
+        }
+
+        private static bool IsWorldMapFeature(string title)
+        {
+            if (string.IsNullOrEmpty(title))
+                return false;
+
+            string normalized = title.Trim().ToLowerInvariant();
+            return normalized == "high quality world map"
+                || normalized == "mesh and sculpt aware map rendering"
+                || normalized == "mesh and sculpt aware rendering"
+                || normalized == "cleaner water and alpha handling"
+                || normalized == "cleaner water overlays"
+                || normalized == "background map generation"
+                || normalized == "cooperative heavy rendering";
+        }
+
         private static void AddDefaultFeatures(List<FeatureItem> features)
         {
             features.Add(new FeatureItem
             {
                 Title = "High quality world map",
-                Body = "Terrain textures, water depth shading, land detail, aerial tone mapping and sharper object overlays make map tiles more readable."
-            });
-            features.Add(new FeatureItem
-            {
-                Title = "Mesh and sculpt aware rendering",
-                Body = "Map tiles can draw mesh and sculpt geometry instead of treating complex content as oversized flat prims."
-            });
-            features.Add(new FeatureItem
-            {
-                Title = "Cleaner water overlays",
-                Body = "Transparent wave planes are filtered from the map while solid docks, boats and large builds still render."
+                Body = "Terrain textures, water depth shading, land detail, aerial tone mapping, mesh/sculpt geometry projection, cleaner water alpha handling, background generation and cooperative rendering make map tiles sharper, more geographic and safer for simulator responsiveness."
             });
             features.Add(new FeatureItem
             {
