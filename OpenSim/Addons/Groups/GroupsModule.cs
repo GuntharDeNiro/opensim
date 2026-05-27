@@ -1304,6 +1304,11 @@ namespace OpenSim.Groups
 
         public void InviteGroup(IClientAPI remoteClient, UUID agentID, UUID groupID, UUID invitedAgentID, UUID roleID)
         {
+            InviteGroup(remoteClient, agentID, groupID, invitedAgentID, roleID, null);
+        }
+
+        public void InviteGroup(IClientAPI remoteClient, UUID agentID, UUID groupID, UUID invitedAgentID, UUID roleID, string message)
+        {
             if (m_debugEnabled) m_log.DebugFormat("[Groups]: {0} called", System.Reflection.MethodBase.GetCurrentMethod().Name);
 
             string agentName = m_UserManagement.GetUserName(agentID);
@@ -1335,7 +1340,11 @@ namespace OpenSim.Groups
                     //msg.timestamp = (uint)Util.UnixTimeSinceEpoch();
                     msg.timestamp = 0;
                     msg.fromAgentName = agentName;
-                    msg.message = string.Format("{0} has invited you to join a group called {1}. There is no cost to join this group.", agentName, group.GroupName);
+                    msg.message = FormatInviteMessage(
+                        message,
+                        agentName,
+                        group.GroupName,
+                        string.Format("{0} has invited you to join a group called {1}. There is no cost to join this group.", agentName, group.GroupName));
                     msg.dialog = (byte)OpenMetaverse.InstantMessageDialog.GroupInvitation;
                     msg.fromGroup = true;
                     msg.offline = (byte)0;
@@ -1347,6 +1356,16 @@ namespace OpenSim.Groups
                     OutgoingInstantMessage(msg, invitedAgentID);
                 }
             }
+        }
+
+        private static string FormatInviteMessage(string message, string inviterName, string groupName, string defaultMessage)
+        {
+            if (string.IsNullOrEmpty(message))
+                return defaultMessage;
+
+            return message
+                .Replace("{InviterName}", inviterName)
+                .Replace("{GroupName}", groupName);
         }
 
         public List<DirGroupsReplyData> FindGroups(IClientAPI remoteClient, string query)

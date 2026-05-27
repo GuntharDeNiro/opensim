@@ -55,6 +55,7 @@ namespace OpenSim.Region.OptionalModules.Avatar.GroupAutoInvite
         private UUID m_roleID = UUID.Zero;
         private int m_inviteDelaySeconds = 10;
         private bool m_inviteOncePerSession = true;
+        private string m_inviteMessage = "Ciao {AvatarName}, benvenuto in {RegionName}! Entra nel gruppo {GroupName} per ricevere news, eventi e aggiornamenti.";
 
         public string Name { get { return "Group Auto Invite Module"; } }
 
@@ -73,6 +74,7 @@ namespace OpenSim.Region.OptionalModules.Avatar.GroupAutoInvite
             UUID.TryParse(config.GetString("RoleID", string.Empty), out m_roleID);
             m_inviteDelaySeconds = Math.Max(0, config.GetInt("InviteDelaySeconds", 10));
             m_inviteOncePerSession = config.GetBoolean("InviteOncePerSession", true);
+            m_inviteMessage = config.GetString("InviteMessage", m_inviteMessage).Trim();
         }
 
         public void AddRegion(Scene scene)
@@ -178,11 +180,12 @@ namespace OpenSim.Region.OptionalModules.Avatar.GroupAutoInvite
                 if (m_inviteOncePerSession && !m_invitedThisSession.TryAdd(agentID, 0))
                     return;
 
-                groups.InviteGroup(null, inviterID, group.GroupID, agentID, m_roleID);
+                string inviteMessage = FormatInviteMessage(sp, group);
+                groups.InviteGroup(null, inviterID, group.GroupID, agentID, m_roleID, inviteMessage);
 
                 m_log.InfoFormat(
-                    "[GROUP AUTO INVITE]: Invited {0} to group {1} ({2}) in {3}.",
-                    sp.Name, group.GroupName, group.GroupID, scene.RegionInfo.RegionName);
+                    "[GROUP AUTO INVITE]: Invited {0} to group {1} ({2}) in {3} with message '{4}'.",
+                    sp.Name, group.GroupName, group.GroupID, scene.RegionInfo.RegionName, inviteMessage);
             }
             catch (Exception e)
             {
@@ -201,6 +204,18 @@ namespace OpenSim.Region.OptionalModules.Avatar.GroupAutoInvite
                 return groups.GetGroupRecord(m_groupName);
 
             return null;
+        }
+
+        private string FormatInviteMessage(ScenePresence sp, GroupRecord group)
+        {
+            if (string.IsNullOrEmpty(m_inviteMessage))
+                return null;
+
+            string regionName = m_scene == null ? string.Empty : m_scene.RegionInfo.RegionName;
+            return m_inviteMessage
+                .Replace("{AvatarName}", sp.Name)
+                .Replace("{GroupName}", group.GroupName)
+                .Replace("{RegionName}", regionName);
         }
     }
 }
