@@ -428,6 +428,31 @@
     ;; got a large number of objects, so you can turn it off here if you'd like.
     ; DrawPrimOnMapTile = true
 
+    ;# {PrettyPrimVolumeOnMapTile} {DrawPrimOnMapTile} {Use softer cartographic object overlays?} {true false} true
+    ;; Avoid legacy inverted-color solid blocks for large prims on map tiles.
+    ; PrettyPrimVolumeOnMapTile = true
+
+    ;# {MapObjectVolumeOpacity} {PrettyPrimVolumeOnMapTile} {Object overlay opacity} {} 175
+    ; MapObjectVolumeOpacity = 175
+
+    ;# {MapObjectVolumeLargeOpacity} {PrettyPrimVolumeOnMapTile} {Large object overlay opacity} {} 120
+    ; MapObjectVolumeLargeOpacity = 120
+
+    ;# {MapObjectVolumeLargeArea} {PrettyPrimVolumeOnMapTile} {Footprint area where large-object opacity starts} {} 1800
+    ; MapObjectVolumeLargeArea = 1800
+
+    ;# {MapObjectVolumeOutlines} {PrettyPrimVolumeOnMapTile} {Draw subtle object outlines?} {true false} true
+    ; MapObjectVolumeOutlines = true
+
+    ;# {MapObjectVolumeOutlineOpacity} {PrettyPrimVolumeOnMapTile} {Object outline opacity} {} 85
+    ; MapObjectVolumeOutlineOpacity = 85
+
+    ;# {MapObjectVolumeMinimumBrightness} {PrettyPrimVolumeOnMapTile} {Minimum object overlay brightness} {} 72
+    ; MapObjectVolumeMinimumBrightness = 72
+
+    ;# {MapObjectVolumeMaximumBrightness} {PrettyPrimVolumeOnMapTile} {Maximum object overlay brightness} {} 235
+    ; MapObjectVolumeMaximumBrightness = 235
+
     ;# {TexturePrims} {} {Texture prims on map tiles?} {true false} true
     ;; Texture the faces of the prims that are rendered on the map tiles.
     ; TexturePrims = true

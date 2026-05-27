@@ -28,6 +28,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Reflection;
 using log4net;
 using Mono.Addins;
@@ -57,6 +58,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         public DrawRoutine dr;
 //        public Rectangle rect;
         public SolidBrush brush;
+        public Pen outlinePen;
         public face[] trns;
     }
 
@@ -70,6 +72,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         private IConfigSource m_config;
         private IMapTileTerrainRenderer terrainRenderer;
         private bool m_Enabled = false;
+        private static readonly string[] MapConfigSections = new string[] { "Map", "Startup" };
 
         #region IMapImageGenerator Members
 
@@ -80,14 +83,12 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             bool generateMaptiles = true;
             Bitmap mapbmp;
 
-            string[] configSections = new string[] { "Map", "Startup" };
-
             drawPrimVolume
-                = Util.GetConfigVarFromSections<bool>(m_config, "DrawPrimOnMapTile", configSections, drawPrimVolume);
+                = Util.GetConfigVarFromSections<bool>(m_config, "DrawPrimOnMapTile", MapConfigSections, drawPrimVolume);
             textureTerrain
-                = Util.GetConfigVarFromSections<bool>(m_config, "TextureOnMapTile", configSections, textureTerrain);
+                = Util.GetConfigVarFromSections<bool>(m_config, "TextureOnMapTile", MapConfigSections, textureTerrain);
             generateMaptiles
-                = Util.GetConfigVarFromSections<bool>(m_config, "GenerateMaptiles", configSections, generateMaptiles);
+                = Util.GetConfigVarFromSections<bool>(m_config, "GenerateMaptiles", MapConfigSections, generateMaptiles);
 
             if (generateMaptiles)
             {
@@ -307,6 +308,22 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             List<float> z_sortheights = new List<float>();
             List<uint> z_localIDs = new List<uint>();
             Dictionary<uint, DrawStruct> z_sort = new Dictionary<uint, DrawStruct>();
+            bool prettyObjectVolume = Util.GetConfigVarFromSections<bool>(
+                m_config, "PrettyPrimVolumeOnMapTile", MapConfigSections, true);
+            bool drawObjectOutlines = Util.GetConfigVarFromSections<bool>(
+                m_config, "MapObjectVolumeOutlines", MapConfigSections, true);
+            int objectOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeOpacity", MapConfigSections, 175));
+            int largeObjectOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeLargeOpacity", MapConfigSections, 120));
+            int outlineOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeOutlineOpacity", MapConfigSections, 85));
+            int minimumBrightness = ClampByte(Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeMinimumBrightness", MapConfigSections, 72));
+            int maximumBrightness = ClampByte(Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeMaximumBrightness", MapConfigSections, 235));
+            int largeObjectArea = Math.Max(1, Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeLargeArea", MapConfigSections, 1800));
 
             try
             {
@@ -318,7 +335,6 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                         if (obj is SceneObjectGroup)
                         {
                             SceneObjectGroup mapdot = (SceneObjectGroup)obj;
-                            Color mapdotspot = Color.Gray; // Default color when prim color is white
                             // Loop over prim in group
                             foreach (SceneObjectPart part in mapdot.Parts)
                             {
@@ -328,6 +344,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                 // Draw if the object is at least 1 meter wide in any direction
                                 if (part.Scale.X > 1f || part.Scale.Y > 1f || part.Scale.Z > 1f)
                                 {
+                                    Color mapdotspot = Color.Gray; // Default color when prim color is white
                                     // Try to get the RGBA of the default texture entry..
                                     //
                                     try
@@ -345,31 +362,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                         // if you want tree blocks on the map comment the above line and uncomment the below line
                                         //mapdotspot = Color.PaleGreen;
 
-                                        Primitive.TextureEntry textureEntry = part.Shape.Textures;
-
-                                        if (textureEntry == null || textureEntry.DefaultTexture == null)
-                                            continue;
-
-                                        Color4 texcolor = textureEntry.DefaultTexture.RGBA;
-
-                                        // Not sure why some of these are null, oh well.
-
-                                        int colorr = 255 - (int)(texcolor.R * 255f);
-                                        int colorg = 255 - (int)(texcolor.G * 255f);
-                                        int colorb = 255 - (int)(texcolor.B * 255f);
-
-                                        if (!(colorr == 255 && colorg == 255 && colorb == 255))
-                                        {
-                                            //Try to set the map spot color
-                                            try
-                                            {
-                                                // If the color gets goofy somehow, skip it *shakes fist at Color4
-                                                mapdotspot = Color.FromArgb(colorr, colorg, colorb);
-                                            }
-                                            catch (ArgumentException)
-                                            {
-                                            }
-                                        }
+                                        mapdotspot = GetPartMapColor(part, mapdotspot, prettyObjectVolume,
+                                            minimumBrightness, maximumBrightness);
                                     }
                                     catch (IndexOutOfRangeException)
                                     {
@@ -425,6 +419,10 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                         int mapdrawstartY = (int)(pos.Y - scale.Y);
                                         int mapdrawendX = (int)(pos.X + scale.X);
                                         int mapdrawendY = (int)(pos.Y + scale.Y);
+                                        int objectArea = Math.Abs(mapdrawendX - mapdrawstartX) * Math.Abs(mapdrawendY - mapdrawstartY);
+                                        int fillOpacity = prettyObjectVolume && objectArea >= largeObjectArea
+                                            ? largeObjectOpacity
+                                            : objectOpacity;
 
                                         // If object is beyond the edge of the map, don't draw it to avoid errors
                                         if (mapdrawstartX < 0
@@ -547,7 +545,12 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                         //bool breakYN = false; // If we run into an error drawing, break out of the
                                         // loop so we don't lag to death on error handling
                                         DrawStruct ds = new DrawStruct();
-                                        ds.brush = new SolidBrush(mapdotspot);
+                                        ds.brush = new SolidBrush(prettyObjectVolume
+                                            ? Color.FromArgb(fillOpacity, mapdotspot)
+                                            : mapdotspot);
+                                        ds.outlinePen = null;
+                                        if (prettyObjectVolume && drawObjectOutlines)
+                                            ds.outlinePen = new Pen(Color.FromArgb(outlineOpacity, Darken(mapdotspot, 0.55f)), 1f);
                                         //ds.rect = new Rectangle(mapdrawstartX, (255 - mapdrawstartY), mapdrawendX - mapdrawstartX, mapdrawendY - mapdrawstartY);
 
                                         ds.trns = new face[FaceA.Length];
@@ -605,6 +608,13 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
                     using (Graphics g = Graphics.FromImage(mapbmp))
                     {
+                        if (prettyObjectVolume)
+                        {
+                            g.SmoothingMode = SmoothingMode.AntiAlias;
+                            g.PixelOffsetMode = PixelOffsetMode.Half;
+                            g.CompositingQuality = CompositingQuality.HighQuality;
+                        }
+
                         for (int s = 0; s < sortedZHeights.Length; s++)
                         {
                             if (z_sort.ContainsKey(sortedlocalIds[s]))
@@ -613,6 +623,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                 for (int r = 0; r < rectDrawStruct.trns.Length; r++)
                                 {
                                     g.FillPolygon(rectDrawStruct.brush,rectDrawStruct.trns[r].pts);
+                                    if (rectDrawStruct.outlinePen != null)
+                                        g.DrawPolygon(rectDrawStruct.outlinePen, rectDrawStruct.trns[r].pts);
                                 }
                                 //g.FillRectangle(rectDrawStruct.brush , rectDrawStruct.rect);
                             }
@@ -624,12 +636,95 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             finally
             {
                 foreach (DrawStruct ds in z_sort.Values)
+                {
                     ds.brush.Dispose();
+                    if (ds.outlinePen != null)
+                        ds.outlinePen.Dispose();
+                }
             }
 
             m_log.Debug("[MAPTILE]: Generating Maptile Step 2: Done in " + (Environment.TickCount - tc) + " ms");
 
             return mapbmp;
+        }
+
+        private Color GetPartMapColor(SceneObjectPart part, Color fallback, bool prettyObjectVolume,
+            int minimumBrightness, int maximumBrightness)
+        {
+            Primitive.TextureEntry textureEntry = part.Shape.Textures;
+
+            if (textureEntry == null || textureEntry.DefaultTexture == null)
+                return fallback;
+
+            Color4 texcolor = textureEntry.DefaultTexture.RGBA;
+
+            int colorr = ClampByte((int)(texcolor.R * 255f));
+            int colorg = ClampByte((int)(texcolor.G * 255f));
+            int colorb = ClampByte((int)(texcolor.B * 255f));
+
+            if (!prettyObjectVolume)
+            {
+                colorr = 255 - colorr;
+                colorg = 255 - colorg;
+                colorb = 255 - colorb;
+
+                if (colorr == 255 && colorg == 255 && colorb == 255)
+                    return fallback;
+
+                return Color.FromArgb(colorr, colorg, colorb);
+            }
+
+            Color adjusted = Color.FromArgb(colorr, colorg, colorb);
+            adjusted = ClampBrightness(adjusted, minimumBrightness, maximumBrightness);
+
+            if (adjusted.R > 246 && adjusted.G > 246 && adjusted.B > 246)
+                adjusted = Color.FromArgb(224, 224, 216);
+
+            return adjusted;
+        }
+
+        private static Color ClampBrightness(Color color, int minimumBrightness, int maximumBrightness)
+        {
+            int max = Math.Max(color.R, Math.Max(color.G, color.B));
+            int min = Math.Min(color.R, Math.Min(color.G, color.B));
+            int brightness = (max + min) / 2;
+
+            if (brightness < minimumBrightness)
+                return Blend(color, Color.White, (minimumBrightness - brightness) / 255f);
+
+            if (brightness > maximumBrightness)
+                return Blend(color, Color.Black, (brightness - maximumBrightness) / 255f);
+
+            return color;
+        }
+
+        private static Color Darken(Color color, float amount)
+        {
+            amount = Math.Max(0f, Math.Min(1f, amount));
+            return Color.FromArgb(
+                ClampByte((int)(color.R * amount)),
+                ClampByte((int)(color.G * amount)),
+                ClampByte((int)(color.B * amount)));
+        }
+
+        private static Color Blend(Color from, Color to, float amount)
+        {
+            amount = Math.Max(0f, Math.Min(1f, amount));
+            return Color.FromArgb(
+                ClampByte((int)(from.R + ((to.R - from.R) * amount))),
+                ClampByte((int)(from.G + ((to.G - from.G) * amount))),
+                ClampByte((int)(from.B + ((to.B - from.B) * amount))));
+        }
+
+        private static int ClampByte(int value)
+        {
+            if (value < 0)
+                return 0;
+
+            if (value > 255)
+                return 255;
+
+            return value;
         }
 
         private Point project(ITerrainChannel hm, Vector3 point3d, Vector3 originpos)
