@@ -445,14 +445,14 @@
     ;# {MapObjectVolumeUseTextureAlpha} {PrettyPrimVolumeOnMapTile} {Use prim texture alpha for map overlays?} {true false} true
     ; MapObjectVolumeUseTextureAlpha = true
 
-    ;# {MapObjectVolumeTextureBlend} {MapObjectVolumeSampleTextureAssets} {How strongly sampled texture colors influence object map colors} {} 0.86
-    ; MapObjectVolumeTextureBlend = 0.86
+    ;# {MapObjectVolumeTextureBlend} {MapObjectVolumeSampleTextureAssets} {How strongly sampled texture colors influence object map colors} {} 0.90
+    ; MapObjectVolumeTextureBlend = 0.90
 
     ;# {MapObjectVolumeColorSaturation} {PrettyPrimVolumeOnMapTile} {Object map color saturation multiplier} {} 1.10
     ; MapObjectVolumeColorSaturation = 1.10
 
-    ;# {MapObjectVolumeColorContrast} {PrettyPrimVolumeOnMapTile} {Object map color contrast multiplier} {} 1.06
-    ; MapObjectVolumeColorContrast = 1.06
+    ;# {MapObjectVolumeColorContrast} {PrettyPrimVolumeOnMapTile} {Object map color contrast multiplier} {} 1.08
+    ; MapObjectVolumeColorContrast = 1.08
 
     ;# {MapObjectVolumeFaceShading} {PrettyPrimVolumeOnMapTile} {Shade individual object faces for sharper geographic relief?} {true false} true
     ; MapObjectVolumeFaceShading = true
@@ -521,8 +521,8 @@
     ;# {MapTileAerialBrightness} {MapTileAerialStyle} {Aerial brightness adjustment} {} 1
     ; MapTileAerialBrightness = 1
 
-    ;# {MapTileAerialSharpen} {MapTileAerialStyle} {Final aerial detail sharpening amount} {} 0.18
-    ; MapTileAerialSharpen = 0.18
+    ;# {MapTileAerialSharpen} {MapTileAerialStyle} {Final aerial detail sharpening amount} {} 0.24
+    ; MapTileAerialSharpen = 0.24
 
     ;# {MapWaterDepthShading} {TextureOnMapTile} {Shade water by terrain depth?} {true false} true
     ; MapWaterDepthShading = true
@@ -538,6 +538,12 @@
 
     ;# {MapWaterNoiseStrength} {MapWaterDepthShading} {Subtle water variation strength} {} 0.025
     ; MapWaterNoiseStrength = 0.025
+
+    ;# {MapLandDetailStrength} {TextureOnMapTile} {Subtle heightmap detail added to land colors} {} 0.10
+    ; MapLandDetailStrength = 0.10
+
+    ;# {MapLandShoreBlendMeters} {TextureOnMapTile} {Meters above water where land blends into a shoreline tone} {} 4.5
+    ; MapLandShoreBlendMeters = 4.5
 
     ;# {MapObjectVolumeSampleTextureAssets} {PrettyPrimVolumeOnMapTile} {Decode valid texture assets for object map colors?} {true false} true
     ;; Improves map quality by sampling texture colors. Invalid texture assets are skipped before OpenJPEG is called.

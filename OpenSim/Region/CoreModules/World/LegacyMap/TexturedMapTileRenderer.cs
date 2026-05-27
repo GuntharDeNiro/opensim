@@ -149,6 +149,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         private Color m_color_water_deep;
         private float m_waterDepthRange;
         private float m_waterNoiseStrength;
+        private float m_landDetailStrength;
+        private float m_landShoreBlend;
 
         // mapping from texture UUIDs to averaged color. This will contain 5-9 values, in general; new values are only
         // added when the terrain textures are changed in the estate dialog and a new map is generated (and will stay in
@@ -181,6 +183,10 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 m_config, "MapWaterDepthRange", configSections, 36f));
             m_waterNoiseStrength = Math.Max(0f, Math.Min(0.2f, Util.GetConfigVarFromSections<float>(
                 m_config, "MapWaterNoiseStrength", configSections, 0.025f)));
+            m_landDetailStrength = Math.Max(0f, Math.Min(0.35f, Util.GetConfigVarFromSections<float>(
+                m_config, "MapLandDetailStrength", configSections, 0.10f)));
+            m_landShoreBlend = Math.Max(0f, Math.Min(12f, Util.GetConfigVarFromSections<float>(
+                m_config, "MapLandShoreBlendMeters", configSections, 4.5f)));
 
             m_mapping = new Dictionary<UUID,Color>();
             m_mapping.Add(defaultTerrainTexture1, m_color_1);
@@ -473,7 +479,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                 hsv.v = (hsv.v + hfdiff > 0f) ? hsv.v + hfdiff : 0f;
                             }
                         }
-                        mapbmp.SetPixel(x, yr, hsv.toColor());
+                        Color landColor = ApplyLandDetail(hsv.toColor(), hm, x, y, heightvalue, waterHeight);
+                        mapbmp.SetPixel(x, yr, landColor);
                     }
                     else
                     {
@@ -503,6 +510,35 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
             Color depthColor = Blend(m_color_water_shallow, m_color_water_deep, ratio);
             return Blend(depthColor, m_color_water, 0.22f);
+        }
+
+        private Color ApplyLandDetail(Color color, ITerrainChannel hm, int x, int y, float height, float waterHeight)
+        {
+            if (m_landDetailStrength <= 0f)
+                return color;
+
+            float west = getHeight(hm, Math.Max(0, x - 1), y);
+            float east = getHeight(hm, Math.Min(hm.Width - 1, x + 1), y);
+            float south = getHeight(hm, x, Math.Max(0, y - 1));
+            float north = getHeight(hm, x, Math.Min(hm.Height - 1, y + 1));
+
+            float slopeLight = ((west - east) * 0.45f) + ((south - north) * 0.35f);
+            float shade = Math.Max(-0.18f, Math.Min(0.18f, slopeLight * m_landDetailStrength));
+            Color detailed = shade >= 0f
+                ? Blend(color, Color.White, shade)
+                : Blend(color, Color.Black, -shade);
+
+            if (m_landShoreBlend > 0f)
+            {
+                float shore = Math.Max(0f, Math.Min(1f, (height - waterHeight) / m_landShoreBlend));
+                if (shore < 1f)
+                {
+                    Color shoreTone = Color.FromArgb(171, 164, 142);
+                    detailed = Blend(shoreTone, detailed, S(shore));
+                }
+            }
+
+            return detailed;
         }
 
         private static Color Blend(Color from, Color to, float amount)

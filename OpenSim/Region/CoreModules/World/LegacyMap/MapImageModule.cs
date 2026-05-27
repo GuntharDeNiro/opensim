@@ -162,7 +162,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                             Util.GetConfigVarFromSections<int>(m_config,
                                 "MapTileAerialBrightness", MapConfigSections, 1),
                             Util.GetConfigVarFromSections<float>(m_config,
-                                "MapTileAerialSharpen", MapConfigSections, 0.18f));
+                                "MapTileAerialSharpen", MapConfigSections, 0.24f));
                     }
                 }
                 else
@@ -349,6 +349,10 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         {
             int tc = 0;
             ITerrainChannel hm = whichScene.Heightmap;
+            float waterHeight = whichScene.RegionInfo != null &&
+                whichScene.RegionInfo.RegionSettings != null
+                ? (float)whichScene.RegionInfo.RegionSettings.WaterHeight
+                : 20f;
             tc = Environment.TickCount;
             m_log.Debug("[MAPTILE]: Generating Maptile Step 2: Object Volume Profile");
             EntityBase[] objs = whichScene.GetEntities();
@@ -396,11 +400,11 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             bool sampleTextureAssets = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeSampleTextureAssets", MapConfigSections, true);
             float textureBlend = Math.Max(0f, Math.Min(1f, Util.GetConfigVarFromSections<float>(
-                m_config, "MapObjectVolumeTextureBlend", MapConfigSections, 0.86f)));
+                m_config, "MapObjectVolumeTextureBlend", MapConfigSections, 0.90f)));
             float objectSaturation = Math.Max(0f, Math.Min(2f, Util.GetConfigVarFromSections<float>(
                 m_config, "MapObjectVolumeColorSaturation", MapConfigSections, 1.10f)));
             float objectContrast = Math.Max(0f, Math.Min(2f, Util.GetConfigVarFromSections<float>(
-                m_config, "MapObjectVolumeColorContrast", MapConfigSections, 1.06f)));
+                m_config, "MapObjectVolumeColorContrast", MapConfigSections, 1.08f)));
             bool faceShading = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeFaceShading", MapConfigSections, true);
             bool renderMeshGeometry = Util.GetConfigVarFromSections<bool>(
@@ -513,13 +517,18 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                         int fillOpacity = prettyObjectVolume && objectArea >= largeObjectArea
                                             ? largeObjectOpacity
                                             : objectOpacity;
-                                        bool isWaterLikeObject = prettyObjectVolume &&
-                                            IsWaterLikeMapObject(part, mapdotspot, objectArea, part.Scale, largeObjectArea);
-
+                                        float textureAlpha = 1f;
                                         if (prettyObjectVolume && useTextureAlpha)
+                                        {
+                                            textureAlpha = GetPartTextureAlpha(part, sampleTextureAssets);
                                             fillOpacity = ApplyTextureAlpha(fillOpacity,
-                                                GetPartTextureAlpha(part, sampleTextureAssets),
+                                                textureAlpha,
                                                 minimumOpacity);
+                                        }
+
+                                        bool isWaterLikeObject = prettyObjectVolume &&
+                                            IsWaterLikeMapObject(part, mapdotspot, objectArea, part.Scale,
+                                                largeObjectArea, pos, waterHeight, textureAlpha);
 
                                         if (isWaterLikeObject)
                                             fillOpacity = Math.Min(fillOpacity, waterObjectOpacity);
@@ -1439,12 +1448,10 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             return Math.Max(minimumOpacity, ClampByte((int)(opacity * textureAlpha)));
         }
 
-        private bool IsWaterLikeMapObject(SceneObjectPart part, Color color, int objectArea, Vector3 scale, int largeObjectArea)
+        private bool IsWaterLikeMapObject(SceneObjectPart part, Color color, int objectArea,
+            Vector3 scale, int largeObjectArea, Vector3 pos, float waterHeight, float textureAlpha)
         {
             if (objectArea < largeObjectArea)
-                return false;
-
-            if (part.TextureAnimation == null || part.TextureAnimation.Length == 0)
                 return false;
 
             float largestSide = Math.Max(scale.X, Math.Max(scale.Y, scale.Z));
@@ -1456,10 +1463,21 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             int max = Math.Max(color.R, Math.Max(color.G, color.B));
             int min = Math.Min(color.R, Math.Min(color.G, color.B));
             int brightness = (max + min) / 2;
-            bool paleOverlay = brightness > 145 && (max - min) < 70;
+            bool animated = part.TextureAnimation != null && part.TextureAnimation.Length > 0;
+            bool translucent = textureAlpha < 0.82f;
+            bool neutralOverlay = brightness > 48 && brightness < 220 && (max - min) < 54;
             bool blueOrCyan = color.B >= color.R - 8 && color.G >= color.R - 35;
+            bool nearWater = Math.Abs(pos.Z - waterHeight) < 10f || pos.Z < waterHeight + 4f;
+            bool namedWater = false;
 
-            return (paleOverlay && blueOrCyan) || largestSide >= 32f;
+            if (!String.IsNullOrEmpty(part.Name))
+            {
+                string name = part.Name.ToLowerInvariant();
+                namedWater = name.Contains("water") || name.Contains("wave") ||
+                    name.Contains("ocean") || name.Contains("sea");
+            }
+
+            return animated || namedWater || (nearWater && (translucent || blueOrCyan || neutralOverlay));
         }
 
         private static Color ClampBrightness(Color color, int minimumBrightness, int maximumBrightness)
