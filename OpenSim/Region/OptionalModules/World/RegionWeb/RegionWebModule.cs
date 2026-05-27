@@ -526,6 +526,16 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 content.Features.Clear();
                 content.Features.AddRange(NormalizeFeatures(configuredFeatures));
             }
+            EnsureFeature(content.Features, "Wave-following boats",
+                "Boats can now move with the sea surface, following wave motion for a more natural marina and sailing experience.");
+            EnsureFeature(content.Features, "Smooth region crossings",
+                "Avatar and vehicle crossings between neighbouring regions are smoothed to reduce the hard stop, rubber-banding and visual pop of stock OpenSim border transfers.");
+            EnsureFeature(content.Features, "Lag-resistant walk animations",
+                "Walking animations recover cleanly after lag spikes, so avatars do not remain stuck in broken walk states when the simulator catches up.");
+            EnsureFeature(content.Features, "AI-connected text build tools",
+                "Estate builders can use text commands connected to AI to plan, generate and refine terrain or building ideas directly from the simulator workflow.");
+            EnsureFeature(content.Features, "Automatic cloud avatar recovery",
+                "If an avatar becomes a cloud, the server automatically handles the recovery and restores the normal appearance within a few seconds.");
 
             return content;
         }
@@ -739,9 +749,13 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 + "Feature1 = \"High quality world map|Terrain textures, water depth shading, land detail, aerial tone mapping, mesh/sculpt geometry projection, cleaner water alpha handling, background generation and cooperative rendering make map tiles sharper, more geographic and safer for simulator responsiveness.\"\n"
                 + "Feature2 = \"RegionWeb estate portal|Every region can have a public web page with photos, blog posts, map tile, parcels and live region statistics.\"\n"
                 + "Feature3 = \"Weather module|Regions can run rain, storm, snow or sunny presets, with wind, clouds, lightning, thunder and automatic forecast cycling.\"\n"
-                + "Feature4 = \"Text build tools|Estate builders can generate or manage terrain and building assistance from in-world text commands.\"\n"
-                + "Feature5 = \"Group auto invite|Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects.\"\n"
-                + "Feature6 = \"Viewer polish|Simulator version branding and appearance fallback options reduce noisy viewer warnings and clouded-avatar edge cases.\"\n",
+                + "Feature4 = \"Wave-following boats|Boats can now move with the sea surface, following wave motion for a more natural marina and sailing experience.\"\n"
+                + "Feature5 = \"Smooth region crossings|Avatar and vehicle crossings between neighbouring regions are smoothed to reduce the hard stop, rubber-banding and visual pop of stock OpenSim border transfers.\"\n"
+                + "Feature6 = \"Lag-resistant walk animations|Walking animations recover cleanly after lag spikes, so avatars do not remain stuck in broken walk states when the simulator catches up.\"\n"
+                + "Feature7 = \"AI-connected text build tools|Estate builders can use text commands connected to AI to plan, generate and refine terrain or building ideas directly from the simulator workflow.\"\n"
+                + "Feature8 = \"Automatic cloud avatar recovery|If an avatar becomes a cloud, the server automatically handles the recovery and restores the normal appearance within a few seconds.\"\n"
+                + "Feature9 = \"Group auto invite|Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects.\"\n"
+                + "Feature10 = \"Viewer polish|Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.\"\n",
                 new UTF8Encoding(false));
         }
 
@@ -914,6 +928,16 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     continue;
                 }
 
+                if (feature.Title.Equals("Text build tools", StringComparison.OrdinalIgnoreCase))
+                {
+                    normalized.Add(new FeatureItem
+                    {
+                        Title = "AI-connected text build tools",
+                        Body = "Estate builders can use text commands connected to AI to plan, generate and refine terrain or building ideas directly from the simulator workflow."
+                    });
+                    continue;
+                }
+
                 normalized.Add(feature);
             }
 
@@ -951,6 +975,46 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             {
                 Title = "Weather and visitor polish",
                 Body = "Optional weather presets, group auto-invites, viewer version branding and appearance fallback improve the daily experience."
+            });
+            features.Add(new FeatureItem
+            {
+                Title = "Wave-following boats",
+                Body = "Boats can now move with the sea surface, following wave motion for a more natural marina and sailing experience."
+            });
+            features.Add(new FeatureItem
+            {
+                Title = "Smooth region crossings",
+                Body = "Avatar and vehicle crossings between neighbouring regions are smoothed to reduce the hard stop, rubber-banding and visual pop of stock OpenSim border transfers."
+            });
+            features.Add(new FeatureItem
+            {
+                Title = "Lag-resistant walk animations",
+                Body = "Walking animations recover cleanly after lag spikes, so avatars do not remain stuck in broken walk states when the simulator catches up."
+            });
+            features.Add(new FeatureItem
+            {
+                Title = "AI-connected text build tools",
+                Body = "Estate builders can use text commands connected to AI to plan, generate and refine terrain or building ideas directly from the simulator workflow."
+            });
+            features.Add(new FeatureItem
+            {
+                Title = "Automatic cloud avatar recovery",
+                Body = "If an avatar becomes a cloud, the server automatically handles the recovery and restores the normal appearance within a few seconds."
+            });
+        }
+
+        private static void EnsureFeature(List<FeatureItem> features, string title, string body)
+        {
+            foreach (FeatureItem feature in features)
+            {
+                if (feature.Title.Equals(title, StringComparison.OrdinalIgnoreCase))
+                    return;
+            }
+
+            features.Add(new FeatureItem
+            {
+                Title = title,
+                Body = body
             });
         }
 
