@@ -1336,8 +1336,12 @@
     ; PublicPath = "/regionweb"
 
     ;# {ContentDirectory} {Enabled} {Folder for per-region web content} {} RegionWeb
-    ;; Relative paths are under bin/. Each region gets a folder named after its URL slug.
+    ;; Relative paths are under bin/. The estate landing page uses estate.ini,
+    ;; and each region gets a folder named after its URL slug.
     ; ContentDirectory = "RegionWeb"
+
+    ;# {EstateTitle} {Enabled} {Default title for the central estate website} {} OpenSimulator Estate
+    ; EstateTitle = "OpenSimulator Estate"
 
     ;# {AutoCreateContent} {Enabled} {Create starter profile and post files} {true false} true
     ; AutoCreateContent = true
