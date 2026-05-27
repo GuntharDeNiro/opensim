@@ -174,13 +174,13 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             m_waterDepthShading = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapWaterDepthShading", configSections, true);
             m_color_water_shallow = System.Drawing.ColorTranslator.FromHtml(Util.GetConfigVarFromSections<string>(
-                m_config, "MapWaterShallowColor", configSections, "#5B93A4"));
+                m_config, "MapWaterShallowColor", configSections, "#6C8791"));
             m_color_water_deep = System.Drawing.ColorTranslator.FromHtml(Util.GetConfigVarFromSections<string>(
-                m_config, "MapWaterDeepColor", configSections, "#12384E"));
+                m_config, "MapWaterDeepColor", configSections, "#244B5A"));
             m_waterDepthRange = Math.Max(1f, Util.GetConfigVarFromSections<float>(
-                m_config, "MapWaterDepthRange", configSections, 28f));
+                m_config, "MapWaterDepthRange", configSections, 36f));
             m_waterNoiseStrength = Math.Max(0f, Math.Min(0.2f, Util.GetConfigVarFromSections<float>(
-                m_config, "MapWaterNoiseStrength", configSections, 0.045f)));
+                m_config, "MapWaterNoiseStrength", configSections, 0.025f)));
 
             m_mapping = new Dictionary<UUID,Color>();
             m_mapping.Add(defaultTerrainTexture1, m_color_1);

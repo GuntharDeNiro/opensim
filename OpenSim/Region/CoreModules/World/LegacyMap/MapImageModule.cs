@@ -156,7 +156,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                             Util.GetConfigVarFromSections<float>(m_config,
                                 "MapTileAerialSoften", MapConfigSections, 0.08f),
                             Util.GetConfigVarFromSections<float>(m_config,
-                                "MapTileAerialSaturation", MapConfigSections, 0.95f),
+                                "MapTileAerialSaturation", MapConfigSections, 0.92f),
                             Util.GetConfigVarFromSections<float>(m_config,
                                 "MapTileAerialContrast", MapConfigSections, 1.04f),
                             Util.GetConfigVarFromSections<int>(m_config,
@@ -386,7 +386,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             int minimumOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeMinimumOpacity", MapConfigSections, 35));
             int waterObjectOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
-                m_config, "MapWaterObjectVolumeOpacity", MapConfigSections, 22));
+                m_config, "MapWaterObjectVolumeOpacity", MapConfigSections, 0));
             int minimumBrightness = ClampByte(Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeMinimumBrightness", MapConfigSections, 72));
             int maximumBrightness = ClampByte(Util.GetConfigVarFromSections<int>(
@@ -523,6 +523,9 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
                                         if (isWaterLikeObject)
                                             fillOpacity = Math.Min(fillOpacity, waterObjectOpacity);
+
+                                        if (isWaterLikeObject && fillOpacity <= 0)
+                                            continue;
 
                                         if (prettyObjectVolume && renderMeshGeometry &&
                                             IsSculptOrMesh(part) &&
