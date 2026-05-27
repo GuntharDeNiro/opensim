@@ -462,6 +462,11 @@
     ;# {MapObjectVolumeMaximumBrightness} {PrettyPrimVolumeOnMapTile} {Maximum object overlay brightness} {} 235
     ; MapObjectVolumeMaximumBrightness = 235
 
+    ;# {MapObjectVolumeSampleTextureAssets} {PrettyPrimVolumeOnMapTile} {Decode texture assets for object map colors?} {true false} false
+    ;; Leave disabled unless you really need texture-derived map colors. Some remote or malformed texture
+    ;; assets can make OpenJPEG log decode errors while map tiles are generated.
+    ; MapObjectVolumeSampleTextureAssets = false
+
     ;# {TexturePrims} {} {Texture prims on map tiles?} {true false} true
     ;; Texture the faces of the prims that are rendered on the map tiles.
     ; TexturePrims = true

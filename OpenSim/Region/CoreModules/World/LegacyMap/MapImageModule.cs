@@ -338,6 +338,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 m_config, "MapObjectVolumeMaximumBrightness", MapConfigSections, 235));
             int largeObjectArea = Math.Max(1, Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeLargeArea", MapConfigSections, 1800));
+            bool sampleTextureAssets = Util.GetConfigVarFromSections<bool>(
+                m_config, "MapObjectVolumeSampleTextureAssets", MapConfigSections, false);
 
             try
             {
@@ -377,6 +379,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                         //mapdotspot = Color.PaleGreen;
 
                                         mapdotspot = GetPartMapColor(part, mapdotspot, prettyObjectVolume,
+                                            sampleTextureAssets,
                                             minimumBrightness, maximumBrightness);
                                     }
                                     catch (IndexOutOfRangeException)
@@ -441,7 +444,9 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                             IsWaterLikeMapObject(part, mapdotspot, objectArea, part.Scale, largeObjectArea);
 
                                         if (prettyObjectVolume && useTextureAlpha)
-                                            fillOpacity = ApplyTextureAlpha(fillOpacity, GetPartTextureAlpha(part), minimumOpacity);
+                                            fillOpacity = ApplyTextureAlpha(fillOpacity,
+                                                GetPartTextureAlpha(part, sampleTextureAssets),
+                                                minimumOpacity);
 
                                         if (isWaterLikeObject)
                                             fillOpacity = Math.Min(fillOpacity, waterObjectOpacity);
@@ -671,6 +676,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         }
 
         private Color GetPartMapColor(SceneObjectPart part, Color fallback, bool prettyObjectVolume,
+            bool sampleTextureAssets,
             int minimumBrightness, int maximumBrightness)
         {
             Primitive.TextureEntry textureEntry = part.Shape.Textures;
@@ -697,9 +703,12 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             }
 
             Color adjusted = Color.FromArgb(colorr, colorg, colorb);
-            MapTextureSample sample = GetPartTextureSample(part);
-            if (sample.valid)
-                adjusted = Blend(adjusted, sample.color, 0.75f);
+            if (sampleTextureAssets)
+            {
+                MapTextureSample sample = GetPartTextureSample(part);
+                if (sample.valid)
+                    adjusted = Blend(adjusted, sample.color, 0.75f);
+            }
 
             adjusted = ClampBrightness(adjusted, minimumBrightness, maximumBrightness);
 
@@ -709,11 +718,14 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             return adjusted;
         }
 
-        private float GetPartTextureAlpha(SceneObjectPart part)
+        private float GetPartTextureAlpha(SceneObjectPart part, bool sampleTextureAssets)
         {
-            MapTextureSample sample = GetPartTextureSample(part);
-            if (sample.valid)
-                return sample.alpha;
+            if (sampleTextureAssets)
+            {
+                MapTextureSample sample = GetPartTextureSample(part);
+                if (sample.valid)
+                    return sample.alpha;
+            }
 
             Primitive.TextureEntry textureEntry = part.Shape.Textures;
             if (textureEntry == null || textureEntry.DefaultTexture == null)
@@ -810,7 +822,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             };
 
             AssetBase asset = m_scene.AssetService.Get(textureID.ToString());
-            if (asset == null || asset.Data == null || asset.Data.Length == 0)
+            if (asset == null || asset.Type != (sbyte)AssetType.Texture ||
+                asset.Data == null || asset.Data.Length == 0)
             {
                 m_textureSampleCache[textureID] = sample;
                 return sample;
