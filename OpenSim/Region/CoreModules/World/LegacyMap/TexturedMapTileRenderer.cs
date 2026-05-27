@@ -144,6 +144,11 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         private Color m_color_3;
         private Color m_color_4;
         private bool m_decodeTerrainTextureAssets;
+        private bool m_waterDepthShading;
+        private Color m_color_water_shallow;
+        private Color m_color_water_deep;
+        private float m_waterDepthRange;
+        private float m_waterNoiseStrength;
 
         // mapping from texture UUIDs to averaged color. This will contain 5-9 values, in general; new values are only
         // added when the terrain textures are changed in the estate dialog and a new map is generated (and will stay in
@@ -166,6 +171,16 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             m_color_4 = System.Drawing.ColorTranslator.FromHtml(Util.GetConfigVarFromSections<string>(m_config, "MapColor4", configSections, "#C8C8C8"));
             m_decodeTerrainTextureAssets = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapTileDecodeTerrainTextureAssets", configSections, true);
+            m_waterDepthShading = Util.GetConfigVarFromSections<bool>(
+                m_config, "MapWaterDepthShading", configSections, true);
+            m_color_water_shallow = System.Drawing.ColorTranslator.FromHtml(Util.GetConfigVarFromSections<string>(
+                m_config, "MapWaterShallowColor", configSections, "#5B93A4"));
+            m_color_water_deep = System.Drawing.ColorTranslator.FromHtml(Util.GetConfigVarFromSections<string>(
+                m_config, "MapWaterDeepColor", configSections, "#12384E"));
+            m_waterDepthRange = Math.Max(1f, Util.GetConfigVarFromSections<float>(
+                m_config, "MapWaterDepthRange", configSections, 28f));
+            m_waterNoiseStrength = Math.Max(0f, Math.Min(0.2f, Util.GetConfigVarFromSections<float>(
+                m_config, "MapWaterNoiseStrength", configSections, 0.045f)));
 
             m_mapping = new Dictionary<UUID,Color>();
             m_mapping.Add(defaultTerrainTexture1, m_color_1);
@@ -462,24 +477,53 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     }
                     else
                     {
-                        // We're under the water level with the terrain, so paint water instead of land
+                        float depth = waterHeight - heightvalue;
+                        if (Single.IsInfinity(depth) || Single.IsNaN(depth) || depth < 0f)
+                            depth = 0f;
 
-                        heightvalue = waterHeight - heightvalue;
-                        if (Single.IsInfinity(heightvalue) || Single.IsNaN(heightvalue))
-                            heightvalue = 0f;
-                        else if (heightvalue > 19f)
-                            heightvalue = 19f;
-                        else if (heightvalue < 0f)
-                            heightvalue = 0f;
-
-                        heightvalue = 100f - (heightvalue * 100f) / 19f;  // 0 - 19 => 100 - 0
-
-                        mapbmp.SetPixel(x, yr, m_color_water);
+                        mapbmp.SetPixel(x, yr, GetWaterColor(depth, x, y));
                     }
                 }
             }
 
             m_log.Debug("[TEXTURED MAPTILE RENDERER]: Generating Maptile Step 1: Done in " + (Environment.TickCount - tc) + " ms");
+        }
+
+        private Color GetWaterColor(float depth, int x, int y)
+        {
+            if (!m_waterDepthShading)
+                return m_color_water;
+
+            float ratio = Math.Max(0f, Math.Min(1f, depth / m_waterDepthRange));
+            ratio = S(ratio);
+
+            float noise = (float)TerrainUtil.InterpolatedNoise(x / 11.0, y / 11.0) * m_waterNoiseStrength;
+            float fineNoise = (float)TerrainUtil.InterpolatedNoise(x + 91, y + 17) * m_waterNoiseStrength * 0.45f;
+            ratio = Math.Max(0f, Math.Min(1f, ratio + noise + fineNoise));
+
+            Color depthColor = Blend(m_color_water_shallow, m_color_water_deep, ratio);
+            return Blend(depthColor, m_color_water, 0.22f);
+        }
+
+        private static Color Blend(Color from, Color to, float amount)
+        {
+            amount = Math.Max(0f, Math.Min(1f, amount));
+            float inverse = 1f - amount;
+            return Color.FromArgb(
+                ClampByte((int)((from.R * inverse) + (to.R * amount))),
+                ClampByte((int)((from.G * inverse) + (to.G * amount))),
+                ClampByte((int)((from.B * inverse) + (to.B * amount))));
+        }
+
+        private static int ClampByte(int value)
+        {
+            if (value < 0)
+                return 0;
+
+            if (value > 255)
+                return 255;
+
+            return value;
         }
     }
 }

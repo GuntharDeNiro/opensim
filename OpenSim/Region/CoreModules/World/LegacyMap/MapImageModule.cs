@@ -140,13 +140,13 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     {
                         ApplyAerialMapStyle(mapbmp,
                             Util.GetConfigVarFromSections<float>(m_config,
-                                "MapTileAerialSoften", MapConfigSections, 0.18f),
+                                "MapTileAerialSoften", MapConfigSections, 0.08f),
                             Util.GetConfigVarFromSections<float>(m_config,
-                                "MapTileAerialSaturation", MapConfigSections, 0.86f),
+                                "MapTileAerialSaturation", MapConfigSections, 0.95f),
                             Util.GetConfigVarFromSections<float>(m_config,
-                                "MapTileAerialContrast", MapConfigSections, 0.92f),
+                                "MapTileAerialContrast", MapConfigSections, 1.04f),
                             Util.GetConfigVarFromSections<int>(m_config,
-                                "MapTileAerialBrightness", MapConfigSections, 4));
+                                "MapTileAerialBrightness", MapConfigSections, 1));
                     }
                 }
                 else
@@ -369,7 +369,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             int minimumOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeMinimumOpacity", MapConfigSections, 35));
             int waterObjectOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
-                m_config, "MapWaterObjectVolumeOpacity", MapConfigSections, 38));
+                m_config, "MapWaterObjectVolumeOpacity", MapConfigSections, 22));
             int minimumBrightness = ClampByte(Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeMinimumBrightness", MapConfigSections, 72));
             int maximumBrightness = ClampByte(Util.GetConfigVarFromSections<int>(
@@ -1145,7 +1145,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             bool paleOverlay = brightness > 145 && (max - min) < 70;
             bool blueOrCyan = color.B >= color.R - 8 && color.G >= color.R - 35;
 
-            return paleOverlay && blueOrCyan;
+            return (paleOverlay && blueOrCyan) || largestSide >= 32f;
         }
 
         private static Color ClampBrightness(Color color, int minimumBrightness, int maximumBrightness)

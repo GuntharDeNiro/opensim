@@ -448,8 +448,8 @@
     ;# {MapObjectVolumeMinimumOpacity} {PrettyPrimVolumeOnMapTile} {Minimum opacity after texture alpha is applied} {} 35
     ; MapObjectVolumeMinimumOpacity = 35
 
-    ;# {MapWaterObjectVolumeOpacity} {PrettyPrimVolumeOnMapTile} {Opacity for large flat water-like overlays} {} 38
-    ; MapWaterObjectVolumeOpacity = 38
+    ;# {MapWaterObjectVolumeOpacity} {PrettyPrimVolumeOnMapTile} {Opacity for large flat water-like overlays} {} 22
+    ; MapWaterObjectVolumeOpacity = 22
 
     ;# {MapObjectVolumeLargeArea} {PrettyPrimVolumeOnMapTile} {Footprint area where large-object opacity starts} {} 1800
     ; MapObjectVolumeLargeArea = 1800
@@ -490,17 +490,32 @@
     ;# {MapTileAerialStyle} {} {Apply final aerial-photo style tone and softening pass?} {true false} true
     ; MapTileAerialStyle = true
 
-    ;# {MapTileAerialSoften} {MapTileAerialStyle} {Aerial softening amount} {} 0.18
-    ; MapTileAerialSoften = 0.18
+    ;# {MapTileAerialSoften} {MapTileAerialStyle} {Aerial softening amount} {} 0.08
+    ; MapTileAerialSoften = 0.08
 
-    ;# {MapTileAerialSaturation} {MapTileAerialStyle} {Aerial saturation amount} {} 0.86
-    ; MapTileAerialSaturation = 0.86
+    ;# {MapTileAerialSaturation} {MapTileAerialStyle} {Aerial saturation amount} {} 0.95
+    ; MapTileAerialSaturation = 0.95
 
-    ;# {MapTileAerialContrast} {MapTileAerialStyle} {Aerial contrast amount} {} 0.92
-    ; MapTileAerialContrast = 0.92
+    ;# {MapTileAerialContrast} {MapTileAerialStyle} {Aerial contrast amount} {} 1.04
+    ; MapTileAerialContrast = 1.04
 
-    ;# {MapTileAerialBrightness} {MapTileAerialStyle} {Aerial brightness adjustment} {} 4
-    ; MapTileAerialBrightness = 4
+    ;# {MapTileAerialBrightness} {MapTileAerialStyle} {Aerial brightness adjustment} {} 1
+    ; MapTileAerialBrightness = 1
+
+    ;# {MapWaterDepthShading} {TextureOnMapTile} {Shade water by terrain depth?} {true false} true
+    ; MapWaterDepthShading = true
+
+    ;# {MapWaterShallowColor} {MapWaterDepthShading} {Water color for shallow coastlines} {} "#5B93A4"
+    ; MapWaterShallowColor = "#5B93A4"
+
+    ;# {MapWaterDeepColor} {MapWaterDepthShading} {Water color for deep water} {} "#12384E"
+    ; MapWaterDeepColor = "#12384E"
+
+    ;# {MapWaterDepthRange} {MapWaterDepthShading} {Depth in meters used to reach deep water color} {} 28
+    ; MapWaterDepthRange = 28
+
+    ;# {MapWaterNoiseStrength} {MapWaterDepthShading} {Subtle water variation strength} {} 0.045
+    ; MapWaterNoiseStrength = 0.045
 
     ;# {MapObjectVolumeSampleTextureAssets} {PrettyPrimVolumeOnMapTile} {Decode valid texture assets for object map colors?} {true false} true
     ;; Improves map quality by sampling texture colors. Invalid texture assets are skipped before OpenJPEG is called.
