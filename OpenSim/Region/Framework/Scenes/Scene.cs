@@ -476,6 +476,9 @@ namespace OpenSim.Region.Framework.Scenes
 
         private readonly Timer m_mapGenerationTimer = new();
         private readonly bool m_generateMaptiles;
+        private readonly bool m_generateMaptilesInBackground;
+        private readonly bool m_mapGenerationTimerEnabled;
+        private volatile bool m_backgroundMaptileGenerationRunning;
 
         protected int m_lastHealth = -1;
         protected int m_lastUsers = -1;
@@ -1012,6 +1015,8 @@ namespace OpenSim.Region.Framework.Scenes
 
                 m_generateMaptiles
                     = Util.GetConfigVarFromSections<bool>(config, "GenerateMaptiles", possibleMapConfigSections, true);
+                m_generateMaptilesInBackground
+                    = Util.GetConfigVarFromSections<bool>(config, "GenerateMaptilesInBackground", possibleMapConfigSections, true);
 
                 if (m_generateMaptiles)
                 {
@@ -1019,6 +1024,7 @@ namespace OpenSim.Region.Framework.Scenes
                     m_log.InfoFormat("[SCENE]: Region {0}, WORLD MAP refresh time set to {1} seconds", RegionInfo.RegionName, maptileRefresh);
                     if (maptileRefresh != 0)
                     {
+                        m_mapGenerationTimerEnabled = true;
                         m_mapGenerationTimer.Interval = maptileRefresh * 1000;
                         m_mapGenerationTimer.Elapsed += RegenerateMaptileAndReregister;
                         m_mapGenerationTimer.AutoReset = false;
@@ -2269,11 +2275,11 @@ namespace OpenSim.Region.Framework.Scenes
         {
             m_sceneGridService.SetScene(this);
 
-            //// Unfortunately this needs to be here and it can't be async.
-            //// The map tile image is stored in RegionSettings, but it also needs to be
-            //// stored in the GridService, because that's what the world map module uses
-            //// to send the map image UUIDs (of other regions) to the viewer...
-            if (m_generateMaptiles)
+            //// Historically this was synchronous because the generated image UUID is stored
+            //// in RegionSettings before being propagated to the grid.  High-quality map
+            //// rendering can be expensive, so the default is now to register immediately
+            //// and regenerate/reregister the finished maptile in the background.
+            if (m_generateMaptiles && !m_generateMaptilesInBackground)
                 RegenerateMaptile();
 
             GridRegion region = new(RegionInfo);
@@ -2286,6 +2292,9 @@ namespace OpenSim.Region.Framework.Scenes
 
             if (error != String.Empty)
                 throw new Exception(error);
+
+            if (m_generateMaptiles && m_generateMaptilesInBackground)
+                RegenerateMaptileAndReregisterInBackground();
         }
 
         #endregion
@@ -5986,8 +5995,34 @@ Environment.Exit(1);
             string error = GridService.RegisterRegion(RegionInfo.ScopeID, new GridRegion(RegionInfo));
             if (error != string.Empty)
                 throw new Exception(error);
-            if(m_generateMaptiles)
+            if(m_generateMaptiles && m_mapGenerationTimerEnabled)
                 m_mapGenerationTimer.Start();
+        }
+
+        private void RegenerateMaptileAndReregisterInBackground()
+        {
+            if (m_backgroundMaptileGenerationRunning)
+                return;
+
+            m_backgroundMaptileGenerationRunning = true;
+
+            WorkManager.StartThread(delegate
+            {
+                try
+                {
+                    RegenerateMaptileAndReregister(null, null);
+                }
+                catch (Exception ex)
+                {
+                    m_log.WarnFormat("[SCENE]: Background maptile generation for {0} failed: {1}",
+                        RegionInfo.RegionName, ex.Message);
+                }
+                finally
+                {
+                    m_backgroundMaptileGenerationRunning = false;
+                }
+            }, $"MaptileGeneration-({Name.Replace(" ", "_")})", ThreadPriority.BelowNormal, false,
+                false, null, 20000, false);
         }
 
         /// <summary>
