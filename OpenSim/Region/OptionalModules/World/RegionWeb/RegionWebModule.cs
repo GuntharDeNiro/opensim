@@ -248,6 +248,12 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     return;
                 }
 
+                if (parts.Length >= 2 && parts[0].Equals("feature", StringComparison.OrdinalIgnoreCase))
+                {
+                    SendFeaturePage(parts[1], response);
+                    return;
+                }
+
                 if (!TryGetScene(parts[0], out Scene scene))
                 {
                     SendNotFound(response, "Region page not found.");
@@ -329,8 +335,9 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             html.Append("<section id=\"features\" class=\"wrap feature-section\"><h2>What this estate adds to OpenSim</h2><div class=\"feature-grid\">");
             foreach (FeatureItem feature in content.Features)
             {
-                html.Append("<article><h3>").Append(Html(feature.Title)).Append("</h3><p>")
-                    .Append(Html(feature.Body)).Append("</p></article>");
+                html.Append("<a class=\"feature-card\" href=\"").Append(Html(FeatureURL(feature))).Append("\"><h3>")
+                    .Append(Html(feature.Title)).Append("</h3><p>")
+                    .Append(Html(feature.Body)).Append("</p><span>Read guide</span></a>");
             }
             html.Append("</div></section>");
 
@@ -350,6 +357,45 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             html.Append("</div></section></main>");
             html.Append(EndPage());
+            SendHtml(response, html.ToString());
+        }
+
+        private void SendFeaturePage(string slug, IOSHttpResponse response)
+        {
+            EstatePageContent estate = LoadEstateContent();
+            FeatureItem feature = null;
+
+            foreach (FeatureItem item in estate.Features)
+            {
+                if (MakeSlug(item.Title).Equals(slug, StringComparison.OrdinalIgnoreCase))
+                {
+                    feature = item;
+                    break;
+                }
+            }
+
+            if (feature == null)
+            {
+                SendNotFound(response, "Feature page not found.");
+                return;
+            }
+
+            FeaturePageContent content = LoadFeaturePage(feature);
+
+            StringBuilder html = BeginPage(content.Title + " - " + estate.Title);
+            html.Append("<main class=\"wrap feature-page\"><a class=\"back\" href=\"")
+                .Append(Html(m_basePath)).Append("/#features\">Back to features</a>")
+                .Append("<p class=\"feature-kicker\">Feature guide</p><h1>")
+                .Append(Html(content.Title)).Append("</h1><p class=\"lead\">")
+                .Append(Html(content.Summary)).Append("</p>");
+
+            html.Append("<section><h2>What it does</h2>")
+                .Append(Paragraphs(content.Overview)).Append("</section>");
+
+            AppendFeatureList(html, "How to use it", content.Usage);
+            AppendFeatureList(html, "Configuration notes", content.Notes);
+
+            html.Append("</main>").Append(EndPage());
             SendHtml(response, html.ToString());
         }
 
@@ -536,6 +582,151 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 "Estate builders can use text commands connected to AI to plan, generate and refine terrain or building ideas directly from the simulator workflow.");
             EnsureFeature(content.Features, "Automatic cloud avatar recovery",
                 "If an avatar becomes a cloud, the server automatically handles the recovery and restores the normal appearance within a few seconds.");
+            EnsureFeature(content.Features, "Group auto invite",
+                "Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects.");
+            EnsureFeature(content.Features, "Viewer polish",
+                "Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.");
+
+            return content;
+        }
+
+        private FeaturePageContent LoadFeaturePage(FeatureItem feature)
+        {
+            FeaturePageContent content = GetDefaultFeaturePage(feature);
+            string file = Path.Combine(m_absoluteContentDirectory, "features", MakeSlug(feature.Title) + ".ini");
+            if (!File.Exists(file))
+                return content;
+
+            IniConfigSource source;
+            try
+            {
+                source = new IniConfigSource(file);
+            }
+            catch
+            {
+                return content;
+            }
+
+            IConfig config = source.Configs["Feature"];
+            if (config == null)
+                return content;
+
+            content.Title = config.GetString("Title", content.Title).Trim();
+            content.Summary = config.GetString("Summary", content.Summary).Trim();
+            content.Overview = config.GetString("Overview", content.Overview).Trim();
+
+            List<string> usage = ParseFeatureList(config, "Usage");
+            if (usage.Count > 0)
+                content.Usage = usage;
+
+            List<string> notes = ParseFeatureList(config, "Note");
+            if (notes.Count > 0)
+                content.Notes = notes;
+
+            return content;
+        }
+
+        private static FeaturePageContent GetDefaultFeaturePage(FeatureItem feature)
+        {
+            string slug = MakeSlug(feature.Title);
+            FeaturePageContent content = new FeaturePageContent
+            {
+                Title = feature.Title,
+                Summary = feature.Body,
+                Overview = feature.Body
+            };
+
+            switch (slug)
+            {
+                case "high-quality-world-map":
+                    content.Overview = "The world map renderer produces a sharper source tile before the viewer ever zooms it. It combines terrain texture sampling, depth-aware water color, aerial tone mapping, mesh and sculpt projection, cleaner alpha handling for water overlays, and cooperative render passes that avoid starving the simulator while heavy object scenes are being drawn.";
+                    content.Usage.Add("Keep GenerateMaptiles enabled in [Map] and use MapImageModule for the region map renderer.");
+                    content.Usage.Add("Enable texture sampling and mesh/sculpt aware rendering when you want detailed marinas, vehicles, sculpt builds and textured terrain to appear correctly on the map.");
+                    content.Usage.Add("Use the console command generate map after changing terrain, water objects, large builds or map settings.");
+                    content.Usage.Add("If wave planes or animated water overlays pollute the tile, lower MapWaterObjectVolumeOpacity or keep texture alpha sampling enabled.");
+                    content.Notes.Add("Very large opaque builds are still rendered, while transparent water-like overlays are drawn faintly so they do not become grey rectangles.");
+                    content.Notes.Add("Background and cooperative rendering make the feature safer on busy regions, but a manual map render can still be expensive on very dense scenes.");
+                    break;
+
+                case "regionweb-pages":
+                case "regionweb-estate-portal":
+                    content.Title = "RegionWeb estate portal";
+                    content.Summary = "Every estate and region can publish a web page with photos, posts, map tiles, parcels and live simulator statistics.";
+                    content.Overview = "RegionWeb turns the simulator HTTP endpoint into a simple estate website. The central page lists online regions and estate features; each region gets a profile page, gallery, blog posts, current map tile, parcel summaries and live stats pulled from the simulator.";
+                    content.Usage.Add("Open /regionweb/ on the simulator HTTP address to view the estate landing page.");
+                    content.Usage.Add("Edit bin/RegionWeb/estate.ini for the central title, tagline, hero image and feature cards.");
+                    content.Usage.Add("Edit bin/RegionWeb/<region-slug>/profile.ini for each region page, and add JPEG or PNG files under that region's media folder.");
+                    content.Usage.Add("Create posts as text files under bin/RegionWeb/<region-slug>/posts/ using the Title, Date, Summary, Image and body format created by the sample file.");
+                    content.Notes.Add("The module auto-creates starter folders without overwriting existing content.");
+                    break;
+
+                case "weather-and-visitor-polish":
+                case "weather-module":
+                    content.Title = "Weather module";
+                    content.Summary = "Regions can run rain, storm, snow or sunny presets with wind, clouds, lightning, thunder and automatic forecast cycling.";
+                    content.Overview = "The weather system adds estate-controlled atmosphere without needing scripted emitters scattered by hand. It can change clouds and wind, spawn particle weather, announce forecasts and cycle between presets after startup.";
+                    content.Usage.Add("Enable the module in [Weather] and choose the command channel used by estate managers.");
+                    content.Usage.Add("Configure AutoCycleEnabled, AutoCycleHours and AutoCycleChoices to let the region rotate between storm, rain, snow, sunny and clear.");
+                    content.Usage.Add("Tune EmitterGrid, Intensity, wind strengths and lightning delays per region style.");
+                    content.Usage.Add("Use forecast warning and entry IM messages when visitors should know current and upcoming conditions.");
+                    content.Notes.Add("Large storms create many emitters, so keep intensity and emitter spacing reasonable on busy regions.");
+                    break;
+
+                case "wave-following-boats":
+                    content.Overview = "Boat motion can now be tied to the sea surface, so vessels sit and move more naturally with waves instead of looking glued to a flat mathematical plane. This is especially visible in marinas, harbors and aerial views where water movement and boats should agree.";
+                    content.Usage.Add("Use boats or vehicle scripts that opt into the estate wave-following behavior.");
+                    content.Usage.Add("Keep the object close to the water surface so the server can apply the intended vertical motion cleanly.");
+                    content.Usage.Add("After updating an old boat, rerezzing it is the quickest way to ensure it starts with fresh motion state.");
+                    content.Notes.Add("The feature improves visual motion; it does not require visitors to install a special viewer.");
+                    break;
+
+                case "smooth-region-crossings":
+                    content.Overview = "Region crossings are softened so avatars and vehicles do not hit the border with the abrupt stop, rubber-banding and visual pop that stock OpenSim can show during transfer. The goal is to make neighbouring regions feel like one larger continuous place.";
+                    content.Usage.Add("Keep neighbouring regions online, adjacent and reachable through the normal simulator neighbour connection.");
+                    content.Usage.Add("Use consistent simulator builds and compatible physics settings on regions that share a border.");
+                    content.Usage.Add("Test crossings with both walking avatars and vehicles after changing region size, physics or network settings.");
+                    content.Notes.Add("Crossing quality still depends on network latency and the target region being healthy, but the server now reduces the harsh visual transition.");
+                    break;
+
+                case "lag-resistant-walk-animations":
+                    content.Overview = "When the simulator lags, avatars can sometimes remain visually stuck in a bad walking state even after movement resumes. This build recovers walk animation state when the simulator catches up, so visitors do not stay trapped in broken locomotion.";
+                    content.Usage.Add("No viewer-side action is required; the server handles recovery automatically.");
+                    content.Usage.Add("If a region is under heavy load, wait a few seconds after the spike before judging animation state.");
+                    content.Usage.Add("Keep custom AO scripts reasonable, because very aggressive scripted animation overrides can still fight normal movement animation.");
+                    content.Notes.Add("This does not hide real simulator load; it prevents lag from leaving avatars visually broken after the load spike passes.");
+                    break;
+
+                case "ai-connected-text-build-tools":
+                    content.Overview = "The text build tool connects in-world commands to AI-assisted building workflows. Builders can describe what they want, iterate on ideas and use text as a faster control surface for terrain, layout or object planning inside the simulator workflow.";
+                    content.Usage.Add("Enable the text build module and use its configured in-world command channel.");
+                    content.Usage.Add("Speak concise build requests on that channel, then refine the result with follow-up instructions.");
+                    content.Usage.Add("Use it for planning, layout, terrain and fast creative iteration, then review the generated changes like any other build work.");
+                    content.Notes.Add("AI-assisted building should stay permission-aware: restrict access to trusted builders or estate staff.");
+                    break;
+
+                case "automatic-cloud-avatar-recovery":
+                    content.Overview = "If an avatar enters the region as a cloud because appearance data or baked textures are incomplete, the server now manages the recovery path and restores the normal appearance within a few seconds. The visitor does not have to relog or manually rebake as often.";
+                    content.Usage.Add("Leave the recovery feature enabled on regions where visitor appearance reliability matters.");
+                    content.Usage.Add("When a visitor appears as a cloud, wait for the server recovery window before asking them to relog.");
+                    content.Usage.Add("Keep asset and inventory services healthy, because the recovery still needs the avatar's saved wearables and textures to be available.");
+                    content.Notes.Add("The server avoids saving temporary fallback appearance as the user's real outfit.");
+                    break;
+
+                case "group-auto-invite":
+                    content.Overview = "Regions can invite arriving root avatars to a configured group using the normal viewer group invitation popup. This replaces fragile scripted invite objects with a server-side region module.";
+                    content.Usage.Add("Enable [GroupAutoInvite] and set GroupID or GroupName.");
+                    content.Usage.Add("Optionally set InviterID, RoleID, InviteDelaySeconds and a custom InviteMessage.");
+                    content.Usage.Add("Keep InviteOncePerSession enabled if visitors should not be spammed after teleports or relogs.");
+                    content.Notes.Add("The module sends an invitation; it does not force users to join.");
+                    break;
+
+                case "viewer-polish":
+                    content.Overview = "Viewer-facing polish keeps neighbouring regions feeling like one estate. The simulator can send a stable branded version string to viewers so teleports and crossings do not produce noisy different-version warnings when local builds or operating systems differ.";
+                    content.Usage.Add("Set SendSimulatorVersionToViewer and ViewerSimulatorVersionOverride in [ClientStack.LindenUDP].");
+                    content.Usage.Add("Use the same override string across estate regions that should feel like one coherent grid experience.");
+                    content.Notes.Add("This is presentation polish only; keep the actual simulator binaries compatible for crossings and shared services.");
+                    break;
+            }
 
             return content;
         }
@@ -733,7 +924,10 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private void EnsureEstateContent()
         {
             string mediaDir = Path.Combine(m_absoluteContentDirectory, "media");
+            string featuresDir = Path.Combine(m_absoluteContentDirectory, "features");
             Directory.CreateDirectory(mediaDir);
+            Directory.CreateDirectory(featuresDir);
+            EnsureDefaultFeaturePages(featuresDir);
 
             string file = Path.Combine(m_absoluteContentDirectory, "estate.ini");
             if (File.Exists(file))
@@ -757,6 +951,45 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 + "Feature9 = \"Group auto invite|Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects.\"\n"
                 + "Feature10 = \"Viewer polish|Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.\"\n",
                 new UTF8Encoding(false));
+        }
+
+        private void EnsureDefaultFeaturePages(string featuresDir)
+        {
+            List<FeatureItem> features = new List<FeatureItem>();
+            AddDefaultFeatures(features);
+
+            foreach (FeatureItem feature in features)
+            {
+                string file = Path.Combine(featuresDir, MakeSlug(feature.Title) + ".ini");
+                if (File.Exists(file))
+                    continue;
+
+                FeaturePageContent content = GetDefaultFeaturePage(feature);
+                WriteFeaturePage(file, content);
+            }
+        }
+
+        private static void WriteFeaturePage(string file, FeaturePageContent content)
+        {
+            StringBuilder text = new StringBuilder();
+            text.Append("[Feature]\n")
+                .Append("Title = \"").Append(EscapeIni(content.Title)).Append("\"\n")
+                .Append("Summary = \"").Append(EscapeIni(content.Summary)).Append("\"\n")
+                .Append("Overview = \"").Append(EscapeIni(content.Overview)).Append("\"\n");
+
+            for (int i = 0; i < content.Usage.Count; i++)
+            {
+                text.Append("Usage").Append((i + 1).ToString(CultureInfo.InvariantCulture))
+                    .Append(" = \"").Append(EscapeIni(content.Usage[i])).Append("\"\n");
+            }
+
+            for (int i = 0; i < content.Notes.Count; i++)
+            {
+                text.Append("Note").Append((i + 1).ToString(CultureInfo.InvariantCulture))
+                    .Append(" = \"").Append(EscapeIni(content.Notes[i])).Append("\"\n");
+            }
+
+            File.WriteAllText(file, text.ToString(), new UTF8Encoding(false));
         }
 
         private void EnsureRegionContent(Scene scene)
@@ -869,6 +1102,11 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             return m_basePath + "/media/" + Url(Path.GetFileName(fileName));
         }
 
+        private string FeatureURL(FeatureItem feature)
+        {
+            return m_basePath + "/feature/" + Url(MakeSlug(feature.Title)) + "/";
+        }
+
         private static List<FeatureItem> ParseFeatures(string features)
         {
             List<FeatureItem> items = new List<FeatureItem>();
@@ -884,6 +1122,30 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     Title = title,
                     Body = parts.Length > 1 ? parts[1].Trim() : string.Empty
                 });
+            }
+
+            return items;
+        }
+
+        private static List<string> ParseFeatureList(IConfig config, string prefix)
+        {
+            List<string> items = new List<string>();
+            for (int i = 1; i <= 12; i++)
+            {
+                string value = config.GetString(prefix + i.ToString(CultureInfo.InvariantCulture), string.Empty).Trim();
+                if (!string.IsNullOrEmpty(value))
+                    items.Add(value);
+            }
+
+            string joined = config.GetString(prefix, string.Empty);
+            if (string.IsNullOrEmpty(joined))
+                joined = config.GetString(prefix + "s", string.Empty);
+
+            foreach (string value in joined.Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string trimmed = value.Trim();
+                if (!string.IsNullOrEmpty(trimmed))
+                    items.Add(trimmed);
             }
 
             return items;
@@ -968,13 +1230,13 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             });
             features.Add(new FeatureItem
             {
-                Title = "RegionWeb pages",
-                Body = "Each region gets photos, blog posts, a live map, parcel summaries and useful visitor statistics."
+                Title = "RegionWeb estate portal",
+                Body = "Every region can have a public web page with photos, blog posts, map tile, parcels and live region statistics."
             });
             features.Add(new FeatureItem
             {
-                Title = "Weather and visitor polish",
-                Body = "Optional weather presets, group auto-invites, viewer version branding and appearance fallback improve the daily experience."
+                Title = "Weather module",
+                Body = "Regions can run rain, storm, snow or sunny presets, with wind, clouds, lightning, thunder and automatic forecast cycling."
             });
             features.Add(new FeatureItem
             {
@@ -1001,6 +1263,16 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 Title = "Automatic cloud avatar recovery",
                 Body = "If an avatar becomes a cloud, the server automatically handles the recovery and restores the normal appearance within a few seconds."
             });
+            features.Add(new FeatureItem
+            {
+                Title = "Group auto invite",
+                Body = "Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects."
+            });
+            features.Add(new FeatureItem
+            {
+                Title = "Viewer polish",
+                Body = "Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent."
+            });
         }
 
         private static void EnsureFeature(List<FeatureItem> features, string title, string body)
@@ -1021,6 +1293,17 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private static string Stat(string label, string value)
         {
             return "<dt>" + Html(label) + "</dt><dd>" + Html(value) + "</dd>";
+        }
+
+        private static void AppendFeatureList(StringBuilder html, string title, List<string> items)
+        {
+            if (items.Count == 0)
+                return;
+
+            html.Append("<section><h2>").Append(Html(title)).Append("</h2><ul>");
+            foreach (string item in items)
+                html.Append("<li>").Append(Html(item)).Append("</li>");
+            html.Append("</ul></section>");
         }
 
         private static void SendHtml(IOSHttpResponse response, string html)
@@ -1044,7 +1327,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 .Append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
                 .Append("<title>").Append(Html(title)).Append("</title>")
                 .Append("<style>")
-                .Append("body{margin:0;background:#101417;color:#e9efec;font:16px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}a{color:#9bd3e6;text-decoration:none}img{max-width:100%;display:block}.wrap{max-width:1180px;margin:0 auto;padding:0 24px}.estate-hero{min-height:520px;background-size:cover;background-position:center;display:flex;align-items:flex-end}.estate-hero-plain{background:linear-gradient(135deg,#11252b,#1e2927 52%,#3a3526)}.estate-hero .wrap{padding-top:110px;padding-bottom:72px}.estate-hero p{max-width:760px;color:#d9e5e1;font-size:19px}.estate-hero>div>p:first-child,.hero p{margin:0 0 10px;color:#b9d8d3;text-transform:uppercase;font-size:13px;letter-spacing:.08em}.estate-hero h1{max-width:900px;margin:0;font-size:clamp(44px,8vw,96px);line-height:.92}.estate-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}.estate-actions a{background:#d7e4df;color:#101417;padding:10px 15px;font-weight:700}.estate-actions a+a{background:#223239;color:#dbe7e4}.estate-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;margin-top:28px;background:#2a363a}.estate-stats div{background:#171e22;padding:18px}.estate-stats strong{display:block;font-size:30px}.estate-stats span{color:#aebbb9}.feature-section{padding-top:48px}.feature-section h2,.list h2{font-size:34px;margin:0 0 20px}.feature-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}.feature-grid article{background:#171e22;border:1px solid #263136;padding:18px}.feature-grid h3{margin:0 0 8px;font-size:21px}.feature-grid p{margin:0;color:#c7d2cf}.hero{min-height:360px;background-size:cover;background-position:center;display:flex;align-items:flex-end}.hero .wrap{padding-top:90px;padding-bottom:46px}.hero h1{margin:0;font-size:clamp(38px,7vw,82px);line-height:.94}.meta{margin-top:16px;color:#cfd8d5}.layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:36px;padding-top:36px;padding-bottom:56px}.story{min-width:0}.story>p{font-size:19px;color:#d5dfdc}.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin:30px 0}.gallery figure{margin:0;background:#182025}.gallery img{aspect-ratio:4/3;object-fit:cover}.gallery figcaption{padding:10px;color:#c7d0ce;font-size:14px}.panel{align-self:start}.map{width:100%;aspect-ratio:1;object-fit:cover;border:1px solid #2a363a}.stats,.parcels{margin-top:18px;background:#171e22;border:1px solid #263136;padding:18px}.stats h2,.parcels h2,.story h2{margin:0 0 14px}.stats dl{display:grid;grid-template-columns:1fr auto;gap:7px 16px;margin:0}.stats dt{color:#9facad}.stats dd{margin:0;font-weight:700}.parcels div{display:flex;justify-content:space-between;gap:12px;border-top:1px solid #263136;padding:9px 0}.parcels div:first-of-type{border-top:0}.parcels span{color:#aab6b8}.post{border-top:1px solid #2a363a;padding:22px 0}.post img{width:100%;max-height:360px;object-fit:cover;margin-bottom:14px}.post time{color:#9facad;font-size:13px}.post h3{margin:4px 0 8px;font-size:24px}.post p{color:#cbd5d2}.post-page{padding-top:36px;padding-bottom:60px;max-width:850px}.post.full h1{font-size:46px;line-height:1.05;margin:6px 0 22px}.post.full p{font-size:18px}.back{display:inline-block;margin-bottom:18px}.region-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}.list{padding-top:42px;padding-bottom:60px}.region-card{background:#171e22;border:1px solid #263136;color:#e9efec}.region-card img{aspect-ratio:16/9;object-fit:cover}.region-card strong,.region-card span{display:block;padding:0 14px}.region-card strong{padding-top:13px;font-size:20px}.region-card span{padding-bottom:14px;color:#abb8b8}.empty code{word-break:break-all}@media(max-width:820px){.layout,.estate-stats{grid-template-columns:1fr}.hero{min-height:300px}.estate-hero{min-height:430px}.wrap{padding-left:16px;padding-right:16px}}")
+                .Append("body{margin:0;background:#101417;color:#e9efec;font:16px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}a{color:#9bd3e6;text-decoration:none}img{max-width:100%;display:block}.wrap{max-width:1180px;margin:0 auto;padding:0 24px}.estate-hero{min-height:520px;background-size:cover;background-position:center;display:flex;align-items:flex-end}.estate-hero-plain{background:linear-gradient(135deg,#11252b,#1e2927 52%,#3a3526)}.estate-hero .wrap{padding-top:110px;padding-bottom:72px}.estate-hero p{max-width:760px;color:#d9e5e1;font-size:19px}.estate-hero>div>p:first-child,.hero p,.feature-kicker{margin:0 0 10px;color:#b9d8d3;text-transform:uppercase;font-size:13px;letter-spacing:.08em}.estate-hero h1{max-width:900px;margin:0;font-size:clamp(44px,8vw,96px);line-height:.92}.estate-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}.estate-actions a{background:#d7e4df;color:#101417;padding:10px 15px;font-weight:700}.estate-actions a+a{background:#223239;color:#dbe7e4}.estate-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;margin-top:28px;background:#2a363a}.estate-stats div{background:#171e22;padding:18px}.estate-stats strong{display:block;font-size:30px}.estate-stats span{color:#aebbb9}.feature-section{padding-top:48px}.feature-section h2,.list h2{font-size:34px;margin:0 0 20px}.feature-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}.feature-card{display:block;background:#171e22;border:1px solid #263136;color:#e9efec;padding:18px;min-height:190px}.feature-card:hover{border-color:#6da8b7;background:#1a2428}.feature-card h3{margin:0 0 8px;font-size:21px}.feature-card p{margin:0;color:#c7d2cf}.feature-card span{display:inline-block;margin-top:18px;color:#9bd3e6;font-weight:700}.feature-page{padding-top:42px;padding-bottom:70px;max-width:900px}.feature-page h1{font-size:clamp(38px,7vw,68px);line-height:1;margin:0 0 18px}.feature-page .lead{font-size:21px;color:#d4dfdc;margin:0 0 34px}.feature-page section{border-top:1px solid #2a363a;padding-top:24px;margin-top:26px}.feature-page h2{font-size:28px;margin:0 0 12px}.feature-page li{margin:0 0 10px;color:#d2dcda}.hero{min-height:360px;background-size:cover;background-position:center;display:flex;align-items:flex-end}.hero .wrap{padding-top:90px;padding-bottom:46px}.hero h1{margin:0;font-size:clamp(38px,7vw,82px);line-height:.94}.meta{margin-top:16px;color:#cfd8d5}.layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:36px;padding-top:36px;padding-bottom:56px}.story{min-width:0}.story>p{font-size:19px;color:#d5dfdc}.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin:30px 0}.gallery figure{margin:0;background:#182025}.gallery img{aspect-ratio:4/3;object-fit:cover}.gallery figcaption{padding:10px;color:#c7d0ce;font-size:14px}.panel{align-self:start}.map{width:100%;aspect-ratio:1;object-fit:cover;border:1px solid #2a363a}.stats,.parcels{margin-top:18px;background:#171e22;border:1px solid #263136;padding:18px}.stats h2,.parcels h2,.story h2{margin:0 0 14px}.stats dl{display:grid;grid-template-columns:1fr auto;gap:7px 16px;margin:0}.stats dt{color:#9facad}.stats dd{margin:0;font-weight:700}.parcels div{display:flex;justify-content:space-between;gap:12px;border-top:1px solid #263136;padding:9px 0}.parcels div:first-of-type{border-top:0}.parcels span{color:#aab6b8}.post{border-top:1px solid #2a363a;padding:22px 0}.post img{width:100%;max-height:360px;object-fit:cover;margin-bottom:14px}.post time{color:#9facad;font-size:13px}.post h3{margin:4px 0 8px;font-size:24px}.post p{color:#cbd5d2}.post-page{padding-top:36px;padding-bottom:60px;max-width:850px}.post.full h1{font-size:46px;line-height:1.05;margin:6px 0 22px}.post.full p{font-size:18px}.back{display:inline-block;margin-bottom:18px}.region-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}.list{padding-top:42px;padding-bottom:60px}.region-card{background:#171e22;border:1px solid #263136;color:#e9efec}.region-card img{aspect-ratio:16/9;object-fit:cover}.region-card strong,.region-card span{display:block;padding:0 14px}.region-card strong{padding-top:13px;font-size:20px}.region-card span{padding-bottom:14px;color:#abb8b8}.empty code{word-break:break-all}@media(max-width:820px){.layout,.estate-stats{grid-template-columns:1fr}.hero{min-height:300px}.estate-hero{min-height:430px}.wrap{padding-left:16px;padding-right:16px}}")
                 .Append("</style></head><body>");
             return html;
         }
@@ -1178,6 +1461,15 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         {
             public string Title;
             public string Body;
+        }
+
+        private class FeaturePageContent
+        {
+            public string Title;
+            public string Summary;
+            public string Overview;
+            public List<string> Usage = new List<string>();
+            public List<string> Notes = new List<string>();
         }
 
         private class GalleryItem
