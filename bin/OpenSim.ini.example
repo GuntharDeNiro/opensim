@@ -1326,6 +1326,34 @@
     ;; if true NPCs will have no group title, if false display "- NPC -" for easy identification {true false} default: true
     ; NoNPCGroup = true
 
+[RegionWeb]
+    ;# {Enabled} {} {Enable public per-region website and blog pages} {true false} true
+    ;; Serves pages at /regionweb/<region-slug>/ with the region map,
+    ;; owner-editable profile text, media gallery, blog posts and live statistics.
+    ; Enabled = true
+
+    ;# {PublicPath} {Enabled} {Public URL path for region pages} {} /regionweb
+    ; PublicPath = "/regionweb"
+
+    ;# {ContentDirectory} {Enabled} {Folder for per-region web content} {} RegionWeb
+    ;; Relative paths are under bin/. Each region gets a folder named after its URL slug.
+    ; ContentDirectory = "RegionWeb"
+
+    ;# {AutoCreateContent} {Enabled} {Create starter profile and post files} {true false} true
+    ; AutoCreateContent = true
+
+    ;# {ShowMap} {Enabled} {Show the current world map tile} {true false} true
+    ; ShowMap = true
+
+    ;# {ShowStats} {Enabled} {Show live region statistics} {true false} true
+    ; ShowStats = true
+
+    ;# {ShowParcels} {Enabled} {Show largest parcels} {true false} true
+    ; ShowParcels = true
+
+    ;# {PostsPerPage} {Enabled} {Number of blog posts on the region page} {} 5
+    ; PostsPerPage = 5
+
 
 [Terrain]
     ;# {InitialTerrain} {} {Initial terrain type} {pinhead-island flat} pinhead-island
