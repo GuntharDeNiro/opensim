@@ -879,6 +879,24 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public LSL_Integer llIsExperienceTrusted()
+        {
+            return m_LSL_Functions.llIsExperienceTrusted();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public LSL_Integer llGetExperiencePermissions()
+        {
+            return m_LSL_Functions.llGetExperiencePermissions();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public LSL_Integer llExperienceCanAutoGrant(int permissions)
+        {
+            return m_LSL_Functions.llExperienceCanAutoGrant(permissions);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public LSL_Key llGetPermissionsKey()
         {
             return m_LSL_Functions.llGetPermissionsKey();

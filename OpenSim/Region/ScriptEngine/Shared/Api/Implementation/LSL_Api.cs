@@ -4693,6 +4693,24 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             return perms;
         }
 
+        public LSL_Integer llIsExperienceTrusted()
+        {
+            return IsScriptExperienceTrusted() ? 1 : 0;
+        }
+
+        public LSL_Integer llGetExperiencePermissions()
+        {
+            return IsScriptExperienceTrusted() ? m_scriptExperienceAutoGrantPermissions : 0;
+        }
+
+        public LSL_Integer llExperienceCanAutoGrant(int permissions)
+        {
+            if (!IsScriptExperienceTrusted())
+                return 0;
+
+            return (permissions & ~m_scriptExperienceAutoGrantPermissions) == 0 ? 1 : 0;
+        }
+
         public LSL_Integer llGetLinkNumber()
         {
 

@@ -1196,6 +1196,8 @@
     ;; Runtime permission bitmask trusted experiences may auto grant.
     ;; Default 39956 grants controls, animations, camera, teleport and animation override.
     ;; It intentionally excludes PERMISSION_DEBIT and ownership changes.
+    ;; Scripts can inspect this trust state with llIsExperienceTrusted(),
+    ;; llGetExperiencePermissions() and llExperienceCanAutoGrant(mask).
     ; AutoGrantPermissions = 39956
 
 
