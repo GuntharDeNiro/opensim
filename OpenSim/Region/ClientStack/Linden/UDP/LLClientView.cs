@@ -36,6 +36,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 
 using log4net;
+using Nini.Config;
 using OpenMetaverse;
 using OpenMetaverse.Packets;
 using OpenMetaverse.StructuredData;
@@ -530,7 +531,10 @@ namespace OpenSim.Region.ClientStack.LindenUDP
             m_assetService = m_scene.RequestModuleInterface<IAssetService>();
             m_GroupsModule = scene.RequestModuleInterface<IGroupsModule>();
             ImageManager = new LLImageManager(this, m_assetService, Scene.RequestModuleInterface<IJ2KDecoder>());
-            m_regionChannelVersion = Util.StringToBytes1024(scene.GetSimulatorVersion());
+            string viewerSimulatorVersion = GetViewerSimulatorVersion(scene);
+            m_regionChannelVersion = string.IsNullOrEmpty(viewerSimulatorVersion)
+                ? Utils.EmptyBytes
+                : Util.StringToBytes1024(viewerSimulatorVersion);
             m_agentId = agentId;
             m_sessionId = sessionId;
             m_secureSessionId = sessionInfo.LoginInfo.SecureSession;
@@ -558,6 +562,26 @@ namespace OpenSim.Region.ClientStack.LindenUDP
             IsActive = true;
 
             m_supportViewerCache = m_udpServer.SupportViewerObjectsCache;
+        }
+
+        private static string GetViewerSimulatorVersion(Scene scene)
+        {
+            IConfigSource config = scene.Config;
+            string[] sections = new string[] { "ClientStack.LindenUDP", "Startup" };
+
+            bool sendSimulatorVersion = Util.GetConfigVarFromSections<bool>(
+                config, "SendSimulatorVersionToViewer", sections, true);
+
+            if (!sendSimulatorVersion)
+                return string.Empty;
+
+            string overrideVersion = Util.GetConfigVarFromSections<string>(
+                config, "ViewerSimulatorVersionOverride", sections, string.Empty);
+
+            if (!string.IsNullOrEmpty(overrideVersion))
+                return overrideVersion;
+
+            return scene.GetSimulatorVersion();
         }
 
         #region Client Methods

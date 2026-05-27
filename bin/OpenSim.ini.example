@@ -781,6 +781,18 @@
     ;; DO NOT MODIFY OpenSimDefaults.ini, as your changes would be lost
     ;; with the next update!
 
+    ;# {SendSimulatorVersionToViewer} {} {Send simulator build/runtime string to viewers?} {true false} false
+    ;; If false, viewers will not receive the simulator build hash/runtime in
+    ;; AgentMovementComplete. This avoids noisy "different simulator version"
+    ;; notices when teleporting or crossing between regions with different
+    ;; local builds or operating systems.
+    ; SendSimulatorVersionToViewer = false
+
+    ;# {ViewerSimulatorVersionOverride} {SendSimulatorVersionToViewer} {Fixed simulator version string for viewers} {} OpenSim
+    ;; Optional fixed string to send instead of the full build/runtime string.
+    ;; Only used when SendSimulatorVersionToViewer is true.
+    ; ViewerSimulatorVersionOverride = "OpenSim"
+
     ;# {DisableFacelights} {} {Stop facelights from working?} {true false} false
     ;; Quash and remove any light properties from attachments not on the
     ;; hands. This allows flashlights and lanterns to function, but kills
