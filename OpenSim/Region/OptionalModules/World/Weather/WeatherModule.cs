@@ -103,7 +103,16 @@ namespace OpenSim.Region.OptionalModules.World.Weather
         private int m_autoCycleStartupDelaySeconds;
         private bool m_autoCycleChangeOnStartup;
         private Timer m_autoCycleTimer;
+        private Timer m_autoCycleWarningTimer;
         private int m_autoCycleBusy;
+        private long m_nextAutoCycleTicks;
+        private WeatherKind m_pendingAutoCycleWeather;
+        private bool m_hasPendingAutoCycleWeather;
+        private int m_autoCycleForecastWarningMinutes;
+        private string m_autoCycleForecastWarningMessage;
+        private bool m_sendWeatherIMOnEntry;
+        private int m_weatherIMDelaySeconds;
+        private string m_weatherIMMessage;
 
         public string Name { get { return "Weather Module"; } }
 
@@ -142,6 +151,15 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             m_autoCycleStartupDelaySeconds = Math.Max(1, config.GetInt("AutoCycleStartupDelaySeconds", 30));
             m_autoCycleChangeOnStartup = config.GetBoolean("AutoCycleChangeOnStartup", true);
             ParseAutoCycleChoices(config.GetString("AutoCycleChoices", "storm,rain,snow,sunny"));
+            m_autoCycleForecastWarningMinutes = Math.Max(0, config.GetInt("AutoCycleForecastWarningMinutes", 15));
+            m_autoCycleForecastWarningMessage = config.GetString(
+                "AutoCycleForecastWarningMessage",
+                "Weather forecast update: next conditions for {RegionName} are expected to shift to {NextWeather} in {TimeUntilNextForecast}.").Trim();
+            m_sendWeatherIMOnEntry = config.GetBoolean("SendWeatherIMOnEntry", true);
+            m_weatherIMDelaySeconds = Math.Max(0, config.GetInt("WeatherIMDelaySeconds", 8));
+            m_weatherIMMessage = config.GetString(
+                "WeatherIMMessage",
+                "Weather forecast for {RegionName}: current conditions are {Weather}. Next forecast: {NextForecast}. Stay tuned for further regional updates.").Trim();
 
             string thunderSound = config.GetString("ThunderSound", string.Empty);
             if (!string.IsNullOrEmpty(thunderSound) && !UUID.TryParse(thunderSound, out m_thunderSound))
@@ -155,6 +173,7 @@ namespace OpenSim.Region.OptionalModules.World.Weather
 
             m_scene = scene;
             m_scene.EventManager.OnChatFromClient += OnChatFromClient;
+            m_scene.EventManager.OnMakeRootAgent += OnMakeRootAgent;
             m_log.InfoFormat(
                 "[WEATHER]: Enabled in region {0} on channel {1}",
                 scene.RegionInfo.RegionName,
@@ -166,7 +185,10 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             StopAutoCycle();
 
             if (m_scene != null)
+            {
                 m_scene.EventManager.OnChatFromClient -= OnChatFromClient;
+                m_scene.EventManager.OnMakeRootAgent -= OnMakeRootAgent;
+            }
 
             ClearWeather(false, true);
             m_scene = null;
@@ -192,6 +214,24 @@ namespace OpenSim.Region.OptionalModules.World.Weather
         {
             StopAutoCycle();
             ClearWeather(false, true);
+        }
+
+        private void OnMakeRootAgent(ScenePresence sp)
+        {
+            if (!m_sendWeatherIMOnEntry || sp == null || sp.IsDeleted || sp.IsNPC || sp.IsChildAgent)
+                return;
+
+            Util.FireAndForget(
+                o =>
+                {
+                    if (m_weatherIMDelaySeconds > 0)
+                        Thread.Sleep(m_weatherIMDelaySeconds * 1000);
+
+                    SendWeatherIM(sp.UUID);
+                },
+                null,
+                "WeatherModule.EntryIM",
+                false);
         }
 
         private void OnChatFromClient(object sender, OSChatMessage chat)
@@ -308,7 +348,9 @@ namespace OpenSim.Region.OptionalModules.World.Weather
                 ? m_autoCycleStartupDelaySeconds * 1000
                 : AutoCycleIntervalMS();
 
-            m_autoCycleTimer = new Timer(AutoCycleTimerElapsed, null, dueTime, Timeout.Infinite);
+            m_autoCycleTimer = new Timer(AutoCycleTimerElapsed, null, Timeout.Infinite, Timeout.Infinite);
+            m_autoCycleWarningTimer = new Timer(AutoCycleForecastWarningElapsed, null, Timeout.Infinite, Timeout.Infinite);
+            ScheduleAutoCycle(dueTime);
 
             m_log.InfoFormat(
                 "[WEATHER]: Auto cycle enabled in {0}; choices={1}, interval={2:0.##} hours",
@@ -321,11 +363,17 @@ namespace OpenSim.Region.OptionalModules.World.Weather
         {
             Timer timer = m_autoCycleTimer;
             m_autoCycleTimer = null;
+            Timer warningTimer = m_autoCycleWarningTimer;
+            m_autoCycleWarningTimer = null;
 
             if (timer != null)
                 timer.Dispose();
+            if (warningTimer != null)
+                warningTimer.Dispose();
 
             Interlocked.Exchange(ref m_autoCycleBusy, 0);
+            m_nextAutoCycleTicks = 0;
+            m_hasPendingAutoCycleWeather = false;
         }
 
         private void AutoCycleTimerElapsed(object state)
@@ -338,7 +386,13 @@ namespace OpenSim.Region.OptionalModules.World.Weather
                 if (m_scene == null)
                     return;
 
-                WeatherKind weather = PickAutoCycleWeather();
+                WeatherKind weather;
+                lock (m_sync)
+                {
+                    weather = m_hasPendingAutoCycleWeather ? m_pendingAutoCycleWeather : PickAutoCycleWeather();
+                    m_hasPendingAutoCycleWeather = false;
+                }
+
                 if (weather == WeatherKind.Clear)
                 {
                     ClearWeather(true, true);
@@ -373,11 +427,63 @@ namespace OpenSim.Region.OptionalModules.World.Weather
 
         private void ScheduleNextAutoCycle()
         {
+            ScheduleAutoCycle(AutoCycleIntervalMS());
+        }
+
+        private void ScheduleAutoCycle(int dueTimeMS)
+        {
             Timer timer = m_autoCycleTimer;
             if (timer == null || m_scene == null)
                 return;
 
-            timer.Change(AutoCycleIntervalMS(), Timeout.Infinite);
+            dueTimeMS = Math.Max(1000, dueTimeMS);
+            m_nextAutoCycleTicks = DateTime.Now.Ticks + dueTimeMS * 10000L;
+            timer.Change(dueTimeMS, Timeout.Infinite);
+
+            ScheduleAutoCycleWarning(dueTimeMS);
+        }
+
+        private void ScheduleAutoCycleWarning(int dueTimeMS)
+        {
+            Timer warningTimer = m_autoCycleWarningTimer;
+            if (warningTimer == null || m_autoCycleForecastWarningMinutes <= 0 || string.IsNullOrEmpty(m_autoCycleForecastWarningMessage))
+                return;
+
+            int warningLeadMS = m_autoCycleForecastWarningMinutes * 60 * 1000;
+            int warningDueMS = dueTimeMS - warningLeadMS;
+            if (warningDueMS <= 0)
+            {
+                warningTimer.Change(Timeout.Infinite, Timeout.Infinite);
+                return;
+            }
+
+            warningTimer.Change(warningDueMS, Timeout.Infinite);
+        }
+
+        private void AutoCycleForecastWarningElapsed(object state)
+        {
+            Scene scene = m_scene;
+            if (scene == null || string.IsNullOrEmpty(m_autoCycleForecastWarningMessage))
+                return;
+
+            WeatherKind nextWeather;
+            lock (m_sync)
+            {
+                if (!m_hasPendingAutoCycleWeather)
+                {
+                    m_pendingAutoCycleWeather = PickAutoCycleWeather();
+                    m_hasPendingAutoCycleWeather = true;
+                }
+
+                nextWeather = m_pendingAutoCycleWeather;
+            }
+
+            string message = FormatForecastWarningMessage(scene, nextWeather);
+            scene.ForEachRootScenePresence(sp =>
+            {
+                if (sp != null && !sp.IsDeleted && sp.ControllingClient != null)
+                    SendRegionWeatherMessage(sp, message);
+            });
         }
 
         private int AutoCycleIntervalMS()
@@ -1103,6 +1209,108 @@ namespace OpenSim.Region.OptionalModules.World.Weather
                     WeatherName(weather),
                     emitterCount,
                     m_autoCycleEnabled ? string.Format("{0:0.##}h", m_autoCycleHours) : "off"));
+        }
+
+        private void SendWeatherIM(UUID agentID)
+        {
+            Scene scene = m_scene;
+            if (scene == null || string.IsNullOrEmpty(m_weatherIMMessage))
+                return;
+
+            ScenePresence sp = scene.GetScenePresence(agentID);
+            if (sp == null || sp.IsDeleted || sp.IsNPC || sp.IsChildAgent || sp.ControllingClient == null)
+                return;
+
+            GridInstantMessage msg = new GridInstantMessage
+            {
+                imSessionID = UUID.Random().Guid,
+                fromAgentID = UUID.Zero.Guid,
+                toAgentID = agentID.Guid,
+                timestamp = (uint)Util.UnixTimeSinceEpoch(),
+                fromAgentName = "Weather",
+                message = FormatWeatherIMMessage(scene),
+                dialog = (byte)InstantMessageDialog.MessageFromAgent,
+                fromGroup = false,
+                offline = (byte)0,
+                ParentEstateID = 0,
+                Position = sp.AbsolutePosition,
+                RegionID = scene.RegionInfo.RegionID.Guid,
+                binaryBucket = Array.Empty<byte>()
+            };
+
+            sp.ControllingClient.SendInstantMessage(msg);
+        }
+
+        private string FormatForecastWarningMessage(Scene scene, WeatherKind nextWeather)
+        {
+            return m_autoCycleForecastWarningMessage
+                .Replace("{RegionName}", scene.RegionInfo.RegionName)
+                .Replace("{NextWeather}", WeatherName(nextWeather))
+                .Replace("{TimeUntilNextForecast}", FormatTimeUntilNextForecast())
+                .Replace("{NextForecast}", FormatNextForecast());
+        }
+
+        private void SendRegionWeatherMessage(ScenePresence sp, string message)
+        {
+            sp.ControllingClient.SendChatMessage(
+                message,
+                (byte)ChatTypeEnum.Region,
+                Vector3.Zero,
+                "Weather",
+                UUID.Zero,
+                UUID.Zero,
+                (byte)ChatSourceType.Object,
+                (byte)ChatAudibleLevel.Fully);
+        }
+
+        private string FormatWeatherIMMessage(Scene scene)
+        {
+            int emitterCount;
+            WeatherKind weather;
+            lock (m_sync)
+            {
+                emitterCount = m_emitters.Count;
+                weather = m_currentWeather;
+            }
+
+            return m_weatherIMMessage
+                .Replace("{RegionName}", scene.RegionInfo.RegionName)
+                .Replace("{Weather}", WeatherName(weather))
+                .Replace("{EmitterCount}", emitterCount.ToString(CultureInfo.InvariantCulture))
+                .Replace("{AutoCycle}", m_autoCycleEnabled ? string.Format(CultureInfo.InvariantCulture, "{0:0.##}h", m_autoCycleHours) : "off")
+                .Replace("{NextForecast}", FormatNextForecast());
+        }
+
+        private string FormatNextForecast()
+        {
+            if (!m_autoCycleEnabled)
+                return "manual updates only";
+
+            string timeUntil = FormatTimeUntilNextForecast();
+            if (string.IsNullOrEmpty(timeUntil))
+                return "scheduled shortly";
+
+            return "in " + timeUntil;
+        }
+
+        private string FormatTimeUntilNextForecast()
+        {
+            long nextTicks = m_nextAutoCycleTicks;
+            if (nextTicks <= 0)
+                return string.Empty;
+
+            TimeSpan remaining = new TimeSpan(Math.Max(0, nextTicks - DateTime.Now.Ticks));
+            if (remaining.TotalSeconds < 60)
+                return "less than 1 minute";
+
+            int hours = (int)Math.Floor(remaining.TotalHours);
+            int minutes = remaining.Minutes;
+            if (hours > 0 && minutes > 0)
+                return string.Format(CultureInfo.InvariantCulture, "{0} hour{1} {2} minute{3}", hours, hours == 1 ? string.Empty : "s", minutes, minutes == 1 ? string.Empty : "s");
+            if (hours > 0)
+                return string.Format(CultureInfo.InvariantCulture, "{0} hour{1}", hours, hours == 1 ? string.Empty : "s");
+
+            return string.Format(CultureInfo.InvariantCulture, "{0} minute{1}", Math.Max(1, minutes), minutes == 1 ? string.Empty : "s");
         }
 
         private static string WeatherName(WeatherKind weather)
