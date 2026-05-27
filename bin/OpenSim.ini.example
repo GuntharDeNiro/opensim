@@ -457,6 +457,12 @@
     ;# {MapObjectVolumeFaceShading} {PrettyPrimVolumeOnMapTile} {Shade individual object faces for sharper geographic relief?} {true false} true
     ; MapObjectVolumeFaceShading = true
 
+    ;# {MapObjectVolumeRenderMeshGeometry} {PrettyPrimVolumeOnMapTile} {Render sculpt and mesh geometry instead of their bounding boxes?} {true false} true
+    ; MapObjectVolumeRenderMeshGeometry = true
+
+    ;# {MapObjectVolumeMeshDetailLevel} {MapObjectVolumeRenderMeshGeometry} {Mesh and sculpt map detail level: 0=Low, 1=Medium, 2=High, 3=Highest} {} 3
+    ; MapObjectVolumeMeshDetailLevel = 3
+
     ;# {MapObjectVolumeMinimumOpacity} {PrettyPrimVolumeOnMapTile} {Minimum opacity after texture alpha is applied} {} 35
     ; MapObjectVolumeMinimumOpacity = 35
 

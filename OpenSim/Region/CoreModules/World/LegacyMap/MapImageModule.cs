@@ -30,11 +30,13 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Reflection;
+using CSJ2K;
 using log4net;
 using Mono.Addins;
 using Nini.Config;
 using OpenMetaverse;
 using OpenMetaverse.Imaging;
+using OpenMetaverse.Rendering;
 using OpenSim.Framework;
 using OpenSim.Region.Framework.Interfaces;
 using OpenSim.Region.Framework.Scenes;
@@ -74,6 +76,14 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         public float z;
     }
 
+    public struct MapPolygonDraw
+    {
+        public Point[] points;
+        public SolidBrush brush;
+        public Pen outlinePen;
+        public float z;
+    }
+
     public struct MapTextureSample
     {
         public bool valid;
@@ -90,6 +100,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         private Scene m_scene;
         private IConfigSource m_config;
         private IMapTileTerrainRenderer terrainRenderer;
+        private IRendering m_primMesher;
         private bool m_Enabled = false;
         private static readonly string[] MapConfigSections = new string[] { "Map", "Startup" };
         private readonly Dictionary<UUID, MapTextureSample> m_textureSampleCache = new Dictionary<UUID, MapTextureSample>();
@@ -345,6 +356,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             List<uint> z_localIDs = new List<uint>();
             Dictionary<uint, DrawStruct> z_sort = new Dictionary<uint, DrawStruct>();
             List<MapEllipseDraw> vegetation = new List<MapEllipseDraw>();
+            List<MapPolygonDraw> meshGeometry = new List<MapPolygonDraw>();
             bool prettyObjectVolume = Util.GetConfigVarFromSections<bool>(
                 m_config, "PrettyPrimVolumeOnMapTile", MapConfigSections, true);
             bool drawObjectOutlines = Util.GetConfigVarFromSections<bool>(
@@ -391,6 +403,12 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 m_config, "MapObjectVolumeColorContrast", MapConfigSections, 1.06f)));
             bool faceShading = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeFaceShading", MapConfigSections, true);
+            bool renderMeshGeometry = Util.GetConfigVarFromSections<bool>(
+                m_config, "MapObjectVolumeRenderMeshGeometry", MapConfigSections, true);
+            DetailLevel meshDetailLevel = GetMapMeshDetailLevel(Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeMeshDetailLevel", MapConfigSections, 3));
+
+            EnsurePrimMesher(renderMeshGeometry);
 
             try
             {
@@ -505,6 +523,13 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
                                         if (isWaterLikeObject)
                                             fillOpacity = Math.Min(fillOpacity, waterObjectOpacity);
+
+                                        if (prettyObjectVolume && renderMeshGeometry &&
+                                            IsSculptOrMesh(part) &&
+                                            TryAddMeshGeometryDraws(meshGeometry, part, mapdotspot,
+                                                fillOpacity, outlineOpacity, drawObjectOutlines,
+                                                faceShading, meshDetailLevel))
+                                            continue;
 
                                         // If object is beyond the edge of the map, don't draw it to avoid errors
                                         if (mapdrawstartX < 0
@@ -736,6 +761,18 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                 g.FillEllipse(veg.innerBrush, veg.innerRect);
                         }
 
+                        meshGeometry.Sort(delegate(MapPolygonDraw left, MapPolygonDraw right)
+                        {
+                            return left.z.CompareTo(right.z);
+                        });
+
+                        foreach (MapPolygonDraw mesh in meshGeometry)
+                        {
+                            g.FillPolygon(mesh.brush, mesh.points);
+                            if (mesh.outlinePen != null)
+                                g.DrawPolygon(mesh.outlinePen, mesh.points);
+                        }
+
                         for (int s = 0; s < sortedZHeights.Length; s++)
                         {
                             if (z_sort.ContainsKey(sortedlocalIds[s]))
@@ -786,11 +823,198 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     if (veg.outlinePen != null)
                         veg.outlinePen.Dispose();
                 }
+
+                foreach (MapPolygonDraw mesh in meshGeometry)
+                {
+                    mesh.brush.Dispose();
+                    if (mesh.outlinePen != null)
+                        mesh.outlinePen.Dispose();
+                }
             }
 
             m_log.Debug("[MAPTILE]: Generating Maptile Step 2: Done in " + (Environment.TickCount - tc) + " ms");
 
             return mapbmp;
+        }
+
+        private void EnsurePrimMesher(bool needed)
+        {
+            if (!needed || m_primMesher != null)
+                return;
+
+            List<string> renderers = RenderingLoader.ListRenderers(Util.ExecutingDirectory());
+            if (renderers.Count > 0)
+            {
+                m_primMesher = RenderingLoader.LoadRenderer(renderers[0]);
+                m_log.Debug("[MAPTILE]: Loaded mesh geometry renderer " + renderers[0]);
+            }
+            else
+            {
+                m_log.Debug("[MAPTILE]: No mesh geometry renderer available; sculpt and mesh map tiles will use volume fallback");
+            }
+        }
+
+        private static DetailLevel GetMapMeshDetailLevel(int configuredLevel)
+        {
+            if (configuredLevel < 0)
+                configuredLevel = 0;
+            else if (configuredLevel > 3)
+                configuredLevel = 3;
+
+            return (DetailLevel)configuredLevel;
+        }
+
+        private static bool IsSculptOrMesh(SceneObjectPart part)
+        {
+            return part != null &&
+                part.Shape != null &&
+                part.Shape.SculptEntry &&
+                part.Shape.SculptTexture.IsNotZero();
+        }
+
+        private bool TryAddMeshGeometryDraws(List<MapPolygonDraw> meshGeometry, SceneObjectPart part,
+            Color fallbackColor, int opacity, int outlineOpacity, bool drawOutlines,
+            bool faceShading, DetailLevel lod)
+        {
+            if (m_primMesher == null)
+                return false;
+
+            FacetedMesh renderMesh = GetRenderMesh(part, lod);
+            if (renderMesh == null || renderMesh.Faces == null || renderMesh.Faces.Count == 0)
+                return false;
+
+            Primitive.TextureEntry textureEntry = part.Shape.Textures;
+            if (textureEntry == null)
+                return false;
+
+            Vector3 pos = part.GetWorldPosition();
+            Quaternion rot = part.GetWorldRotation();
+            Vector3 scale = part.Scale;
+            bool added = false;
+
+            for (int i = 0; i < renderMesh.Faces.Count; i++)
+            {
+                OpenMetaverse.Rendering.Face face = renderMesh.Faces[i];
+                if (face == null || face.Vertices == null || face.Indices == null)
+                    continue;
+
+                Primitive.TextureEntryFace textureFace = textureEntry.GetFace((uint)i);
+                if (textureFace == null || textureFace.RGBA.A <= 0f)
+                    continue;
+
+                Color faceColor = GetTextureFaceMapColor(textureFace, fallbackColor);
+                int faceOpacity = ApplyTextureAlpha(opacity, textureFace.RGBA.A, 0);
+
+                for (int j = 0; j + 2 < face.Indices.Count; j += 3)
+                {
+                    int index0 = face.Indices[j];
+                    int index1 = face.Indices[j + 1];
+                    int index2 = face.Indices[j + 2];
+
+                    if (index0 < 0 || index1 < 0 || index2 < 0 ||
+                        index0 >= face.Vertices.Count ||
+                        index1 >= face.Vertices.Count ||
+                        index2 >= face.Vertices.Count)
+                        continue;
+
+                    Vector3 world0 = MeshVertexToWorld(face.Vertices[index0].Position, scale, rot, pos);
+                    Vector3 world1 = MeshVertexToWorld(face.Vertices[index1].Position, scale, rot, pos);
+                    Vector3 world2 = MeshVertexToWorld(face.Vertices[index2].Position, scale, rot, pos);
+
+                    if (!MapPointIsDrawable(world0) || !MapPointIsDrawable(world1) || !MapPointIsDrawable(world2))
+                        continue;
+
+                    Color drawColor = faceShading ? ShadeFaceColor(faceColor, world0, world1, world2) : faceColor;
+                    Point[] points = new Point[]
+                    {
+                        WorldToMapPoint(world0),
+                        WorldToMapPoint(world1),
+                        WorldToMapPoint(world2)
+                    };
+
+                    meshGeometry.Add(new MapPolygonDraw
+                    {
+                        points = points,
+                        brush = new SolidBrush(Color.FromArgb(faceOpacity, drawColor)),
+                        outlinePen = drawOutlines
+                            ? new Pen(Color.FromArgb(Math.Min(outlineOpacity, 72), Darken(drawColor, 0.50f)), 1f)
+                            : null,
+                        z = (world0.Z + world1.Z + world2.Z) / 3f
+                    });
+                    added = true;
+                }
+            }
+
+            return added;
+        }
+
+        private FacetedMesh GetRenderMesh(SceneObjectPart part, DetailLevel lod)
+        {
+            Primitive omvPrim = part.Shape.ToOmvPrimitive(part.OffsetPosition, part.RotationOffset);
+            FacetedMesh renderMesh = null;
+
+            if (omvPrim.Sculpt != null && omvPrim.Sculpt.SculptTexture.IsNotZero())
+            {
+                AssetBase sculptAsset = m_scene.AssetService.Get(omvPrim.Sculpt.SculptTexture.ToString());
+                if (sculptAsset != null && sculptAsset.Data != null)
+                {
+                    try
+                    {
+                        if (omvPrim.Sculpt.Type == SculptType.Mesh)
+                        {
+                            FacetedMesh.TryDecodeFromBytes(sculptAsset.Data, lod, out renderMesh, true);
+                        }
+                        else if (IsLikelyDecodableTexture(sculptAsset.Data))
+                        {
+                            Image sculpt = J2kImage.FromBytes(sculptAsset.Data, null, true, 12);
+                            if (sculpt != null)
+                            {
+                                using (sculpt)
+                                {
+                                    renderMesh = m_primMesher.GenerateFacetedSculptMesh(omvPrim, (Bitmap)sculpt, lod);
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        m_log.DebugFormat("[MAPTILE]: Mesh geometry decode failed for {0}: {1}", part.Name, e.Message);
+                    }
+                }
+            }
+
+            return renderMesh;
+        }
+
+        private Color GetTextureFaceMapColor(Primitive.TextureEntryFace textureFace, Color fallback)
+        {
+            MapTextureSample sample = GetTextureFaceSample(textureFace);
+            if (sample.valid)
+                return ClampBrightness(sample.color, 56, 242);
+
+            return fallback;
+        }
+
+        private Vector3 MeshVertexToWorld(Vector3 vertex, Vector3 scale, Quaternion rot, Vector3 pos)
+        {
+            Vector3 local = new Vector3(vertex.X * scale.X, vertex.Y * scale.Y, vertex.Z * scale.Z);
+            local *= rot;
+            return pos + local;
+        }
+
+        private bool MapPointIsDrawable(Vector3 point)
+        {
+            if (Single.IsNaN(point.X) || Single.IsNaN(point.Y) ||
+                Single.IsInfinity(point.X) || Single.IsInfinity(point.Y))
+                return false;
+
+            return point.X >= 0f && point.X < m_scene.RegionInfo.RegionSizeX &&
+                point.Y >= 0f && point.Y < m_scene.RegionInfo.RegionSizeY;
+        }
+
+        private Point WorldToMapPoint(Vector3 point)
+        {
+            return new Point((int)point.X, (int)(m_scene.RegionInfo.RegionSizeY - 1 - point.Y));
         }
 
         private bool IsVegetation(SceneObjectPart part)
