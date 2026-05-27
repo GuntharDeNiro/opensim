@@ -47,6 +47,7 @@ namespace OpenSim.Region.OptionalModules.World.Weather
         private enum WeatherKind
         {
             Clear,
+            Sunny,
             Rain,
             Storm,
             Snow
@@ -63,6 +64,7 @@ namespace OpenSim.Region.OptionalModules.World.Weather
         private readonly object m_sync = new object();
         private readonly object m_randomSync = new object();
         private readonly List<SceneObjectGroup> m_emitters = new List<SceneObjectGroup>();
+        private readonly List<WeatherKind> m_autoCycleChoices = new List<WeatherKind>();
         private readonly Random m_random = new Random();
 
         private Scene m_scene;
@@ -96,6 +98,12 @@ namespace OpenSim.Region.OptionalModules.World.Weather
         private bool m_thunderEnabled;
         private UUID m_thunderSound = UUID.Zero;
         private float m_thunderVolume;
+        private bool m_autoCycleEnabled;
+        private float m_autoCycleHours;
+        private int m_autoCycleStartupDelaySeconds;
+        private bool m_autoCycleChangeOnStartup;
+        private Timer m_autoCycleTimer;
+        private int m_autoCycleBusy;
 
         public string Name { get { return "Weather Module"; } }
 
@@ -129,6 +137,11 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             m_lightningMaxDelayMS = Math.Max(m_lightningMinDelayMS, config.GetInt("LightningMaxDelayMS", 18000));
             m_thunderEnabled = config.GetBoolean("ThunderEnabled", true);
             m_thunderVolume = Clamp(config.GetFloat("ThunderVolume", 1f), 0f, 1f);
+            m_autoCycleEnabled = config.GetBoolean("AutoCycleEnabled", false);
+            m_autoCycleHours = Math.Max(0.01f, config.GetFloat("AutoCycleHours", 6f));
+            m_autoCycleStartupDelaySeconds = Math.Max(1, config.GetInt("AutoCycleStartupDelaySeconds", 30));
+            m_autoCycleChangeOnStartup = config.GetBoolean("AutoCycleChangeOnStartup", true);
+            ParseAutoCycleChoices(config.GetString("AutoCycleChoices", "storm,rain,snow,sunny"));
 
             string thunderSound = config.GetString("ThunderSound", string.Empty);
             if (!string.IsNullOrEmpty(thunderSound) && !UUID.TryParse(thunderSound, out m_thunderSound))
@@ -150,6 +163,8 @@ namespace OpenSim.Region.OptionalModules.World.Weather
 
         public void RemoveRegion(Scene scene)
         {
+            StopAutoCycle();
+
             if (m_scene != null)
                 m_scene.EventManager.OnChatFromClient -= OnChatFromClient;
 
@@ -169,10 +184,13 @@ namespace OpenSim.Region.OptionalModules.World.Weather
             m_windModule = scene.RequestModuleInterface<IWindModule>();
             if (m_adjustWind && m_windModule == null)
                 m_log.WarnFormat("[WEATHER]: Region wind changes disabled in {0}; WindModule is not available.", scene.RegionInfo.RegionName);
+
+            StartAutoCycle();
         }
 
         public void Close()
         {
+            StopAutoCycle();
             ClearWeather(false, true);
         }
 
@@ -200,7 +218,7 @@ namespace OpenSim.Region.OptionalModules.World.Weather
 
             if (!TryResolveWeather(request, out WeatherKind weather))
             {
-                SendReply(client, "Weather: use rain, storm, snow, clear, or status.");
+                SendReply(client, "Weather: use rain, storm, snow, sunny, clear, or status.");
                 return;
             }
 
@@ -225,33 +243,37 @@ namespace OpenSim.Region.OptionalModules.World.Weather
                 return false;
 
             List<SceneObjectGroup> created = new List<SceneObjectGroup>();
-            int sizeX = Math.Max(1, (int)m_scene.RegionInfo.RegionSizeX);
-            int sizeY = Math.Max(1, (int)m_scene.RegionInfo.RegionSizeY);
-            float spacingX = sizeX / (float)m_emitterGrid;
-            float spacingY = sizeY / (float)m_emitterGrid;
-            float radius = Math.Max(spacingX, spacingY) * 0.62f;
 
-            for (int x = 0; x < m_emitterGrid; x++)
+            if (weather != WeatherKind.Sunny)
             {
-                for (int y = 0; y < m_emitterGrid; y++)
+                int sizeX = Math.Max(1, (int)m_scene.RegionInfo.RegionSizeX);
+                int sizeY = Math.Max(1, (int)m_scene.RegionInfo.RegionSizeY);
+                float spacingX = sizeX / (float)m_emitterGrid;
+                float spacingY = sizeY / (float)m_emitterGrid;
+                float radius = Math.Max(spacingX, spacingY) * 0.62f;
+
+                for (int x = 0; x < m_emitterGrid; x++)
                 {
-                    float posX = JitteredCellPosition(x, spacingX, sizeX);
-                    float posY = JitteredCellPosition(y, spacingY, sizeY);
-                    float ground = m_scene.GetGroundHeight(posX, posY);
-                    Vector3 position = new Vector3(posX, posY, ground + JitterHeight());
-                    if (IsCoveredFromSky(posX, posY, ground, position.Z))
-                        continue;
-
-                    SceneObjectGroup emitter = CreateEmitter(ownerId, weather, position, radius);
-                    if (!m_scene.AddNewSceneObject(emitter, false))
+                    for (int y = 0; y < m_emitterGrid; y++)
                     {
-                        DeleteEmitters(created);
-                        return false;
-                    }
+                        float posX = JitteredCellPosition(x, spacingX, sizeX);
+                        float posY = JitteredCellPosition(y, spacingY, sizeY);
+                        float ground = m_scene.GetGroundHeight(posX, posY);
+                        Vector3 position = new Vector3(posX, posY, ground + JitterHeight());
+                        if (IsCoveredFromSky(posX, posY, ground, position.Z))
+                            continue;
 
-                    emitter.RootPart.SendFullUpdateToAllClients();
-                    emitter.ScheduleGroupForUpdate(PrimUpdateFlags.FullUpdatewithAnimMatOvr);
-                    created.Add(emitter);
+                        SceneObjectGroup emitter = CreateEmitter(ownerId, weather, position, radius);
+                        if (!m_scene.AddNewSceneObject(emitter, false))
+                        {
+                            DeleteEmitters(created);
+                            return false;
+                        }
+
+                        emitter.RootPart.SendFullUpdateToAllClients();
+                        emitter.ScheduleGroupForUpdate(PrimUpdateFlags.FullUpdatewithAnimMatOvr);
+                        created.Add(emitter);
+                    }
                 }
             }
 
@@ -273,6 +295,143 @@ namespace OpenSim.Region.OptionalModules.World.Weather
                 created.Count);
 
             return true;
+        }
+
+        private void StartAutoCycle()
+        {
+            if (!m_autoCycleEnabled || m_scene == null)
+                return;
+
+            StopAutoCycle();
+
+            int dueTime = m_autoCycleChangeOnStartup
+                ? m_autoCycleStartupDelaySeconds * 1000
+                : AutoCycleIntervalMS();
+
+            m_autoCycleTimer = new Timer(AutoCycleTimerElapsed, null, dueTime, Timeout.Infinite);
+
+            m_log.InfoFormat(
+                "[WEATHER]: Auto cycle enabled in {0}; choices={1}, interval={2:0.##} hours",
+                m_scene.RegionInfo.RegionName,
+                AutoCycleChoiceNames(),
+                m_autoCycleHours);
+        }
+
+        private void StopAutoCycle()
+        {
+            Timer timer = m_autoCycleTimer;
+            m_autoCycleTimer = null;
+
+            if (timer != null)
+                timer.Dispose();
+
+            Interlocked.Exchange(ref m_autoCycleBusy, 0);
+        }
+
+        private void AutoCycleTimerElapsed(object state)
+        {
+            if (Interlocked.Exchange(ref m_autoCycleBusy, 1) != 0)
+                return;
+
+            try
+            {
+                if (m_scene == null)
+                    return;
+
+                WeatherKind weather = PickAutoCycleWeather();
+                if (weather == WeatherKind.Clear)
+                {
+                    ClearWeather(true, true);
+                    m_log.InfoFormat("[WEATHER]: Auto cycle selected clear in {0}", m_scene.RegionInfo.RegionName);
+                }
+                else if (ApplyWeather(weather, UUID.Zero))
+                {
+                    m_log.InfoFormat(
+                        "[WEATHER]: Auto cycle selected {0} in {1}",
+                        WeatherName(weather),
+                        m_scene.RegionInfo.RegionName);
+                }
+                else
+                {
+                    m_log.WarnFormat(
+                        "[WEATHER]: Auto cycle could not start {0} in {1}",
+                        WeatherName(weather),
+                        m_scene.RegionInfo.RegionName);
+                }
+            }
+            catch (Exception e)
+            {
+                string regionName = m_scene == null ? "unknown region" : m_scene.RegionInfo.RegionName;
+                m_log.WarnFormat("[WEATHER]: Auto cycle failed in {0}: {1}", regionName, e);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref m_autoCycleBusy, 0);
+                ScheduleNextAutoCycle();
+            }
+        }
+
+        private void ScheduleNextAutoCycle()
+        {
+            Timer timer = m_autoCycleTimer;
+            if (timer == null || m_scene == null)
+                return;
+
+            timer.Change(AutoCycleIntervalMS(), Timeout.Infinite);
+        }
+
+        private int AutoCycleIntervalMS()
+        {
+            return Math.Max(1000, (int)Math.Min(int.MaxValue, m_autoCycleHours * 60f * 60f * 1000f));
+        }
+
+        private WeatherKind PickAutoCycleWeather()
+        {
+            WeatherKind current;
+            lock (m_sync)
+                current = m_currentWeather;
+
+            lock (m_randomSync)
+            {
+                for (int attempt = 0; attempt < 8; attempt++)
+                {
+                    WeatherKind weather = m_autoCycleChoices[m_random.Next(m_autoCycleChoices.Count)];
+                    if (m_autoCycleChoices.Count == 1 || weather != current)
+                        return weather;
+                }
+
+                return m_autoCycleChoices[m_random.Next(m_autoCycleChoices.Count)];
+            }
+        }
+
+        private void ParseAutoCycleChoices(string choices)
+        {
+            m_autoCycleChoices.Clear();
+
+            string[] tokens = (choices ?? string.Empty).Split(',');
+            foreach (string rawToken in tokens)
+            {
+                WeatherKind weather;
+                if (TryResolveWeather(rawToken.Trim(), out weather) && !m_autoCycleChoices.Contains(weather))
+                    m_autoCycleChoices.Add(weather);
+            }
+
+            if (m_autoCycleChoices.Count == 0)
+            {
+                m_autoCycleChoices.Add(WeatherKind.Storm);
+                m_autoCycleChoices.Add(WeatherKind.Rain);
+                m_autoCycleChoices.Add(WeatherKind.Snow);
+                m_autoCycleChoices.Add(WeatherKind.Sunny);
+            }
+        }
+
+        private string AutoCycleChoiceNames()
+        {
+            List<string> names = new List<string>(m_autoCycleChoices.Count);
+            foreach (WeatherKind weather in m_autoCycleChoices)
+                names.Add(WeatherName(weather));
+
+            return string.Join(",", names.ToArray());
         }
 
         private bool IsCoveredFromSky(float x, float y, float ground, float emitterZ)
@@ -633,7 +792,29 @@ namespace OpenSim.Region.OptionalModules.World.Weather
 
             RegionLightShareData clouds = CloneLightShare(current);
 
-            if (weather == WeatherKind.Storm)
+            if (weather == WeatherKind.Sunny)
+            {
+                clouds.cloudCoverage = 0.05f;
+                clouds.cloudScale = 0.28f;
+                clouds.cloudColor = new Vector4(1.0f, 0.98f, 0.9f, 1f);
+                clouds.cloudXYDensity = new Vector3(0.38f, 0.18f, 0.28f);
+                clouds.cloudDetailXYDensity = new Vector3(0.34f, 0.16f, 0.04f);
+                clouds.cloudScrollX = 0.06f;
+                clouds.cloudScrollY = 0.012f;
+                clouds.horizon = new Vector4(0.58f, 0.72f, 0.95f, 1f);
+                clouds.blueDensity = new Vector4(0.16f, 0.32f, 0.68f, 1f);
+                clouds.ambient = new Vector4(0.48f, 0.48f, 0.42f, 1f);
+                clouds.sunMoonColor = new Vector4(1.0f, 0.88f, 0.52f, 1f);
+                clouds.hazeHorizon = Math.Min(clouds.hazeHorizon, 0.1f);
+                clouds.hazeDensity = Math.Min(clouds.hazeDensity, 0.18f);
+                clouds.densityMultiplier = Math.Min(clouds.densityMultiplier, 0.08f);
+                clouds.distanceMultiplier = Math.Max(clouds.distanceMultiplier, 1.15f);
+                clouds.sunGlowFocus = Math.Max(clouds.sunGlowFocus, 0.22f);
+                clouds.sunGlowSize = Math.Max(clouds.sunGlowSize, 2.4f);
+                clouds.sceneGamma = Math.Max(clouds.sceneGamma, 1.16f);
+                clouds.starBrightness = 0f;
+            }
+            else if (weather == WeatherKind.Storm)
             {
                 clouds.cloudCoverage = 0.94f;
                 clouds.cloudScale = 0.72f;
@@ -862,9 +1043,15 @@ namespace OpenSim.Region.OptionalModules.World.Weather
         {
             string lower = request.ToLower(CultureInfo.InvariantCulture);
 
-            if (lower.Contains("clear") || lower.Contains("stop") || lower.Contains("sereno") || lower.Contains("asciutto"))
+            if (lower.Contains("clear") || lower.Contains("stop") || lower.Contains("asciutto"))
             {
                 weather = WeatherKind.Clear;
+                return true;
+            }
+
+            if (lower.Contains("sunny") || lower.Contains("sun") || lower.Contains("sereno") || lower.Contains("sole"))
+            {
+                weather = WeatherKind.Sunny;
                 return true;
             }
 
@@ -911,7 +1098,11 @@ namespace OpenSim.Region.OptionalModules.World.Weather
 
             SendReply(
                 client,
-                string.Format("Weather: {0}, emitters={1}.", WeatherName(weather), emitterCount));
+                string.Format(
+                    "Weather: {0}, emitters={1}, auto={2}.",
+                    WeatherName(weather),
+                    emitterCount,
+                    m_autoCycleEnabled ? string.Format("{0:0.##}h", m_autoCycleHours) : "off"));
         }
 
         private static string WeatherName(WeatherKind weather)
@@ -924,6 +1115,8 @@ namespace OpenSim.Region.OptionalModules.World.Weather
                     return "storm";
                 case WeatherKind.Snow:
                     return "snow";
+                case WeatherKind.Sunny:
+                    return "sunny";
                 default:
                     return "clear";
             }
