@@ -1198,6 +1198,8 @@
     ;; It intentionally excludes PERMISSION_DEBIT and ownership changes.
     ;; Scripts can inspect this trust state with llIsExperienceTrusted(),
     ;; llGetExperiencePermissions() and llExperienceCanAutoGrant(mask).
+    ;; Scripts can also use llRequestExperiencePermissions(agent, name) and
+    ;; handle experience_permissions(agent) or experience_permissions_denied(agent, reason).
     ; AutoGrantPermissions = 39956
 
 

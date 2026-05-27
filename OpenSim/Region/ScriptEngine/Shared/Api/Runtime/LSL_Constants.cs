@@ -89,6 +89,12 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         public const int PERMISSION_OVERRIDE_ANIMATIONS = 0x8000;
         public const int PERMISSION_RETURN_OBJECTS = 0x10000;
 
+        public const int XP_ERROR_NONE = 0;
+        public const int XP_ERROR_EXPERIENCE_DISABLED = 1;
+        public const int XP_ERROR_EXPERIENCE_NOT_TRUSTED = 2;
+        public const int XP_ERROR_AGENT_NOT_FOUND = 3;
+        public const int XP_ERROR_INVALID_PARAMETERS = 4;
+
         public const int AGENT_FLYING = 0x1;
         //ApiDesc The agent has attachments
         public const int AGENT_ATTACHMENTS = 0x2;

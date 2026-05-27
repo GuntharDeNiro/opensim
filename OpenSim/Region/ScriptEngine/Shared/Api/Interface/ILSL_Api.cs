@@ -331,6 +331,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
           LSL_List llGetVisualParams(string id, LSL_List visualparams);
            LSL_Key llRequestInventoryData(LSL_String name);
               void llRequestPermissions(string agent, int perm);
+              void llRequestExperiencePermissions(string agent, string experience);
+              void llReleaseExperiencePermissions(string agent);
        LSL_Integer llIsExperienceTrusted();
        LSL_Integer llGetExperiencePermissions();
        LSL_Integer llExperienceCanAutoGrant(int permissions);

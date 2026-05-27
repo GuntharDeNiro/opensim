@@ -612,6 +612,41 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     Array.Empty<DetectParams>()));
         }
 
+        private void ReleaseScriptPermissions(UUID agentID)
+        {
+            if (!m_item.PermsGranter.Equals(agentID))
+                return;
+
+            if ((m_item.PermsMask & ScriptBaseClass.PERMISSION_TAKE_CONTROLS) != 0)
+                llReleaseControls();
+
+            m_host.TaskInventory.LockItemsForWrite(true);
+            m_host.TaskInventory[m_item.ItemID].PermsGranter = UUID.Zero;
+            m_host.TaskInventory[m_item.ItemID].PermsMask = 0;
+            m_host.TaskInventory.LockItemsForWrite(false);
+
+            m_ScriptEngine.PostScriptEvent(m_item.ItemID, new EventParams(
+                    "run_time_permissions", new Object[] {
+                    new LSL_Integer(0) },
+                    Array.Empty<DetectParams>()));
+        }
+
+        private void PostExperiencePermissions(UUID agentID)
+        {
+            m_ScriptEngine.PostScriptEvent(m_item.ItemID, new EventParams(
+                    "experience_permissions", new Object[] {
+                    new LSL_Key(agentID.ToString()) },
+                    Array.Empty<DetectParams>()));
+        }
+
+        private void PostExperiencePermissionsDenied(UUID agentID, int reason)
+        {
+            m_ScriptEngine.PostScriptEvent(m_item.ItemID, new EventParams(
+                    "experience_permissions_denied", new Object[] {
+                    new LSL_Key(agentID.ToString()), new LSL_Integer(reason) },
+                    Array.Empty<DetectParams>()));
+        }
+
         protected SceneObjectPart MonitoringObject()
         {
             UUID m = m_host.ParentGroup.MonitoringObject;
@@ -4653,6 +4688,43 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             m_ScriptEngine.PostScriptEvent(
                 m_item.ItemID,
                 new EventParams("run_time_permissions", new Object[] { new LSL_Integer(0) }, Array.Empty<DetectParams>()));
+        }
+
+        public void llRequestExperiencePermissions(string agent, string experience)
+        {
+            if (!UUID.TryParse(agent, out UUID agentID) || agentID.IsZero())
+            {
+                PostExperiencePermissionsDenied(UUID.Zero, ScriptBaseClass.XP_ERROR_INVALID_PARAMETERS);
+                return;
+            }
+
+            ScenePresence presence = World.GetScenePresence(agentID);
+            if (presence == null || presence.IsDeleted || presence.IsChildAgent)
+            {
+                PostExperiencePermissionsDenied(agentID, ScriptBaseClass.XP_ERROR_AGENT_NOT_FOUND);
+                return;
+            }
+
+            if (!m_scriptExperiencesEnabled || m_scriptExperienceAutoGrantPermissions == 0)
+            {
+                PostExperiencePermissionsDenied(agentID, ScriptBaseClass.XP_ERROR_EXPERIENCE_DISABLED);
+                return;
+            }
+
+            if (!IsScriptExperienceTrusted())
+            {
+                PostExperiencePermissionsDenied(agentID, ScriptBaseClass.XP_ERROR_EXPERIENCE_NOT_TRUSTED);
+                return;
+            }
+
+            GrantScriptPermissions(agentID, m_scriptExperienceAutoGrantPermissions);
+            PostExperiencePermissions(agentID);
+        }
+
+        public void llReleaseExperiencePermissions(string agent)
+        {
+            if (UUID.TryParse(agent, out UUID agentID) && agentID.IsNotZero())
+                ReleaseScriptPermissions(agentID);
         }
 
         void handleScriptAnswer(IClientAPI client, UUID taskID, UUID itemID, int answer)

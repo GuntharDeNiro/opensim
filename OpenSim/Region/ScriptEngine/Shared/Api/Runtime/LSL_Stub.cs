@@ -1707,6 +1707,18 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void llRequestExperiencePermissions(string agent, string experience)
+        {
+            m_LSL_Functions.llRequestExperiencePermissions(agent, experience);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void llReleaseExperiencePermissions(string agent)
+        {
+            m_LSL_Functions.llReleaseExperiencePermissions(agent);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public LSL_Key llRequestSecureURL()
         {
             return m_LSL_Functions.llRequestSecureURL();

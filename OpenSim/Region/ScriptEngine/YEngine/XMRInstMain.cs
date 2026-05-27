@@ -215,6 +215,8 @@ namespace OpenSim.Region.ScriptEngine.Yengine
             {"control", ScriptEventCode.control},
             {"dataserver", ScriptEventCode.dataserver},
             {"email", ScriptEventCode.email},
+            {"experience_permissions", ScriptEventCode.experience_permissions},
+            {"experience_permissions_denied", ScriptEventCode.experience_permissions_denied},
             {"http_response", ScriptEventCode.http_response},
             {"land_collision", ScriptEventCode.land_collision},
             {"land_collision_end", ScriptEventCode.land_collision_end},

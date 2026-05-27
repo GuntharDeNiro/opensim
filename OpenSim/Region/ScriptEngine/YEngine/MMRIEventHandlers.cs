@@ -47,6 +47,8 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         void control(string id, int held, int change);
         void dataserver(string queryid, string data);
         void email(string time, string address, string subj, string message, int num_left);
+        void experience_permissions(string agent);
+        void experience_permissions_denied(string agent, int reason);
         void http_request(string request_id, string method, string body);
         void http_response(string request_id, int status, LSL_List metadata, string body);
         void land_collision(LSL_Vector pos);
