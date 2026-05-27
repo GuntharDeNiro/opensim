@@ -498,10 +498,13 @@
     ;# {MapTileAerialBrightness} {MapTileAerialStyle} {Aerial brightness adjustment} {} 4
     ; MapTileAerialBrightness = 4
 
-    ;# {MapObjectVolumeSampleTextureAssets} {PrettyPrimVolumeOnMapTile} {Decode texture assets for object map colors?} {true false} false
-    ;; Leave disabled unless you really need texture-derived map colors. Some remote or malformed texture
-    ;; assets can make OpenJPEG log decode errors while map tiles are generated.
-    ; MapObjectVolumeSampleTextureAssets = false
+    ;# {MapObjectVolumeSampleTextureAssets} {PrettyPrimVolumeOnMapTile} {Decode valid texture assets for object map colors?} {true false} true
+    ;; Improves map quality by sampling texture colors. Invalid texture assets are skipped before OpenJPEG is called.
+    ; MapObjectVolumeSampleTextureAssets = true
+
+    ;# {MapTileDecodeTerrainTextureAssets} {TextureOnMapTile} {Decode valid terrain texture assets for terrain map colors?} {true false} true
+    ;; Improves terrain map quality by deriving colors from valid terrain texture assets.
+    ; MapTileDecodeTerrainTextureAssets = true
 
     ;# {TexturePrims} {} {Texture prims on map tiles?} {true false} true
     ;; Texture the faces of the prims that are rendered on the map tiles.

@@ -377,7 +377,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             int largeObjectArea = Math.Max(1, Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeLargeArea", MapConfigSections, 1800));
             bool sampleTextureAssets = Util.GetConfigVarFromSections<bool>(
-                m_config, "MapObjectVolumeSampleTextureAssets", MapConfigSections, false);
+                m_config, "MapObjectVolumeSampleTextureAssets", MapConfigSections, true);
 
             try
             {
@@ -1016,7 +1016,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
             AssetBase asset = m_scene.AssetService.Get(textureID.ToString());
             if (asset == null || asset.Type != (sbyte)AssetType.Texture ||
-                asset.Data == null || asset.Data.Length == 0)
+                asset.Data == null || !IsLikelyDecodableTexture(asset.Data))
             {
                 m_textureSampleCache[textureID] = sample;
                 return sample;
@@ -1042,6 +1042,48 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
             m_textureSampleCache[textureID] = sample;
             return sample;
+        }
+
+        private static bool IsLikelyDecodableTexture(byte[] data)
+        {
+            if (data == null || data.Length < 42)
+                return false;
+
+            int siz = FindMarker(data, 0xff, 0x51);
+            if (siz < 0 || siz + 40 > data.Length)
+                return false;
+
+            uint xsiz = ReadUInt32BE(data, siz + 6);
+            uint ysiz = ReadUInt32BE(data, siz + 10);
+            uint xosiz = ReadUInt32BE(data, siz + 14);
+            uint yosiz = ReadUInt32BE(data, siz + 18);
+            ushort components = ReadUInt16BE(data, siz + 38);
+
+            return xsiz > xosiz && ysiz > yosiz && components > 0 && components <= 4;
+        }
+
+        private static int FindMarker(byte[] data, byte first, byte second)
+        {
+            for (int i = 0; i < data.Length - 1; i++)
+            {
+                if (data[i] == first && data[i + 1] == second)
+                    return i;
+            }
+
+            return -1;
+        }
+
+        private static ushort ReadUInt16BE(byte[] data, int offset)
+        {
+            return (ushort)((data[offset] << 8) | data[offset + 1]);
+        }
+
+        private static uint ReadUInt32BE(byte[] data, int offset)
+        {
+            return (uint)((data[offset] << 24) |
+                (data[offset + 1] << 16) |
+                (data[offset + 2] << 8) |
+                data[offset + 3]);
         }
 
         private static MapTextureSample ComputeTextureSample(Bitmap bitmap)

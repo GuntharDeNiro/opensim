@@ -143,6 +143,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         private Color m_color_2;
         private Color m_color_3;
         private Color m_color_4;
+        private bool m_decodeTerrainTextureAssets;
 
         // mapping from texture UUIDs to averaged color. This will contain 5-9 values, in general; new values are only
         // added when the terrain textures are changed in the estate dialog and a new map is generated (and will stay in
@@ -163,6 +164,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             m_color_2 = System.Drawing.ColorTranslator.FromHtml(Util.GetConfigVarFromSections<string>(m_config, "MapColor2", configSections, "#455931"));
             m_color_3 = System.Drawing.ColorTranslator.FromHtml(Util.GetConfigVarFromSections<string>(m_config, "MapColor3", configSections, "#A29A8D"));
             m_color_4 = System.Drawing.ColorTranslator.FromHtml(Util.GetConfigVarFromSections<string>(m_config, "MapColor4", configSections, "#C8C8C8"));
+            m_decodeTerrainTextureAssets = Util.GetConfigVarFromSections<bool>(
+                m_config, "MapTileDecodeTerrainTextureAssets", configSections, true);
 
             m_mapping = new Dictionary<UUID,Color>();
             m_mapping.Add(defaultTerrainTexture1, m_color_1);
@@ -181,9 +184,14 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         //   will wait anyway)
         private Bitmap fetchTexture(UUID id)
         {
+            if (!m_decodeTerrainTextureAssets)
+                return null;
+
             AssetBase asset = m_scene.AssetService.Get(id.ToString());
             m_log.DebugFormat("{0} Fetched texture {1}, found: {2}", LogHeader, id, asset != null);
-            if (asset == null) return null;
+            if (asset == null || asset.Type != (sbyte)AssetType.Texture ||
+                asset.Data == null || !IsLikelyDecodableTexture(asset.Data))
+                return null;
 
             ManagedImage managedImage;
             Image image;
@@ -209,6 +217,48 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             }
             return null;
 
+        }
+
+        private static bool IsLikelyDecodableTexture(byte[] data)
+        {
+            if (data == null || data.Length < 42)
+                return false;
+
+            int siz = FindMarker(data, 0xff, 0x51);
+            if (siz < 0 || siz + 40 > data.Length)
+                return false;
+
+            uint xsiz = ReadUInt32BE(data, siz + 6);
+            uint ysiz = ReadUInt32BE(data, siz + 10);
+            uint xosiz = ReadUInt32BE(data, siz + 14);
+            uint yosiz = ReadUInt32BE(data, siz + 18);
+            ushort components = ReadUInt16BE(data, siz + 38);
+
+            return xsiz > xosiz && ysiz > yosiz && components > 0 && components <= 4;
+        }
+
+        private static int FindMarker(byte[] data, byte first, byte second)
+        {
+            for (int i = 0; i < data.Length - 1; i++)
+            {
+                if (data[i] == first && data[i + 1] == second)
+                    return i;
+            }
+
+            return -1;
+        }
+
+        private static ushort ReadUInt16BE(byte[] data, int offset)
+        {
+            return (ushort)((data[offset] << 8) | data[offset + 1]);
+        }
+
+        private static uint ReadUInt32BE(byte[] data, int offset)
+        {
+            return (uint)((data[offset] << 24) |
+                (data[offset + 1] << 16) |
+                (data[offset + 2] << 8) |
+                data[offset + 3]);
         }
 
         // Compute the average color of a texture.
