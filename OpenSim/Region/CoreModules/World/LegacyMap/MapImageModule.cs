@@ -58,6 +58,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         public DrawRoutine dr;
 //        public Rectangle rect;
         public SolidBrush brush;
+        public SolidBrush[] faceBrushes;
         public SolidBrush shadowBrush;
         public Pen outlinePen;
         public face[] trns;
@@ -67,6 +68,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
     {
         public RectangleF rect;
         public SolidBrush brush;
+        public SolidBrush innerBrush;
+        public RectangleF innerRect;
         public Pen outlinePen;
         public float z;
     }
@@ -146,7 +149,9 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                             Util.GetConfigVarFromSections<float>(m_config,
                                 "MapTileAerialContrast", MapConfigSections, 1.04f),
                             Util.GetConfigVarFromSections<int>(m_config,
-                                "MapTileAerialBrightness", MapConfigSections, 1));
+                                "MapTileAerialBrightness", MapConfigSections, 1),
+                            Util.GetConfigVarFromSections<float>(m_config,
+                                "MapTileAerialSharpen", MapConfigSections, 0.18f));
                     }
                 }
                 else
@@ -378,6 +383,14 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 m_config, "MapObjectVolumeLargeArea", MapConfigSections, 1800));
             bool sampleTextureAssets = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeSampleTextureAssets", MapConfigSections, true);
+            float textureBlend = Math.Max(0f, Math.Min(1f, Util.GetConfigVarFromSections<float>(
+                m_config, "MapObjectVolumeTextureBlend", MapConfigSections, 0.86f)));
+            float objectSaturation = Math.Max(0f, Math.Min(2f, Util.GetConfigVarFromSections<float>(
+                m_config, "MapObjectVolumeColorSaturation", MapConfigSections, 1.10f)));
+            float objectContrast = Math.Max(0f, Math.Min(2f, Util.GetConfigVarFromSections<float>(
+                m_config, "MapObjectVolumeColorContrast", MapConfigSections, 1.06f)));
+            bool faceShading = Util.GetConfigVarFromSections<bool>(
+                m_config, "MapObjectVolumeFaceShading", MapConfigSections, true);
 
             try
             {
@@ -421,7 +434,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
                                         mapdotspot = GetPartMapColor(part, mapdotspot, prettyObjectVolume,
                                             sampleTextureAssets,
-                                            minimumBrightness, maximumBrightness);
+                                            minimumBrightness, maximumBrightness,
+                                            textureBlend, objectSaturation, objectContrast);
                                     }
                                     catch (IndexOutOfRangeException)
                                     {
@@ -616,6 +630,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                         ds.brush = new SolidBrush(prettyObjectVolume
                                             ? Color.FromArgb(fillOpacity, mapdotspot)
                                             : mapdotspot);
+                                        ds.faceBrushes = null;
                                         ds.shadowBrush = prettyObjectVolume && drawObjectShadows && shadowOpacity > 0 && !isWaterLikeObject
                                             ? new SolidBrush(Color.FromArgb(shadowOpacity, 18, 22, 22))
                                             : null;
@@ -625,6 +640,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                         //ds.rect = new Rectangle(mapdrawstartX, (255 - mapdrawstartY), mapdrawendX - mapdrawstartX, mapdrawendY - mapdrawstartY);
 
                                         ds.trns = new face[FaceA.Length];
+                                        if (prettyObjectVolume && faceShading && !isWaterLikeObject)
+                                            ds.faceBrushes = new SolidBrush[FaceA.Length];
 
                                         for (int i = 0; i < FaceA.Length; i++)
                                         {
@@ -639,6 +656,11 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                             workingface.pts = working;
 
                                             ds.trns[i] = workingface;
+                                            if (ds.faceBrushes != null)
+                                            {
+                                                Color shaded = ShadeFaceColor(mapdotspot, FaceA[i], FaceB[i], FaceC[i]);
+                                                ds.faceBrushes[i] = new SolidBrush(Color.FromArgb(fillOpacity, shaded));
+                                            }
                                         }
 
                                         z_sort.Add(part.LocalId, ds);
@@ -710,6 +732,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                             if (veg.outlinePen != null)
                                 g.DrawEllipse(veg.outlinePen, veg.rect);
                             g.FillEllipse(veg.brush, veg.rect);
+                            if (veg.innerBrush != null)
+                                g.FillEllipse(veg.innerBrush, veg.innerRect);
                         }
 
                         for (int s = 0; s < sortedZHeights.Length; s++)
@@ -719,7 +743,12 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                 DrawStruct rectDrawStruct = z_sort[sortedlocalIds[s]];
                                 for (int r = 0; r < rectDrawStruct.trns.Length; r++)
                                 {
-                                    g.FillPolygon(rectDrawStruct.brush,rectDrawStruct.trns[r].pts);
+                                    SolidBrush fillBrush = rectDrawStruct.faceBrushes != null &&
+                                        r < rectDrawStruct.faceBrushes.Length &&
+                                        rectDrawStruct.faceBrushes[r] != null
+                                        ? rectDrawStruct.faceBrushes[r]
+                                        : rectDrawStruct.brush;
+                                    g.FillPolygon(fillBrush,rectDrawStruct.trns[r].pts);
                                     if (rectDrawStruct.outlinePen != null)
                                         g.DrawPolygon(rectDrawStruct.outlinePen, rectDrawStruct.trns[r].pts);
                                 }
@@ -735,6 +764,14 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 foreach (DrawStruct ds in z_sort.Values)
                 {
                     ds.brush.Dispose();
+                    if (ds.faceBrushes != null)
+                    {
+                        foreach (SolidBrush brush in ds.faceBrushes)
+                        {
+                            if (brush != null)
+                                brush.Dispose();
+                        }
+                    }
                     if (ds.shadowBrush != null)
                         ds.shadowBrush.Dispose();
                     if (ds.outlinePen != null)
@@ -744,6 +781,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 foreach (MapEllipseDraw veg in vegetation)
                 {
                     veg.brush.Dispose();
+                    if (veg.innerBrush != null)
+                        veg.innerBrush.Dispose();
                     if (veg.outlinePen != null)
                         veg.outlinePen.Dispose();
                 }
@@ -786,21 +825,37 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             float diameter = Math.Max(part.Scale.X, part.Scale.Y);
             diameter = Math.Max(minSize, Math.Min(maxSize, diameter * (grass ? 0.8f : 1.7f)));
 
+            int variation = StableNoise(part.LocalId, x, y) - 128;
             Color canopy = grass
-                ? Color.FromArgb(132, 145, 104)
-                : Color.FromArgb(102, 119, 82);
+                ? Color.FromArgb(
+                    ClampByte(132 + (variation / 8)),
+                    ClampByte(145 + (variation / 7)),
+                    ClampByte(104 + (variation / 10)))
+                : Color.FromArgb(
+                    ClampByte(102 + (variation / 9)),
+                    ClampByte(119 + (variation / 7)),
+                    ClampByte(82 + (variation / 11)));
             Color outline = Darken(canopy, 0.58f);
+            Color inner = Lighten(canopy, grass ? 1.08f : 1.14f);
 
             RectangleF rect = new RectangleF(
                 pos.X - (diameter * 0.5f),
                 (hm.Height - pos.Y) - (diameter * 0.5f),
                 diameter,
                 diameter);
+            float innerDiameter = diameter * (grass ? 0.42f : 0.52f);
+            RectangleF innerRect = new RectangleF(
+                pos.X - (innerDiameter * 0.35f),
+                (hm.Height - pos.Y) - (innerDiameter * 0.65f),
+                innerDiameter,
+                innerDiameter);
 
             vegetation.Add(new MapEllipseDraw
             {
                 rect = rect,
                 brush = new SolidBrush(Color.FromArgb(opacity, canopy)),
+                innerBrush = new SolidBrush(Color.FromArgb(Math.Min(opacity, grass ? 42 : 58), inner)),
+                innerRect = innerRect,
                 outlinePen = new Pen(Color.FromArgb(Math.Min(opacity, 55), outline), 1f),
                 z = pos.Z
             });
@@ -815,11 +870,12 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         }
 
         private static void ApplyAerialMapStyle(Bitmap mapbmp, float softenBlend,
-            float saturation, float contrast, int brightness)
+            float saturation, float contrast, int brightness, float sharpen)
         {
             softenBlend = Math.Max(0f, Math.Min(1f, softenBlend));
             saturation = Math.Max(0f, Math.Min(2f, saturation));
             contrast = Math.Max(0f, Math.Min(2f, contrast));
+            sharpen = Math.Max(0f, Math.Min(1f, sharpen));
 
             using (Bitmap source = (Bitmap)mapbmp.Clone())
             {
@@ -830,7 +886,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                         Color center = source.GetPixel(x, y);
                         Color average = AverageNeighbourhood(source, x, y);
                         Color softened = Blend(center, average, softenBlend);
-                        mapbmp.SetPixel(x, y, AdjustAerialTone(softened, saturation, contrast, brightness));
+                        Color detailed = sharpen > 0f ? SharpenAgainstAverage(softened, average, sharpen) : softened;
+                        mapbmp.SetPixel(x, y, AdjustAerialTone(detailed, saturation, contrast, brightness));
                     }
                 }
             }
@@ -868,9 +925,18 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             return Color.FromArgb(r, g, b);
         }
 
+        private static Color SharpenAgainstAverage(Color color, Color average, float amount)
+        {
+            return Color.FromArgb(
+                ClampByte((int)(color.R + ((color.R - average.R) * amount))),
+                ClampByte((int)(color.G + ((color.G - average.G) * amount))),
+                ClampByte((int)(color.B + ((color.B - average.B) * amount))));
+        }
+
         private Color GetPartMapColor(SceneObjectPart part, Color fallback, bool prettyObjectVolume,
             bool sampleTextureAssets,
-            int minimumBrightness, int maximumBrightness)
+            int minimumBrightness, int maximumBrightness,
+            float textureBlend, float saturation, float contrast)
         {
             Primitive.TextureEntry textureEntry = part.Shape.Textures;
 
@@ -900,9 +966,10 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             {
                 MapTextureSample sample = GetPartTextureSample(part);
                 if (sample.valid)
-                    adjusted = Blend(adjusted, sample.color, 0.75f);
+                    adjusted = Blend(adjusted, sample.color, textureBlend);
             }
 
+            adjusted = AdjustAerialTone(adjusted, saturation, contrast, 0);
             adjusted = ClampBrightness(adjusted, minimumBrightness, maximumBrightness);
 
             if (adjusted.R > 246 && adjusted.G > 246 && adjusted.B > 246)
@@ -1092,7 +1159,11 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             long g = 0;
             long b = 0;
             long a = 0;
+            long detailR = 0;
+            long detailG = 0;
+            long detailB = 0;
             int pixels = Math.Max(1, bitmap.Width * bitmap.Height);
+            int detailPixels = 0;
 
             for (int y = 0; y < bitmap.Height; y++)
             {
@@ -1103,7 +1174,22 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     g += color.G;
                     b += color.B;
                     a += color.A;
+                    float gray = (color.R * 0.299f) + (color.G * 0.587f) + (color.B * 0.114f);
+                    if (gray > 28f && gray < 236f && color.A > 24)
+                    {
+                        detailR += color.R;
+                        detailG += color.G;
+                        detailB += color.B;
+                        detailPixels++;
+                    }
                 }
+            }
+
+            if (detailPixels > Math.Max(8, pixels / 20))
+            {
+                r = (long)((r * 0.35f) + ((detailR / detailPixels) * pixels * 0.65f));
+                g = (long)((g * 0.35f) + ((detailG / detailPixels) * pixels * 0.65f));
+                b = (long)((b * 0.35f) + ((detailB / detailPixels) * pixels * 0.65f));
             }
 
             return new MapTextureSample
@@ -1170,6 +1256,53 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 ClampByte((int)(color.R * amount)),
                 ClampByte((int)(color.G * amount)),
                 ClampByte((int)(color.B * amount)));
+        }
+
+        private static Color Lighten(Color color, float amount)
+        {
+            amount = Math.Max(1f, Math.Min(2f, amount));
+            return Color.FromArgb(
+                ClampByte((int)(color.R * amount)),
+                ClampByte((int)(color.G * amount)),
+                ClampByte((int)(color.B * amount)));
+        }
+
+        private static Color ShadeFaceColor(Color color, Vector3 a, Vector3 b, Vector3 c)
+        {
+            float abx = b.X - a.X;
+            float aby = b.Y - a.Y;
+            float abz = b.Z - a.Z;
+            float acx = c.X - a.X;
+            float acy = c.Y - a.Y;
+            float acz = c.Z - a.Z;
+
+            float nx = (aby * acz) - (abz * acy);
+            float ny = (abz * acx) - (abx * acz);
+            float nz = (abx * acy) - (aby * acx);
+            float length = (float)Math.Sqrt((nx * nx) + (ny * ny) + (nz * nz));
+
+            if (length <= 0.0001f)
+                return color;
+
+            nx /= length;
+            ny /= length;
+            nz /= length;
+
+            float dot = Math.Abs((nx * -0.35f) + (ny * -0.45f) + (nz * 0.82f));
+            float shade = 0.78f + (dot * 0.34f);
+            return Color.FromArgb(
+                ClampByte((int)(color.R * shade)),
+                ClampByte((int)(color.G * shade)),
+                ClampByte((int)(color.B * shade)));
+        }
+
+        private static int StableNoise(uint localId, int x, int y)
+        {
+            uint value = localId;
+            value ^= (uint)(x * 374761393);
+            value ^= (uint)(y * 668265263);
+            value = (value ^ (value >> 13)) * 1274126177u;
+            return (int)((value ^ (value >> 16)) & 0xff);
         }
 
         private static Color Blend(Color from, Color to, float amount)

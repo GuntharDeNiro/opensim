@@ -445,6 +445,18 @@
     ;# {MapObjectVolumeUseTextureAlpha} {PrettyPrimVolumeOnMapTile} {Use prim texture alpha for map overlays?} {true false} true
     ; MapObjectVolumeUseTextureAlpha = true
 
+    ;# {MapObjectVolumeTextureBlend} {MapObjectVolumeSampleTextureAssets} {How strongly sampled texture colors influence object map colors} {} 0.86
+    ; MapObjectVolumeTextureBlend = 0.86
+
+    ;# {MapObjectVolumeColorSaturation} {PrettyPrimVolumeOnMapTile} {Object map color saturation multiplier} {} 1.10
+    ; MapObjectVolumeColorSaturation = 1.10
+
+    ;# {MapObjectVolumeColorContrast} {PrettyPrimVolumeOnMapTile} {Object map color contrast multiplier} {} 1.06
+    ; MapObjectVolumeColorContrast = 1.06
+
+    ;# {MapObjectVolumeFaceShading} {PrettyPrimVolumeOnMapTile} {Shade individual object faces for sharper geographic relief?} {true false} true
+    ; MapObjectVolumeFaceShading = true
+
     ;# {MapObjectVolumeMinimumOpacity} {PrettyPrimVolumeOnMapTile} {Minimum opacity after texture alpha is applied} {} 35
     ; MapObjectVolumeMinimumOpacity = 35
 
@@ -501,6 +513,9 @@
 
     ;# {MapTileAerialBrightness} {MapTileAerialStyle} {Aerial brightness adjustment} {} 1
     ; MapTileAerialBrightness = 1
+
+    ;# {MapTileAerialSharpen} {MapTileAerialStyle} {Final aerial detail sharpening amount} {} 0.18
+    ; MapTileAerialSharpen = 0.18
 
     ;# {MapWaterDepthShading} {TextureOnMapTile} {Shade water by terrain depth?} {true false} true
     ; MapWaterDepthShading = true
