@@ -438,6 +438,15 @@
     ;# {MapObjectVolumeLargeOpacity} {PrettyPrimVolumeOnMapTile} {Large object overlay opacity} {} 120
     ; MapObjectVolumeLargeOpacity = 120
 
+    ;# {MapObjectVolumeUseTextureAlpha} {PrettyPrimVolumeOnMapTile} {Use prim texture alpha for map overlays?} {true false} true
+    ; MapObjectVolumeUseTextureAlpha = true
+
+    ;# {MapObjectVolumeMinimumOpacity} {PrettyPrimVolumeOnMapTile} {Minimum opacity after texture alpha is applied} {} 35
+    ; MapObjectVolumeMinimumOpacity = 35
+
+    ;# {MapWaterObjectVolumeOpacity} {PrettyPrimVolumeOnMapTile} {Opacity for large flat water-like overlays} {} 38
+    ; MapWaterObjectVolumeOpacity = 38
+
     ;# {MapObjectVolumeLargeArea} {PrettyPrimVolumeOnMapTile} {Footprint area where large-object opacity starts} {} 1800
     ; MapObjectVolumeLargeArea = 1800
 

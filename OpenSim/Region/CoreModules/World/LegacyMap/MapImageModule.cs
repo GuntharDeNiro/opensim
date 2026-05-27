@@ -318,6 +318,12 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 m_config, "MapObjectVolumeLargeOpacity", MapConfigSections, 120));
             int outlineOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeOutlineOpacity", MapConfigSections, 85));
+            bool useTextureAlpha = Util.GetConfigVarFromSections<bool>(
+                m_config, "MapObjectVolumeUseTextureAlpha", MapConfigSections, true);
+            int minimumOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeMinimumOpacity", MapConfigSections, 35));
+            int waterObjectOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
+                m_config, "MapWaterObjectVolumeOpacity", MapConfigSections, 38));
             int minimumBrightness = ClampByte(Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeMinimumBrightness", MapConfigSections, 72));
             int maximumBrightness = ClampByte(Util.GetConfigVarFromSections<int>(
@@ -423,6 +429,14 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                         int fillOpacity = prettyObjectVolume && objectArea >= largeObjectArea
                                             ? largeObjectOpacity
                                             : objectOpacity;
+                                        bool isWaterLikeObject = prettyObjectVolume &&
+                                            IsWaterLikeMapObject(mapdotspot, objectArea, part.Scale, largeObjectArea);
+
+                                        if (prettyObjectVolume && useTextureAlpha)
+                                            fillOpacity = ApplyTextureAlpha(fillOpacity, GetPartTextureAlpha(part), minimumOpacity);
+
+                                        if (isWaterLikeObject)
+                                            fillOpacity = Math.Min(fillOpacity, waterObjectOpacity);
 
                                         // If object is beyond the edge of the map, don't draw it to avoid errors
                                         if (mapdrawstartX < 0
@@ -549,7 +563,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                             ? Color.FromArgb(fillOpacity, mapdotspot)
                                             : mapdotspot);
                                         ds.outlinePen = null;
-                                        if (prettyObjectVolume && drawObjectOutlines)
+                                        if (prettyObjectVolume && drawObjectOutlines && !isWaterLikeObject)
                                             ds.outlinePen = new Pen(Color.FromArgb(outlineOpacity, Darken(mapdotspot, 0.55f)), 1f);
                                         //ds.rect = new Rectangle(mapdrawstartX, (255 - mapdrawstartY), mapdrawendX - mapdrawstartX, mapdrawendY - mapdrawstartY);
 
@@ -681,6 +695,44 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 adjusted = Color.FromArgb(224, 224, 216);
 
             return adjusted;
+        }
+
+        private float GetPartTextureAlpha(SceneObjectPart part)
+        {
+            Primitive.TextureEntry textureEntry = part.Shape.Textures;
+
+            if (textureEntry == null || textureEntry.DefaultTexture == null)
+                return 1f;
+
+            return Math.Max(0f, Math.Min(1f, textureEntry.DefaultTexture.RGBA.A));
+        }
+
+        private static int ApplyTextureAlpha(int opacity, float textureAlpha, int minimumOpacity)
+        {
+            if (textureAlpha >= 0.99f)
+                return opacity;
+
+            return Math.Max(minimumOpacity, ClampByte((int)(opacity * textureAlpha)));
+        }
+
+        private static bool IsWaterLikeMapObject(Color color, int objectArea, Vector3 scale, int largeObjectArea)
+        {
+            if (objectArea < largeObjectArea)
+                return false;
+
+            float largestSide = Math.Max(scale.X, Math.Max(scale.Y, scale.Z));
+            float thinnestSide = Math.Min(scale.X, Math.Min(scale.Y, scale.Z));
+
+            if (largestSide < 24f || thinnestSide > 3f)
+                return false;
+
+            int max = Math.Max(color.R, Math.Max(color.G, color.B));
+            int min = Math.Min(color.R, Math.Min(color.G, color.B));
+            int brightness = (max + min) / 2;
+            bool paleOverlay = brightness > 145 && (max - min) < 70;
+            bool blueOrCyan = color.B >= color.R - 8 && color.G >= color.R - 35;
+
+            return paleOverlay && blueOrCyan;
         }
 
         private static Color ClampBrightness(Color color, int minimumBrightness, int maximumBrightness)
