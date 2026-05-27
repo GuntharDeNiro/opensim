@@ -58,8 +58,17 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         public DrawRoutine dr;
 //        public Rectangle rect;
         public SolidBrush brush;
+        public SolidBrush shadowBrush;
         public Pen outlinePen;
         public face[] trns;
+    }
+
+    public struct MapEllipseDraw
+    {
+        public RectangleF rect;
+        public SolidBrush brush;
+        public Pen outlinePen;
+        public float z;
     }
 
     public struct MapTextureSample
@@ -124,6 +133,20 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     if (drawPrimVolume)
                     {
                         DrawObjectVolume(m_scene, mapbmp);
+                    }
+
+                    if (Util.GetConfigVarFromSections<bool>(m_config,
+                        "MapTileAerialStyle", MapConfigSections, true))
+                    {
+                        ApplyAerialMapStyle(mapbmp,
+                            Util.GetConfigVarFromSections<float>(m_config,
+                                "MapTileAerialSoften", MapConfigSections, 0.18f),
+                            Util.GetConfigVarFromSections<float>(m_config,
+                                "MapTileAerialSaturation", MapConfigSections, 0.86f),
+                            Util.GetConfigVarFromSections<float>(m_config,
+                                "MapTileAerialContrast", MapConfigSections, 0.92f),
+                            Util.GetConfigVarFromSections<int>(m_config,
+                                "MapTileAerialBrightness", MapConfigSections, 4));
                     }
                 }
                 else
@@ -316,10 +339,25 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             List<float> z_sortheights = new List<float>();
             List<uint> z_localIDs = new List<uint>();
             Dictionary<uint, DrawStruct> z_sort = new Dictionary<uint, DrawStruct>();
+            List<MapEllipseDraw> vegetation = new List<MapEllipseDraw>();
             bool prettyObjectVolume = Util.GetConfigVarFromSections<bool>(
                 m_config, "PrettyPrimVolumeOnMapTile", MapConfigSections, true);
             bool drawObjectOutlines = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeOutlines", MapConfigSections, true);
+            bool drawObjectShadows = Util.GetConfigVarFromSections<bool>(
+                m_config, "MapObjectVolumeShadows", MapConfigSections, true);
+            int shadowOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeShadowOpacity", MapConfigSections, 24));
+            int shadowOffset = Math.Max(0, Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeShadowOffset", MapConfigSections, 2));
+            bool drawVegetation = Util.GetConfigVarFromSections<bool>(
+                m_config, "MapVegetationOnMapTile", MapConfigSections, true);
+            int vegetationOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
+                m_config, "MapVegetationOpacity", MapConfigSections, 86));
+            float vegetationMinSize = Math.Max(1f, Util.GetConfigVarFromSections<float>(
+                m_config, "MapVegetationMinSize", MapConfigSections, 7f));
+            float vegetationMaxSize = Math.Max(vegetationMinSize, Util.GetConfigVarFromSections<float>(
+                m_config, "MapVegetationMaxSize", MapConfigSections, 18f));
             int objectOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeOpacity", MapConfigSections, 175));
             int largeObjectOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
@@ -373,10 +411,13 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                         if (part.Shape == null)
                                             continue;
 
-                                        if (part.Shape.PCode == (byte)PCode.Tree || part.Shape.PCode == (byte)PCode.NewTree || part.Shape.PCode == (byte)PCode.Grass)
-                                            continue; // eliminates trees from this since we don't really have a good tree representation
-                                        // if you want tree blocks on the map comment the above line and uncomment the below line
-                                        //mapdotspot = Color.PaleGreen;
+                                        if (IsVegetation(part))
+                                        {
+                                            if (prettyObjectVolume && drawVegetation)
+                                                AddVegetationDraw(vegetation, part, hm, vegetationOpacity,
+                                                    vegetationMinSize, vegetationMaxSize);
+                                            continue;
+                                        }
 
                                         mapdotspot = GetPartMapColor(part, mapdotspot, prettyObjectVolume,
                                             sampleTextureAssets,
@@ -575,6 +616,9 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                         ds.brush = new SolidBrush(prettyObjectVolume
                                             ? Color.FromArgb(fillOpacity, mapdotspot)
                                             : mapdotspot);
+                                        ds.shadowBrush = prettyObjectVolume && drawObjectShadows && shadowOpacity > 0 && !isWaterLikeObject
+                                            ? new SolidBrush(Color.FromArgb(shadowOpacity, 18, 22, 22))
+                                            : null;
                                         ds.outlinePen = null;
                                         if (prettyObjectVolume && drawObjectOutlines && !isWaterLikeObject)
                                             ds.outlinePen = new Pen(Color.FromArgb(outlineOpacity, Darken(mapdotspot, 0.55f)), 1f);
@@ -649,6 +693,32 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                 DrawStruct rectDrawStruct = z_sort[sortedlocalIds[s]];
                                 for (int r = 0; r < rectDrawStruct.trns.Length; r++)
                                 {
+                                    if (rectDrawStruct.shadowBrush != null && shadowOffset > 0)
+                                        g.FillPolygon(rectDrawStruct.shadowBrush,
+                                            OffsetPoints(rectDrawStruct.trns[r].pts, shadowOffset, shadowOffset));
+                                }
+                            }
+                        }
+
+                        vegetation.Sort(delegate(MapEllipseDraw left, MapEllipseDraw right)
+                        {
+                            return left.z.CompareTo(right.z);
+                        });
+
+                        foreach (MapEllipseDraw veg in vegetation)
+                        {
+                            if (veg.outlinePen != null)
+                                g.DrawEllipse(veg.outlinePen, veg.rect);
+                            g.FillEllipse(veg.brush, veg.rect);
+                        }
+
+                        for (int s = 0; s < sortedZHeights.Length; s++)
+                        {
+                            if (z_sort.ContainsKey(sortedlocalIds[s]))
+                            {
+                                DrawStruct rectDrawStruct = z_sort[sortedlocalIds[s]];
+                                for (int r = 0; r < rectDrawStruct.trns.Length; r++)
+                                {
                                     g.FillPolygon(rectDrawStruct.brush,rectDrawStruct.trns[r].pts);
                                     if (rectDrawStruct.outlinePen != null)
                                         g.DrawPolygon(rectDrawStruct.outlinePen, rectDrawStruct.trns[r].pts);
@@ -665,14 +735,137 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 foreach (DrawStruct ds in z_sort.Values)
                 {
                     ds.brush.Dispose();
+                    if (ds.shadowBrush != null)
+                        ds.shadowBrush.Dispose();
                     if (ds.outlinePen != null)
                         ds.outlinePen.Dispose();
+                }
+
+                foreach (MapEllipseDraw veg in vegetation)
+                {
+                    veg.brush.Dispose();
+                    if (veg.outlinePen != null)
+                        veg.outlinePen.Dispose();
                 }
             }
 
             m_log.Debug("[MAPTILE]: Generating Maptile Step 2: Done in " + (Environment.TickCount - tc) + " ms");
 
             return mapbmp;
+        }
+
+        private bool IsVegetation(SceneObjectPart part)
+        {
+            if (part == null || part.Shape == null)
+                return false;
+
+            byte pcode = part.Shape.PCode;
+            return pcode == (byte)PCode.Tree ||
+                pcode == (byte)PCode.NewTree ||
+                pcode == (byte)PCode.Grass;
+        }
+
+        private void AddVegetationDraw(List<MapEllipseDraw> vegetation, SceneObjectPart part,
+            ITerrainChannel hm, int opacity, float minSize, float maxSize)
+        {
+            Vector3 pos = part.GetWorldPosition();
+            if (!m_scene.PositionIsInCurrentRegion(pos) ||
+                Single.IsNaN(pos.X) || Single.IsNaN(pos.Y) ||
+                Single.IsInfinity(pos.X) || Single.IsInfinity(pos.Y))
+                return;
+
+            int x = (int)pos.X;
+            int y = (int)pos.Y;
+            if (x < 0 || x >= hm.Width || y < 0 || y >= hm.Height)
+                return;
+
+            if (pos.Z >= ((float)hm[x, y] + 256f))
+                return;
+
+            bool grass = part.Shape.PCode == (byte)PCode.Grass;
+            float diameter = Math.Max(part.Scale.X, part.Scale.Y);
+            diameter = Math.Max(minSize, Math.Min(maxSize, diameter * (grass ? 0.8f : 1.7f)));
+
+            Color canopy = grass
+                ? Color.FromArgb(132, 145, 104)
+                : Color.FromArgb(102, 119, 82);
+            Color outline = Darken(canopy, 0.58f);
+
+            RectangleF rect = new RectangleF(
+                pos.X - (diameter * 0.5f),
+                (hm.Height - pos.Y) - (diameter * 0.5f),
+                diameter,
+                diameter);
+
+            vegetation.Add(new MapEllipseDraw
+            {
+                rect = rect,
+                brush = new SolidBrush(Color.FromArgb(opacity, canopy)),
+                outlinePen = new Pen(Color.FromArgb(Math.Min(opacity, 55), outline), 1f),
+                z = pos.Z
+            });
+        }
+
+        private static Point[] OffsetPoints(Point[] source, int offsetX, int offsetY)
+        {
+            Point[] points = new Point[source.Length];
+            for (int i = 0; i < source.Length; i++)
+                points[i] = new Point(source[i].X + offsetX, source[i].Y + offsetY);
+            return points;
+        }
+
+        private static void ApplyAerialMapStyle(Bitmap mapbmp, float softenBlend,
+            float saturation, float contrast, int brightness)
+        {
+            softenBlend = Math.Max(0f, Math.Min(1f, softenBlend));
+            saturation = Math.Max(0f, Math.Min(2f, saturation));
+            contrast = Math.Max(0f, Math.Min(2f, contrast));
+
+            using (Bitmap source = (Bitmap)mapbmp.Clone())
+            {
+                for (int y = 0; y < mapbmp.Height; y++)
+                {
+                    for (int x = 0; x < mapbmp.Width; x++)
+                    {
+                        Color center = source.GetPixel(x, y);
+                        Color average = AverageNeighbourhood(source, x, y);
+                        Color softened = Blend(center, average, softenBlend);
+                        mapbmp.SetPixel(x, y, AdjustAerialTone(softened, saturation, contrast, brightness));
+                    }
+                }
+            }
+        }
+
+        private static Color AverageNeighbourhood(Bitmap bitmap, int x, int y)
+        {
+            int r = 0;
+            int g = 0;
+            int b = 0;
+            int count = 0;
+
+            for (int yy = Math.Max(0, y - 1); yy <= Math.Min(bitmap.Height - 1, y + 1); yy++)
+            {
+                for (int xx = Math.Max(0, x - 1); xx <= Math.Min(bitmap.Width - 1, x + 1); xx++)
+                {
+                    Color pixel = bitmap.GetPixel(xx, yy);
+                    r += pixel.R;
+                    g += pixel.G;
+                    b += pixel.B;
+                    count++;
+                }
+            }
+
+            return Color.FromArgb(r / count, g / count, b / count);
+        }
+
+        private static Color AdjustAerialTone(Color color, float saturation, float contrast, int brightness)
+        {
+            float gray = (color.R * 0.299f) + (color.G * 0.587f) + (color.B * 0.114f);
+            int r = ClampByte((int)((((gray + ((color.R - gray) * saturation)) - 128f) * contrast) + 128f + brightness));
+            int g = ClampByte((int)((((gray + ((color.G - gray) * saturation)) - 128f) * contrast) + 128f + brightness));
+            int b = ClampByte((int)((((gray + ((color.B - gray) * saturation)) - 128f) * contrast) + 128f + brightness));
+
+            return Color.FromArgb(r, g, b);
         }
 
         private Color GetPartMapColor(SceneObjectPart part, Color fallback, bool prettyObjectVolume,

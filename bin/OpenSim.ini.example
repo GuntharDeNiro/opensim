@@ -456,11 +456,47 @@
     ;# {MapObjectVolumeOutlineOpacity} {PrettyPrimVolumeOnMapTile} {Object outline opacity} {} 85
     ; MapObjectVolumeOutlineOpacity = 85
 
+    ;# {MapObjectVolumeShadows} {PrettyPrimVolumeOnMapTile} {Draw soft map shadows under objects?} {true false} true
+    ; MapObjectVolumeShadows = true
+
+    ;# {MapObjectVolumeShadowOpacity} {MapObjectVolumeShadows} {Object shadow opacity} {} 24
+    ; MapObjectVolumeShadowOpacity = 24
+
+    ;# {MapObjectVolumeShadowOffset} {MapObjectVolumeShadows} {Object shadow offset in map pixels} {} 2
+    ; MapObjectVolumeShadowOffset = 2
+
+    ;# {MapVegetationOnMapTile} {PrettyPrimVolumeOnMapTile} {Draw tree and grass canopies on map tiles?} {true false} true
+    ; MapVegetationOnMapTile = true
+
+    ;# {MapVegetationOpacity} {MapVegetationOnMapTile} {Vegetation overlay opacity} {} 86
+    ; MapVegetationOpacity = 86
+
+    ;# {MapVegetationMinSize} {MapVegetationOnMapTile} {Minimum vegetation canopy size in map pixels} {} 7
+    ; MapVegetationMinSize = 7
+
+    ;# {MapVegetationMaxSize} {MapVegetationOnMapTile} {Maximum vegetation canopy size in map pixels} {} 18
+    ; MapVegetationMaxSize = 18
+
     ;# {MapObjectVolumeMinimumBrightness} {PrettyPrimVolumeOnMapTile} {Minimum object overlay brightness} {} 72
     ; MapObjectVolumeMinimumBrightness = 72
 
     ;# {MapObjectVolumeMaximumBrightness} {PrettyPrimVolumeOnMapTile} {Maximum object overlay brightness} {} 235
     ; MapObjectVolumeMaximumBrightness = 235
+
+    ;# {MapTileAerialStyle} {} {Apply final aerial-photo style tone and softening pass?} {true false} true
+    ; MapTileAerialStyle = true
+
+    ;# {MapTileAerialSoften} {MapTileAerialStyle} {Aerial softening amount} {} 0.18
+    ; MapTileAerialSoften = 0.18
+
+    ;# {MapTileAerialSaturation} {MapTileAerialStyle} {Aerial saturation amount} {} 0.86
+    ; MapTileAerialSaturation = 0.86
+
+    ;# {MapTileAerialContrast} {MapTileAerialStyle} {Aerial contrast amount} {} 0.92
+    ; MapTileAerialContrast = 0.92
+
+    ;# {MapTileAerialBrightness} {MapTileAerialStyle} {Aerial brightness adjustment} {} 4
+    ; MapTileAerialBrightness = 4
 
     ;# {MapObjectVolumeSampleTextureAssets} {PrettyPrimVolumeOnMapTile} {Decode texture assets for object map colors?} {true false} false
     ;; Leave disabled unless you really need texture-derived map colors. Some remote or malformed texture
