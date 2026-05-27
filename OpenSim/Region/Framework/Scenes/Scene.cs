@@ -479,6 +479,8 @@ namespace OpenSim.Region.Framework.Scenes
         private readonly bool m_generateMaptilesInBackground;
         private readonly bool m_mapGenerationTimerEnabled;
         private volatile bool m_backgroundMaptileGenerationRunning;
+        private volatile bool m_gridRegistrationCompleted;
+        private volatile bool m_primsLoadedForMaptile;
 
         protected int m_lastHealth = -1;
         protected int m_lastUsers = -1;
@@ -2293,7 +2295,9 @@ namespace OpenSim.Region.Framework.Scenes
             if (error != String.Empty)
                 throw new Exception(error);
 
-            if (m_generateMaptiles && m_generateMaptilesInBackground)
+            m_gridRegistrationCompleted = true;
+
+            if (m_generateMaptiles && m_generateMaptilesInBackground && m_primsLoadedForMaptile)
                 RegenerateMaptileAndReregisterInBackground();
         }
 
@@ -2356,7 +2360,11 @@ namespace OpenSim.Region.Framework.Scenes
             }
 
             LoadingPrims = false;
+            m_primsLoadedForMaptile = true;
             EventManager.TriggerPrimsLoaded(this);
+
+            if (m_generateMaptiles && m_generateMaptilesInBackground && m_gridRegistrationCompleted)
+                RegenerateMaptileAndReregisterInBackground();
         }
 
         public bool SupportsRayCastFiltered()
