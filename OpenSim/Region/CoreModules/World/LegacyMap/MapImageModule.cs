@@ -1465,6 +1465,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             int brightness = (max + min) / 2;
             bool animated = part.TextureAnimation != null && part.TextureAnimation.Length > 0;
             bool translucent = textureAlpha < 0.82f;
+            bool mostlyTransparent = textureAlpha < 0.08f;
             bool neutralOverlay = brightness > 48 && brightness < 220 && (max - min) < 54;
             bool blueOrCyan = color.B >= color.R - 8 && color.G >= color.R - 35;
             bool nearWater = Math.Abs(pos.Z - waterHeight) < 10f || pos.Z < waterHeight + 4f;
@@ -1477,7 +1478,13 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     name.Contains("ocean") || name.Contains("sea");
             }
 
-            return animated || namedWater || (nearWater && (translucent || blueOrCyan || neutralOverlay));
+            if (mostlyTransparent)
+                return true;
+
+            if (!translucent)
+                return false;
+
+            return (animated || namedWater || (nearWater && (blueOrCyan || neutralOverlay)));
         }
 
         private static Color ClampBrightness(Color color, int minimumBrightness, int maximumBrightness)
