@@ -894,8 +894,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
             for (int i = 0; i < renderMesh.Faces.Count; i++)
             {
-                OpenMetaverse.Rendering.Face face = renderMesh.Faces[i];
-                if (face == null || face.Vertices == null || face.Indices == null)
+                Face face = renderMesh.Faces[i];
+                if (face.Vertices == null || face.Indices == null)
                     continue;
 
                 Primitive.TextureEntryFace textureFace = textureEntry.GetFace((uint)i);
@@ -995,7 +995,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             return fallback;
         }
 
-        private Vector3 MeshVertexToWorld(Vector3 vertex, Vector3 scale, Quaternion rot, Vector3 pos)
+        private static Vector3 MeshVertexToWorld(Vector3 vertex, Vector3 scale, Quaternion rot, Vector3 pos)
         {
             Vector3 local = new Vector3(vertex.X * scale.X, vertex.Y * scale.Y, vertex.Z * scale.Z);
             local *= rot;
@@ -1014,7 +1014,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
         private Point WorldToMapPoint(Vector3 point)
         {
-            return new Point((int)point.X, (int)(m_scene.RegionInfo.RegionSizeY - 1 - point.Y));
+            int regionHeight = (int)m_scene.RegionInfo.RegionSizeY;
+            return new Point((int)point.X, (int)(regionHeight - 1 - point.Y));
         }
 
         private bool IsVegetation(SceneObjectPart part)
