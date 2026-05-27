@@ -62,6 +62,13 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         public face[] trns;
     }
 
+    public struct MapTextureSample
+    {
+        public bool valid;
+        public Color color;
+        public float alpha;
+    }
+
     [Extension(Path = "/OpenSim/RegionModules", NodeName = "RegionModule", Id = "MapImageModule")]
     public class MapImageModule : IMapImageGenerator, INonSharedRegionModule
     {
@@ -73,6 +80,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         private IMapTileTerrainRenderer terrainRenderer;
         private bool m_Enabled = false;
         private static readonly string[] MapConfigSections = new string[] { "Map", "Startup" };
+        private readonly Dictionary<UUID, MapTextureSample> m_textureSampleCache = new Dictionary<UUID, MapTextureSample>();
 
         #region IMapImageGenerator Members
 
@@ -430,7 +438,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                             ? largeObjectOpacity
                                             : objectOpacity;
                                         bool isWaterLikeObject = prettyObjectVolume &&
-                                            IsWaterLikeMapObject(mapdotspot, objectArea, part.Scale, largeObjectArea);
+                                            IsWaterLikeMapObject(part, mapdotspot, objectArea, part.Scale, largeObjectArea);
 
                                         if (prettyObjectVolume && useTextureAlpha)
                                             fillOpacity = ApplyTextureAlpha(fillOpacity, GetPartTextureAlpha(part), minimumOpacity);
@@ -689,6 +697,10 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             }
 
             Color adjusted = Color.FromArgb(colorr, colorg, colorb);
+            MapTextureSample sample = GetPartTextureSample(part);
+            if (sample.valid)
+                adjusted = Blend(adjusted, sample.color, 0.75f);
+
             adjusted = ClampBrightness(adjusted, minimumBrightness, maximumBrightness);
 
             if (adjusted.R > 246 && adjusted.G > 246 && adjusted.B > 246)
@@ -699,12 +711,162 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
         private float GetPartTextureAlpha(SceneObjectPart part)
         {
-            Primitive.TextureEntry textureEntry = part.Shape.Textures;
+            MapTextureSample sample = GetPartTextureSample(part);
+            if (sample.valid)
+                return sample.alpha;
 
+            Primitive.TextureEntry textureEntry = part.Shape.Textures;
             if (textureEntry == null || textureEntry.DefaultTexture == null)
                 return 1f;
 
             return Math.Max(0f, Math.Min(1f, textureEntry.DefaultTexture.RGBA.A));
+        }
+
+        private MapTextureSample GetPartTextureSample(SceneObjectPart part)
+        {
+            MapTextureSample fallback = new MapTextureSample
+            {
+                valid = false,
+                color = Color.Gray,
+                alpha = 1f
+            };
+
+            Primitive.TextureEntry textureEntry = part.Shape.Textures;
+            if (textureEntry == null)
+                return fallback;
+
+            MapTextureSample selected = GetTextureFaceSample(textureEntry.DefaultTexture);
+
+            if (textureEntry.FaceTextures != null)
+            {
+                foreach (Primitive.TextureEntryFace face in textureEntry.FaceTextures)
+                {
+                    if (face == null)
+                        continue;
+
+                    MapTextureSample faceSample = GetTextureFaceSample(face);
+                    if (!faceSample.valid)
+                        continue;
+
+                    if (!selected.valid || faceSample.alpha < selected.alpha)
+                        selected = faceSample;
+                }
+            }
+
+            return selected.valid ? selected : fallback;
+        }
+
+        private MapTextureSample GetTextureFaceSample(Primitive.TextureEntryFace face)
+        {
+            MapTextureSample fallback = new MapTextureSample
+            {
+                valid = false,
+                color = Color.Gray,
+                alpha = 1f
+            };
+
+            if (face == null)
+                return fallback;
+
+            float faceAlpha = Math.Max(0f, Math.Min(1f, face.RGBA.A));
+            Color faceColor = Color.FromArgb(
+                ClampByte((int)(face.RGBA.R * 255f)),
+                ClampByte((int)(face.RGBA.G * 255f)),
+                ClampByte((int)(face.RGBA.B * 255f)));
+
+            if (face.TextureID.IsZero())
+            {
+                fallback.valid = true;
+                fallback.color = faceColor;
+                fallback.alpha = faceAlpha;
+                return fallback;
+            }
+
+            MapTextureSample textureSample = GetTextureAssetSample(face.TextureID);
+            if (!textureSample.valid)
+            {
+                fallback.valid = true;
+                fallback.color = faceColor;
+                fallback.alpha = faceAlpha;
+                return fallback;
+            }
+
+            textureSample.color = Multiply(textureSample.color, faceColor);
+            textureSample.alpha = Math.Max(0f, Math.Min(1f, textureSample.alpha * faceAlpha));
+            return textureSample;
+        }
+
+        private MapTextureSample GetTextureAssetSample(UUID textureID)
+        {
+            MapTextureSample sample;
+            if (m_textureSampleCache.TryGetValue(textureID, out sample))
+                return sample;
+
+            sample = new MapTextureSample
+            {
+                valid = false,
+                color = Color.Gray,
+                alpha = 1f
+            };
+
+            AssetBase asset = m_scene.AssetService.Get(textureID.ToString());
+            if (asset == null || asset.Data == null || asset.Data.Length == 0)
+            {
+                m_textureSampleCache[textureID] = sample;
+                return sample;
+            }
+
+            ManagedImage managedImage;
+            Image image;
+            try
+            {
+                if (OpenJPEG.DecodeToImage(asset.Data, out managedImage, out image))
+                {
+                    using (image)
+                    using (Bitmap bitmap = new Bitmap(image))
+                    {
+                        sample = ComputeTextureSample(bitmap);
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                sample.valid = false;
+            }
+
+            m_textureSampleCache[textureID] = sample;
+            return sample;
+        }
+
+        private static MapTextureSample ComputeTextureSample(Bitmap bitmap)
+        {
+            long r = 0;
+            long g = 0;
+            long b = 0;
+            long a = 0;
+            int pixels = Math.Max(1, bitmap.Width * bitmap.Height);
+
+            for (int y = 0; y < bitmap.Height; y++)
+            {
+                for (int x = 0; x < bitmap.Width; x++)
+                {
+                    Color color = bitmap.GetPixel(x, y);
+                    r += color.R;
+                    g += color.G;
+                    b += color.B;
+                    a += color.A;
+                }
+            }
+
+            return new MapTextureSample
+            {
+                valid = true,
+                color = Color.FromArgb(
+                    ClampByte((int)(r / pixels)),
+                    ClampByte((int)(g / pixels)),
+                    ClampByte((int)(b / pixels))),
+                alpha = Math.Max(0f, Math.Min(1f, (float)a / (255f * pixels)))
+            };
         }
 
         private static int ApplyTextureAlpha(int opacity, float textureAlpha, int minimumOpacity)
@@ -715,9 +877,12 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             return Math.Max(minimumOpacity, ClampByte((int)(opacity * textureAlpha)));
         }
 
-        private static bool IsWaterLikeMapObject(Color color, int objectArea, Vector3 scale, int largeObjectArea)
+        private bool IsWaterLikeMapObject(SceneObjectPart part, Color color, int objectArea, Vector3 scale, int largeObjectArea)
         {
             if (objectArea < largeObjectArea)
+                return false;
+
+            if (part.TextureAnimation == null || part.TextureAnimation.Length == 0)
                 return false;
 
             float largestSide = Math.Max(scale.X, Math.Max(scale.Y, scale.Z));
@@ -766,6 +931,14 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 ClampByte((int)(from.R + ((to.R - from.R) * amount))),
                 ClampByte((int)(from.G + ((to.G - from.G) * amount))),
                 ClampByte((int)(from.B + ((to.B - from.B) * amount))));
+        }
+
+        private static Color Multiply(Color first, Color second)
+        {
+            return Color.FromArgb(
+                ClampByte((first.R * second.R) / 255),
+                ClampByte((first.G * second.G) / 255),
+                ClampByte((first.B * second.B) / 255));
         }
 
         private static int ClampByte(int value)
