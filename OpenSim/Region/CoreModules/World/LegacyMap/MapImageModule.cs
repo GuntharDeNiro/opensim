@@ -30,6 +30,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Reflection;
+using System.Threading;
 using CSJ2K;
 using log4net;
 using Mono.Addins;
@@ -361,6 +362,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             Dictionary<uint, DrawStruct> z_sort = new Dictionary<uint, DrawStruct>();
             List<MapEllipseDraw> vegetation = new List<MapEllipseDraw>();
             List<MapPolygonDraw> meshGeometry = new List<MapPolygonDraw>();
+            int yieldCounter = 0;
+            int lastYieldMS = Environment.TickCount;
             bool prettyObjectVolume = Util.GetConfigVarFromSections<bool>(
                 m_config, "PrettyPrimVolumeOnMapTile", MapConfigSections, true);
             bool drawObjectOutlines = Util.GetConfigVarFromSections<bool>(
@@ -427,6 +430,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                             // Loop over prim in group
                             foreach (SceneObjectPart part in mapdot.Parts)
                             {
+                                YieldMaptileWork(ref yieldCounter, ref lastYieldMS);
+
                                 if (part == null)
                                     continue;
 
@@ -747,6 +752,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
                         for (int s = 0; s < sortedZHeights.Length; s++)
                         {
+                            YieldMaptileWork(ref yieldCounter, ref lastYieldMS);
+
                             if (z_sort.ContainsKey(sortedlocalIds[s]))
                             {
                                 DrawStruct rectDrawStruct = z_sort[sortedlocalIds[s]];
@@ -780,6 +787,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
                         foreach (MapPolygonDraw mesh in meshGeometry)
                         {
+                            YieldMaptileWork(ref yieldCounter, ref lastYieldMS);
+
                             g.FillPolygon(mesh.brush, mesh.points);
                             if (mesh.outlinePen != null)
                                 g.DrawPolygon(mesh.outlinePen, mesh.points);
@@ -787,6 +796,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
                         for (int s = 0; s < sortedZHeights.Length; s++)
                         {
+                            YieldMaptileWork(ref yieldCounter, ref lastYieldMS);
+
                             if (z_sort.ContainsKey(sortedlocalIds[s]))
                             {
                                 DrawStruct rectDrawStruct = z_sort[sortedlocalIds[s]];
@@ -876,6 +887,20 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             return (DetailLevel)configuredLevel;
         }
 
+        private static void YieldMaptileWork(ref int counter, ref int lastYieldMS)
+        {
+            counter++;
+            if ((counter & 0x7f) != 0)
+                return;
+
+            int now = Environment.TickCount;
+            if (Util.EnvironmentTickCountSubtract(now, lastYieldMS) < 20)
+                return;
+
+            Thread.Sleep(1);
+            lastYieldMS = Environment.TickCount;
+        }
+
         private static bool IsSculptOrMesh(SceneObjectPart part)
         {
             return part != null &&
@@ -903,9 +928,13 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             Quaternion rot = part.GetWorldRotation();
             Vector3 scale = part.Scale;
             bool added = false;
+            int yieldCounter = 0;
+            int lastYieldMS = Environment.TickCount;
 
             for (int i = 0; i < renderMesh.Faces.Count; i++)
             {
+                YieldMaptileWork(ref yieldCounter, ref lastYieldMS);
+
                 Face face = renderMesh.Faces[i];
                 if (face.Vertices == null || face.Indices == null)
                     continue;
@@ -919,6 +948,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
                 for (int j = 0; j + 2 < face.Indices.Count; j += 3)
                 {
+                    YieldMaptileWork(ref yieldCounter, ref lastYieldMS);
+
                     int index0 = face.Indices[j];
                     int index1 = face.Indices[j + 1];
                     int index2 = face.Indices[j + 2];
