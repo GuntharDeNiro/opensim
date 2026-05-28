@@ -477,10 +477,14 @@ namespace OpenSim.Region.Framework.Scenes
         private readonly Timer m_mapGenerationTimer = new();
         private readonly bool m_generateMaptiles;
         private readonly bool m_generateMaptilesInBackground;
+        private readonly int m_backgroundMaptileStartupDelaySeconds;
+        private readonly bool m_backgroundMaptileDeferWithAgents;
+        private readonly bool m_mapGenerationForceGC;
         private readonly bool m_mapGenerationTimerEnabled;
         private volatile bool m_backgroundMaptileGenerationRunning;
         private volatile bool m_gridRegistrationCompleted;
         private volatile bool m_primsLoadedForMaptile;
+        private static readonly SemaphoreSlim s_backgroundMaptileGenerationSemaphore = new(1, 1);
 
         protected int m_lastHealth = -1;
         protected int m_lastUsers = -1;
@@ -1019,6 +1023,12 @@ namespace OpenSim.Region.Framework.Scenes
                     = Util.GetConfigVarFromSections<bool>(config, "GenerateMaptiles", possibleMapConfigSections, true);
                 m_generateMaptilesInBackground
                     = Util.GetConfigVarFromSections<bool>(config, "GenerateMaptilesInBackground", possibleMapConfigSections, true);
+                m_backgroundMaptileStartupDelaySeconds = Math.Max(0,
+                    Util.GetConfigVarFromSections<int>(config, "MaptileStartupDelaySeconds", possibleMapConfigSections, 180));
+                m_backgroundMaptileDeferWithAgents
+                    = Util.GetConfigVarFromSections<bool>(config, "MaptileDeferIfAgentsPresent", possibleMapConfigSections, true);
+                m_mapGenerationForceGC
+                    = Util.GetConfigVarFromSections<bool>(config, "MaptileForceGC", possibleMapConfigSections, false);
 
                 if (m_generateMaptiles)
                 {
@@ -5992,11 +6002,14 @@ Environment.Exit(1);
         {
             RegenerateMaptile();
 
-            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            GC.Collect();
-            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.Default;
+            if (m_mapGenerationForceGC)
+            {
+                GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+                GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.Default;
+            }
 
             // We need to propagate the new image UUID to the grid service
             // so that all simulators can retrieve it
@@ -6018,7 +6031,31 @@ Environment.Exit(1);
             {
                 try
                 {
-                    RegenerateMaptileAndReregister(null, null);
+                    if (m_backgroundMaptileStartupDelaySeconds > 0)
+                    {
+                        m_log.InfoFormat("[SCENE]: Delaying background maptile generation for {0} by {1} seconds",
+                            RegionInfo.RegionName, m_backgroundMaptileStartupDelaySeconds);
+                        for (int i = 0; i < m_backgroundMaptileStartupDelaySeconds; i++)
+                            Thread.Sleep(1000);
+                    }
+
+                    if (m_backgroundMaptileDeferWithAgents && AnyRootAgentsInInstance())
+                    {
+                        m_log.InfoFormat("[SCENE]: Delaying background maptile generation for {0} until avatars leave the simulator",
+                            RegionInfo.RegionName);
+                        while (AnyRootAgentsInInstance())
+                            Thread.Sleep(10000);
+                    }
+
+                    s_backgroundMaptileGenerationSemaphore.Wait();
+                    try
+                    {
+                        RegenerateMaptileAndReregister(null, null);
+                    }
+                    finally
+                    {
+                        s_backgroundMaptileGenerationSemaphore.Release();
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -6029,8 +6066,19 @@ Environment.Exit(1);
                 {
                     m_backgroundMaptileGenerationRunning = false;
                 }
-            }, $"MaptileGeneration-({Name.Replace(" ", "_")})", ThreadPriority.BelowNormal, false,
+            }, $"MaptileGeneration-({Name.Replace(" ", "_")})", ThreadPriority.Lowest, false,
                 false, null, 20000, false);
+        }
+
+        private static bool AnyRootAgentsInInstance()
+        {
+            foreach (Scene scene in SceneManager.Instance.Scenes)
+            {
+                if (scene != null && scene.GetRootAgentCount() > 0)
+                    return true;
+            }
+
+            return false;
         }
 
         /// <summary>

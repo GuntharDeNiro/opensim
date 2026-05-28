@@ -968,7 +968,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     }
                     catch (Exception e)
                     {
-                        m_log.WarnFormat("[MAPTILE]: Exact geometry decode failed for object '{0}' ({1}), asset {2}, sculpt type {3}: {4}",
+                        m_log.DebugFormat("[MAPTILE]: Exact geometry decode failed for object '{0}' ({1}), asset {2}, sculpt type {3}: {4}",
                             part.Name, part.UUID, omvPrim.Sculpt.SculptTexture, omvPrim.Sculpt.Type, e.Message);
                     }
 
@@ -979,14 +979,14 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 }
                 else
                 {
-                    m_log.WarnFormat("[MAPTILE]: Exact geometry asset missing for object '{0}' ({1}), asset {2}, sculpt type {3}",
+                    m_log.DebugFormat("[MAPTILE]: Exact geometry asset missing for object '{0}' ({1}), asset {2}, sculpt type {3}",
                         part.Name, part.UUID, omvPrim.Sculpt.SculptTexture, omvPrim.Sculpt.Type);
                     m_failedRenderMeshCache.Add(cacheKey);
                 }
 
                 if (renderMesh == null)
                 {
-                    m_log.WarnFormat("[MAPTILE]: Object '{0}' ({1}) was not drawn because exact sculpt/mesh geometry was unavailable",
+                    m_log.DebugFormat("[MAPTILE]: Object '{0}' ({1}) was not drawn because exact sculpt/mesh geometry was unavailable",
                         part.Name, part.UUID);
                 }
 
