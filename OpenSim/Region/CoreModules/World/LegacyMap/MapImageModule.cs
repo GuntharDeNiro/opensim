@@ -566,6 +566,20 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                                 minimumOpacity);
                                         }
 
+                                        if (prettyObjectVolume && useTextureAlpha && textureAlpha >= 0.99f &&
+                                            IsLargeFlatNearWaterMapCandidate(part.Scale, objectArea,
+                                                largeObjectArea, pos, waterHeight))
+                                        {
+                                            float priorityTextureAlpha = GetPartTextureAlpha(part, true, true);
+                                            if (priorityTextureAlpha < textureAlpha)
+                                            {
+                                                textureAlpha = priorityTextureAlpha;
+                                                fillOpacity = ApplyTextureAlpha(fillOpacity,
+                                                    textureAlpha,
+                                                    minimumOpacity);
+                                            }
+                                        }
+
                                         bool isWaterLikeObject = prettyObjectVolume &&
                                             IsWaterLikeMapObject(part, mapdotspot, objectArea, part.Scale,
                                                 largeObjectArea, pos, waterHeight, textureAlpha);
@@ -1313,9 +1327,14 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
         private float GetPartTextureAlpha(SceneObjectPart part, bool sampleTextureAssets)
         {
+            return GetPartTextureAlpha(part, sampleTextureAssets, false);
+        }
+
+        private float GetPartTextureAlpha(SceneObjectPart part, bool sampleTextureAssets, bool prioritySample)
+        {
             if (sampleTextureAssets)
             {
-                MapTextureSample sample = GetPartTextureSample(part);
+                MapTextureSample sample = GetPartTextureSample(part, prioritySample);
                 if (sample.valid)
                     return sample.alpha;
             }
@@ -1329,6 +1348,11 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
         private MapTextureSample GetPartTextureSample(SceneObjectPart part)
         {
+            return GetPartTextureSample(part, false);
+        }
+
+        private MapTextureSample GetPartTextureSample(SceneObjectPart part, bool prioritySample)
+        {
             MapTextureSample fallback = new MapTextureSample
             {
                 valid = false,
@@ -1340,7 +1364,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             if (textureEntry == null)
                 return fallback;
 
-            MapTextureSample selected = GetTextureFaceSample(textureEntry.DefaultTexture);
+            MapTextureSample selected = GetTextureFaceSample(textureEntry.DefaultTexture, prioritySample);
 
             if (textureEntry.FaceTextures != null)
             {
@@ -1349,7 +1373,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     if (face == null)
                         continue;
 
-                    MapTextureSample faceSample = GetTextureFaceSample(face);
+                    MapTextureSample faceSample = GetTextureFaceSample(face, prioritySample);
                     if (!faceSample.valid)
                         continue;
 
@@ -1362,6 +1386,11 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         }
 
         private MapTextureSample GetTextureFaceSample(Primitive.TextureEntryFace face)
+        {
+            return GetTextureFaceSample(face, false);
+        }
+
+        private MapTextureSample GetTextureFaceSample(Primitive.TextureEntryFace face, bool prioritySample)
         {
             MapTextureSample fallback = new MapTextureSample
             {
@@ -1387,7 +1416,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 return fallback;
             }
 
-            MapTextureSample textureSample = GetTextureAssetSample(face.TextureID);
+            MapTextureSample textureSample = GetTextureAssetSample(face.TextureID, prioritySample);
             if (!textureSample.valid)
             {
                 fallback.valid = true;
@@ -1403,6 +1432,11 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
         private MapTextureSample GetTextureAssetSample(UUID textureID)
         {
+            return GetTextureAssetSample(textureID, false);
+        }
+
+        private MapTextureSample GetTextureAssetSample(UUID textureID, bool prioritySample)
+        {
             MapTextureSample sample;
             if (m_textureSampleCache.TryGetValue(textureID, out sample))
                 return sample;
@@ -1414,7 +1448,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 alpha = 1f
             };
 
-            if (m_maxTextureAssetSamplesThisPass > 0 &&
+            if (!prioritySample &&
+                m_maxTextureAssetSamplesThisPass > 0 &&
                 m_textureAssetSamplesThisPass >= m_maxTextureAssetSamplesThisPass)
                 return sample;
 
@@ -1568,6 +1603,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             bool translucent = textureAlpha < 0.82f;
             bool mostlyTransparent = textureAlpha < 0.08f;
             bool neutralOverlay = brightness > 48 && brightness < 220 && (max - min) < 54;
+            bool brightNeutralOverlay = brightness >= 210 && (max - min) < 42;
             bool blueOrCyan = color.B >= color.R - 8 && color.G >= color.R - 35;
             bool nearWater = Math.Abs(pos.Z - waterHeight) < 10f || pos.Z < waterHeight + 4f;
             bool namedWater = false;
@@ -1582,10 +1618,27 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             if (mostlyTransparent)
                 return true;
 
+            if ((animated || namedWater) && nearWater &&
+                (blueOrCyan || neutralOverlay || brightNeutralOverlay))
+                return true;
+
             if (!translucent)
                 return false;
 
             return (animated || namedWater || (nearWater && (blueOrCyan || neutralOverlay)));
+        }
+
+        private static bool IsLargeFlatNearWaterMapCandidate(Vector3 scale, int objectArea,
+            int largeObjectArea, Vector3 pos, float waterHeight)
+        {
+            if (objectArea < largeObjectArea)
+                return false;
+
+            float largestSide = Math.Max(scale.X, Math.Max(scale.Y, scale.Z));
+            float thinnestSide = Math.Min(scale.X, Math.Min(scale.Y, scale.Z));
+            bool nearWater = Math.Abs(pos.Z - waterHeight) < 10f || pos.Z < waterHeight + 4f;
+
+            return nearWater && largestSide >= 24f && thinnestSide <= 3f;
         }
 
         private static Color ClampBrightness(Color color, int minimumBrightness, int maximumBrightness)
