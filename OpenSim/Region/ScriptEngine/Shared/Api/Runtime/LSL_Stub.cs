@@ -939,6 +939,12 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public LSL_List llGetExperienceKeyValueStoreStats()
+        {
+            return m_LSL_Functions.llGetExperienceKeyValueStoreStats();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public LSL_Key llGetPermissionsKey()
         {
             return m_LSL_Functions.llGetPermissionsKey();

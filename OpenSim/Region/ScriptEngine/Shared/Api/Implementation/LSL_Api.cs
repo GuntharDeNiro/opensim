@@ -5174,6 +5174,50 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             return PostKeyValueResult(true, result.ToString());
         }
 
+        public LSL_List llGetExperienceKeyValueStoreStats()
+        {
+            LSL_List result = new();
+            result.Add(new LSL_String("enabled"));
+            result.Add(new LSL_Integer(m_scriptExperiencesEnabled && m_scriptExperienceKvpEnabled ? 1 : 0));
+            result.Add(new LSL_String("trusted"));
+            result.Add(new LSL_Integer(IsScriptExperienceTrusted() ? 1 : 0));
+            result.Add(new LSL_String("max_keys"));
+            result.Add(new LSL_Integer(m_scriptExperienceKvpMaxKeys));
+            result.Add(new LSL_String("max_key_bytes"));
+            result.Add(new LSL_Integer(m_scriptExperienceKvpMaxKeyBytes));
+            result.Add(new LSL_String("max_value_bytes"));
+            result.Add(new LSL_Integer(m_scriptExperienceKvpMaxValueBytes));
+            result.Add(new LSL_String("max_store_bytes"));
+            result.Add(new LSL_Integer(m_scriptExperienceKvpMaxStoreBytes));
+
+            int keyCount = 0;
+            int usedBytes = 0;
+            if (m_scriptExperiencesEnabled && m_scriptExperienceKvpEnabled && IsScriptExperienceTrusted())
+            {
+                lock (m_scriptExperienceKvpLock)
+                {
+                    string scope = ExperienceStoreScope();
+                    EnsureExperienceStoreLoaded(scope);
+                    if (m_scriptExperienceKvpStores.TryGetValue(scope, out Dictionary<string, string> store))
+                    {
+                        keyCount = store.Count;
+                        usedBytes = ExperienceStoreByteCount(store);
+                    }
+                }
+            }
+
+            result.Add(new LSL_String("key_count"));
+            result.Add(new LSL_Integer(keyCount));
+            result.Add(new LSL_String("used_bytes"));
+            result.Add(new LSL_Integer(usedBytes));
+            result.Add(new LSL_String("free_bytes"));
+            result.Add(new LSL_Integer(m_scriptExperienceKvpMaxStoreBytes > 0
+                ? Math.Max(0, m_scriptExperienceKvpMaxStoreBytes - usedBytes)
+                : 0));
+
+            return result;
+        }
+
         public LSL_Integer llGetLinkNumber()
         {
 
