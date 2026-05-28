@@ -97,6 +97,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         private static readonly string[] MapConfigSections = new string[] { "Map", "Startup" };
         private readonly Dictionary<UUID, MapTextureSample> m_textureSampleCache = new Dictionary<UUID, MapTextureSample>();
         private readonly Dictionary<string, FacetedMesh> m_renderMeshCache = new Dictionary<string, FacetedMesh>();
+        private readonly HashSet<string> m_failedRenderMeshCache = new HashSet<string>();
         private int m_textureAssetSamplesThisPass = 0;
         private int m_maxTextureAssetSamplesThisPass = 0;
 
@@ -939,6 +940,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 string cacheKey = omvPrim.Sculpt.SculptTexture + ":" + omvPrim.Sculpt.Type + ":" + lod;
                 if (m_renderMeshCache.TryGetValue(cacheKey, out renderMesh))
                     return renderMesh;
+                if (m_failedRenderMeshCache.Contains(cacheKey))
+                    return null;
 
                 string assetID = omvPrim.Sculpt.SculptTexture.ToString();
                 byte[] sculptData = GetAssetDataForMap(assetID);
@@ -971,11 +974,14 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
                     if (renderMesh != null)
                         m_renderMeshCache[cacheKey] = renderMesh;
+                    else
+                        m_failedRenderMeshCache.Add(cacheKey);
                 }
                 else
                 {
                     m_log.WarnFormat("[MAPTILE]: Exact geometry asset missing for object '{0}' ({1}), asset {2}, sculpt type {3}",
                         part.Name, part.UUID, omvPrim.Sculpt.SculptTexture, omvPrim.Sculpt.Type);
+                    m_failedRenderMeshCache.Add(cacheKey);
                 }
 
                 if (renderMesh == null)
@@ -995,6 +1001,9 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             if (data == null || data.Length == 0)
                 return null;
 
+            if (!LooksLikeCompleteJpeg2000(data))
+                return null;
+
             try
             {
                 // Map generation is background/diagnostic work.  Do not use the
@@ -1008,6 +1017,29 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             {
                 return null;
             }
+        }
+
+        private static bool LooksLikeCompleteJpeg2000(byte[] data)
+        {
+            if (data.Length < 16)
+                return false;
+
+            bool rawCodestream = data[0] == 0xff && data[1] == 0x4f;
+            bool jp2Container = data[0] == 0x00 && data[1] == 0x00 &&
+                data[2] == 0x00 && data[3] == 0x0c &&
+                data[4] == 0x6a && data[5] == 0x50 &&
+                data[6] == 0x20 && data[7] == 0x20;
+
+            if (!rawCodestream && !jp2Container)
+                return false;
+
+            for (int i = data.Length - 2; i >= 0; i--)
+            {
+                if (data[i] == 0xff && data[i + 1] == 0xd9)
+                    return true;
+            }
+
+            return false;
         }
 
         private byte[] GetAssetDataForMap(string assetID)
