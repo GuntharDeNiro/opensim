@@ -3438,7 +3438,12 @@ namespace OpenSim.Region.Framework.Scenes
             //m_scene.EventManager.TriggerParcelPrimCountTainted(); // update select/ sat on
         }
 
-        public void HandleAgentRequestSit(IClientAPI remoteClient, UUID agentID, UUID targetID, Vector3 offset, bool scriptedSit = false)
+        public void HandleAgentRequestSit(IClientAPI remoteClient, UUID agentID, UUID targetID, Vector3 offset)
+        {
+            HandleAgentRequestSit(remoteClient, agentID, targetID, offset, false);
+        }
+
+        public void HandleAgentRequestSit(IClientAPI remoteClient, UUID agentID, UUID targetID, Vector3 offset, bool scriptedSit)
         {
             if (IsChildAgent)
                 return;
