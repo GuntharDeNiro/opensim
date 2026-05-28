@@ -473,6 +473,9 @@
     ;# {MapObjectVolumeFaceShading} {PrettyPrimVolumeOnMapTile} {Shade individual object faces for sharper geographic relief?} {true false} true
     ; MapObjectVolumeFaceShading = true
 
+    ;# {MapObjectVolumeSkipWithAgentsPresent} {PrettyPrimVolumeOnMapTile} {Skip or abort the expensive object overlay pass while avatars are present in this simulator?} {true false} true
+    ; MapObjectVolumeSkipWithAgentsPresent = true
+
     ;# {MapObjectVolumeRenderMeshGeometry} {PrettyPrimVolumeOnMapTile} {Use exact mesh/sculpt/prim geometry for object map rendering?} {true false} true
     ; MapObjectVolumeRenderMeshGeometry = true
 

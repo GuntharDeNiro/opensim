@@ -328,6 +328,14 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             ITerrainChannel hm = whichScene.Heightmap;
             tc = Environment.TickCount;
             m_log.Debug("[MAPTILE]: Generating Maptile Step 2: Object Volume Profile");
+            bool skipObjectVolumeWithAgents = Util.GetConfigVarFromSections<bool>(
+                m_config, "MapObjectVolumeSkipWithAgentsPresent", MapConfigSections, true);
+            if (skipObjectVolumeWithAgents && AnyRootAgentsInInstance())
+            {
+                m_log.Info("[MAPTILE]: Skipping object volume map pass because avatars are present in this simulator");
+                return mapbmp;
+            }
+
             EntityBase[] objs = whichScene.GetEntities();
             List<float> z_sortheights = new List<float>();
             List<uint> z_localIDs = new List<uint>();
@@ -412,6 +420,12 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     {
                         foreach (EntityBase obj in objs)
                         {
+                            if (skipObjectVolumeWithAgents && AnyRootAgentsInInstance())
+                            {
+                                m_log.Info("[MAPTILE]: Aborting object volume map pass because avatars entered this simulator");
+                                return mapbmp;
+                            }
+
                             // Only draw the contents of SceneObjectGroup
                             if (obj is SceneObjectGroup)
                             {
@@ -420,6 +434,11 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                 foreach (SceneObjectPart part in mapdot.Parts)
                                 {
                                     YieldMaptileWork(ref yieldCounter, ref lastYieldMS);
+                                    if (skipObjectVolumeWithAgents && AnyRootAgentsInInstance())
+                                    {
+                                        m_log.Info("[MAPTILE]: Aborting object volume map pass because avatars entered this simulator");
+                                        return mapbmp;
+                                    }
 
                                     if (part == null)
                                         continue;
@@ -893,6 +912,17 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 (part.Shape.SculptType & 0x07) != (byte)SculptType.None;
         }
 
+        private static bool AnyRootAgentsInInstance()
+        {
+            foreach (Scene scene in SceneManager.Instance.Scenes)
+            {
+                if (scene != null && scene.GetRootAgentCount() > 0)
+                    return true;
+            }
+
+            return false;
+        }
+
         private DrawStruct CreateMissingGeometryDrawStruct(ITerrainChannel hm,
             Vector3 pos, Quaternion rot, Vector3 halfScale, Vector3 axPos,
             Color color, int opacity, int outlineOpacity, bool drawOutline,
@@ -1243,7 +1273,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             if (!rawCodestream && !jp2Container)
                 return false;
 
-            return HasJpeg2000EocMarker(data);
+            return HasJpeg2000EocMarker(data) && !HasUnknownJpeg2000CommentMarker(data);
         }
 
         private static bool HasJpeg2000EocMarker(byte[] data)
@@ -1251,6 +1281,21 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             for (int i = data.Length - 2; i >= 0; i--)
             {
                 if (data[i] == 0xff && data[i + 1] == 0xd9)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool HasUnknownJpeg2000CommentMarker(byte[] data)
+        {
+            for (int i = 0; i + 5 < data.Length; i++)
+            {
+                if (data[i] != 0xff || data[i + 1] != 0x64)
+                    continue;
+
+                int registration = (data[i + 4] << 8) | data[i + 5];
+                if (registration == 0)
                     return true;
             }
 
