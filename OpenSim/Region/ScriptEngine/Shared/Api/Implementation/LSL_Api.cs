@@ -128,6 +128,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         protected bool m_scriptExperiencesEnabled = false;
         protected bool m_scriptExperiencesAllowEstateManagers = false;
         protected int m_scriptExperienceAutoGrantPermissions = 0;
+        protected string m_scriptExperienceName = "OpenSim Experience-Lite";
+        protected UUID m_scriptExperienceID = UUID.Zero;
         protected bool m_scriptExperienceKvpEnabled = true;
         protected int m_scriptExperienceKvpMaxKeys = 1024;
         protected int m_scriptExperienceKvpMaxKeyBytes = 1011;
@@ -537,6 +539,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     m_scriptExperiencesEnabled = experiencesConfig.GetBoolean("Enabled", m_scriptExperiencesEnabled);
                     m_scriptExperiencesAllowEstateManagers = experiencesConfig.GetBoolean("AllowEstateManagers", m_scriptExperiencesAllowEstateManagers);
                     m_scriptExperienceAutoGrantPermissions = experiencesConfig.GetInt("AutoGrantPermissions", DefaultExperienceAutoGrantPermissions());
+                    m_scriptExperienceName = experiencesConfig.GetString("ExperienceName", m_scriptExperienceName);
+                    if (UUID.TryParse(experiencesConfig.GetString("ExperienceID", UUID.Zero.ToString()), out UUID experienceID))
+                        m_scriptExperienceID = experienceID;
                     m_scriptExperienceKvpEnabled = experiencesConfig.GetBoolean("KeyValueStoreEnabled", m_scriptExperienceKvpEnabled);
                     m_scriptExperienceKvpMaxKeys = Math.Max(0, experiencesConfig.GetInt("KeyValueStoreMaxKeys", m_scriptExperienceKvpMaxKeys));
                     m_scriptExperienceKvpMaxKeyBytes = Math.Max(1, experiencesConfig.GetInt("KeyValueStoreMaxKeyBytes", m_scriptExperienceKvpMaxKeyBytes));
@@ -613,6 +618,16 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 return 0;
 
             return requestedPermissions & m_scriptExperienceAutoGrantPermissions;
+        }
+
+        private UUID GetScriptExperienceID()
+        {
+            if (m_scriptExperienceID.IsNotZero())
+                return m_scriptExperienceID;
+
+            return m_host != null && m_host.OwnerID.IsNotZero()
+                ? m_host.OwnerID
+                : UUID.Zero;
         }
 
         private void GrantScriptPermissions(UUID agentID, int permissions)
@@ -4971,6 +4986,41 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 return 0;
 
             return (permissions & ~m_scriptExperienceAutoGrantPermissions) == 0 ? 1 : 0;
+        }
+
+        public LSL_Integer llAgentInExperience(string agent)
+        {
+            if (!UUID.TryParse(agent, out UUID agentID) || agentID.IsZero())
+                return 0;
+
+            if (!IsScriptExperienceTrusted())
+                return 0;
+
+            ScenePresence presence = World.GetScenePresence(agentID);
+            return presence != null && !presence.IsDeleted && !presence.IsChildAgent ? 1 : 0;
+        }
+
+        public LSL_List llGetExperienceDetails(string experienceID)
+        {
+            if (!IsScriptExperienceTrusted())
+                return new LSL_List();
+
+            UUID requestedID = UUID.Zero;
+            if (!String.IsNullOrEmpty(experienceID) && !UUID.TryParse(experienceID, out requestedID))
+                return new LSL_List();
+
+            UUID actualID = GetScriptExperienceID();
+            if (requestedID.IsNotZero() && !requestedID.Equals(actualID))
+                return new LSL_List();
+
+            LSL_List details = new();
+            details.Add(new LSL_String(m_scriptExperienceName));
+            details.Add(new LSL_Key(m_host.OwnerID.ToString()));
+            details.Add(new LSL_Key(actualID.ToString()));
+            details.Add(new LSL_Integer(ScriptBaseClass.XP_ERROR_NONE));
+            details.Add(new LSL_String(llGetExperienceErrorMessage(ScriptBaseClass.XP_ERROR_NONE)));
+            details.Add(new LSL_Key(m_host.GroupID.ToString()));
+            return details;
         }
 
         public LSL_String llGetExperienceErrorMessage(int error)

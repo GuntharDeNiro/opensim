@@ -25,6 +25,8 @@ The scripts use:
 - `llRequestExperiencePermissions`
 - `experience_permissions`
 - `experience_permissions_denied`
+- `llAgentInExperience`
+- `llGetExperienceDetails`
 - `llCreateKeyValue`
 - `llReadKeyValue`
 - `llUpdateKeyValue`

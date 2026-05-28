@@ -336,6 +336,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
        LSL_Integer llIsExperienceTrusted();
        LSL_Integer llGetExperiencePermissions();
        LSL_Integer llExperienceCanAutoGrant(int permissions);
+       LSL_Integer llAgentInExperience(string agent);
+          LSL_List llGetExperienceDetails(string experienceID);
         LSL_String llGetExperienceErrorMessage(int error);
            LSL_Key llCreateKeyValue(string key, string value);
            LSL_Key llReadKeyValue(string key);

@@ -897,6 +897,18 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public LSL_Integer llAgentInExperience(string agent)
+        {
+            return m_LSL_Functions.llAgentInExperience(agent);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public LSL_List llGetExperienceDetails(string experienceID)
+        {
+            return m_LSL_Functions.llGetExperienceDetails(experienceID);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public LSL_String llGetExperienceErrorMessage(int error)
         {
             return m_LSL_Functions.llGetExperienceErrorMessage(error);

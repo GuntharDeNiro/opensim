@@ -73,7 +73,15 @@ default
 
     touch_start(integer total)
     {
-        request_experience(llDetectedKey(0));
+        key avatar = llDetectedKey(0);
+        if (llAgentInExperience(avatar))
+            llOwnerSay("Agent is already in this Experience-Lite scope.");
+
+        list details = llGetExperienceDetails(NULL_KEY);
+        if (llGetListLength(details) > 0)
+            llOwnerSay("Experience details: " + llDumpList2String(details, " | "));
+
+        request_experience(avatar);
     }
 
     experience_permissions(key avatar)

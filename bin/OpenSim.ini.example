@@ -1203,6 +1203,10 @@
     ;; If true, scripts owned by estate managers are trusted for auto grants.
     ; AllowEstateManagers = false
 
+    ;; Information returned by llGetExperienceDetails(NULL_KEY).
+    ; ExperienceName = "OpenSim Experience-Lite"
+    ; ExperienceID = "00000000-0000-0000-0000-000000000000"
+
     ;; Comma, semicolon, pipe or space separated UUIDs of trusted script owners.
     ; TrustedOwners =
 
