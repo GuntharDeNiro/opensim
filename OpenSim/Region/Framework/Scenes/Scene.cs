@@ -478,6 +478,7 @@ namespace OpenSim.Region.Framework.Scenes
         private readonly bool m_generateMaptiles;
         private readonly bool m_generateMaptilesInBackground;
         private readonly int m_backgroundMaptileStartupDelaySeconds;
+        private readonly int m_backgroundMaptileThreadStackSizeKB;
         private readonly bool m_backgroundMaptileDeferWithAgents;
         private readonly bool m_mapGenerationForceGC;
         private readonly bool m_mapGenerationTimerEnabled;
@@ -1025,6 +1026,8 @@ namespace OpenSim.Region.Framework.Scenes
                     = Util.GetConfigVarFromSections<bool>(config, "GenerateMaptilesInBackground", possibleMapConfigSections, true);
                 m_backgroundMaptileStartupDelaySeconds = Math.Max(0,
                     Util.GetConfigVarFromSections<int>(config, "MaptileStartupDelaySeconds", possibleMapConfigSections, 180));
+                m_backgroundMaptileThreadStackSizeKB = Math.Max(1024,
+                    Util.GetConfigVarFromSections<int>(config, "MaptileThreadStackSizeKB", possibleMapConfigSections, 8192));
                 m_backgroundMaptileDeferWithAgents
                     = Util.GetConfigVarFromSections<bool>(config, "MaptileDeferIfAgentsPresent", possibleMapConfigSections, true);
                 m_mapGenerationForceGC
@@ -6020,7 +6023,7 @@ Environment.Exit(1);
                 m_mapGenerationTimer.Start();
         }
 
-        private void RegenerateMaptileAndReregisterInBackground()
+        public void RegenerateMaptileAndReregisterInBackground()
         {
             if (m_backgroundMaptileGenerationRunning)
                 return;
@@ -6066,8 +6069,8 @@ Environment.Exit(1);
                 {
                     m_backgroundMaptileGenerationRunning = false;
                 }
-            }, $"MaptileGeneration-({Name.Replace(" ", "_")})", ThreadPriority.Lowest, false,
-                false, null, 20000, false);
+            }, $"MaptileGeneration-({Name.Replace(" ", "_")})", ThreadPriority.Lowest,
+                m_backgroundMaptileThreadStackSizeKB * 1024, false);
         }
 
         private static bool AnyRootAgentsInInstance()

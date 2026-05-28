@@ -68,14 +68,6 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         public face[] trns;
     }
 
-    public struct MapPolygonDraw
-    {
-        public Point[] points;
-        public SolidBrush brush;
-        public Pen outlinePen;
-        public float z;
-    }
-
     public struct MapTextureSample
     {
         public bool valid;
@@ -340,13 +332,16 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             List<float> z_sortheights = new List<float>();
             List<uint> z_localIDs = new List<uint>();
             Dictionary<uint, DrawStruct> z_sort = new Dictionary<uint, DrawStruct>();
-            List<MapPolygonDraw> meshGeometry = new List<MapPolygonDraw>();
+            Dictionary<int, SolidBrush> meshBrushes = new Dictionary<int, SolidBrush>();
+            Dictionary<int, Pen> meshPens = new Dictionary<int, Pen>();
             int yieldCounter = 0;
             int lastYieldMS = Environment.TickCount;
             bool prettyObjectVolume = Util.GetConfigVarFromSections<bool>(
                 m_config, "PrettyPrimVolumeOnMapTile", MapConfigSections, true);
             bool drawObjectOutlines = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeOutlines", MapConfigSections, true);
+            bool drawMeshTriangleOutlines = Util.GetConfigVarFromSections<bool>(
+                m_config, "MapObjectVolumeMeshTriangleOutlines", MapConfigSections, false);
             bool drawObjectShadows = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeShadows", MapConfigSections, true);
             int shadowOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
@@ -381,86 +376,98 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 m_config, "MapObjectVolumeFaceShading", MapConfigSections, true);
             bool renderMeshGeometry = true;
             DetailLevel meshDetailLevel = GetMapMeshDetailLevel(Util.GetConfigVarFromSections<int>(
-                m_config, "MapObjectVolumeMeshDetailLevel", MapConfigSections, 2));
+                m_config, "MapObjectVolumeMeshDetailLevel", MapConfigSections, 1));
             m_maxTextureAssetSamplesThisPass = Math.Max(0, Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeMaxTextureSamples", MapConfigSections, 0));
             m_textureAssetSamplesThisPass = 0;
             int geometryFailures = 0;
+            bool keepMeshCache = Util.GetConfigVarFromSections<bool>(
+                m_config, "MapObjectVolumeKeepMeshCache", MapConfigSections, false);
 
             EnsurePrimMesher(renderMeshGeometry);
 
             try
             {
-                lock (objs)
+                using (Graphics g = Graphics.FromImage(mapbmp))
                 {
-                    foreach (EntityBase obj in objs)
+                    if (prettyObjectVolume)
                     {
-                        // Only draw the contents of SceneObjectGroup
-                        if (obj is SceneObjectGroup)
+                        g.SmoothingMode = SmoothingMode.AntiAlias;
+                        g.PixelOffsetMode = PixelOffsetMode.Half;
+                        g.CompositingQuality = CompositingQuality.HighQuality;
+                    }
+
+                    lock (objs)
+                    {
+                        foreach (EntityBase obj in objs)
                         {
-                            SceneObjectGroup mapdot = (SceneObjectGroup)obj;
-                            // Loop over prim in group
-                            foreach (SceneObjectPart part in mapdot.Parts)
+                            // Only draw the contents of SceneObjectGroup
+                            if (obj is SceneObjectGroup)
                             {
-                                YieldMaptileWork(ref yieldCounter, ref lastYieldMS);
-
-                                if (part == null)
-                                    continue;
-
-                                // Draw every real object part. Exact geometry handles small parts without box inflation.
-                                if (part.Scale.X > 0f && part.Scale.Y > 0f && part.Scale.Z > 0f)
+                                SceneObjectGroup mapdot = (SceneObjectGroup)obj;
+                                // Loop over prim in group
+                                foreach (SceneObjectPart part in mapdot.Parts)
                                 {
-                                    Color mapdotspot = Color.Gray; // Default color when prim color is white
-                                    // Try to get the RGBA of the default texture entry..
-                                    //
-                                    try
-                                    {
-                                        // get the null checks out of the way
-                                        // skip the ones that break
-                                        if (part == null)
-                                            continue;
+                                    YieldMaptileWork(ref yieldCounter, ref lastYieldMS);
 
-                                        if (part.Shape == null)
-                                            continue;
-
-                                        mapdotspot = GetPartMapColor(part, mapdotspot, prettyObjectVolume,
-                                            sampleTextureAssets,
-                                            minimumBrightness, maximumBrightness,
-                                            textureBlend, objectSaturation, objectContrast);
-                                    }
-                                    catch (IndexOutOfRangeException)
-                                    {
-                                        // Windows Array
-                                    }
-                                    catch (ArgumentOutOfRangeException)
-                                    {
-                                        // Mono Array
-                                    }
-
-                                    Vector3 pos = part.GetWorldPosition();
-
-                                    // skip prim outside of region
-                                    if (!m_scene.PositionIsInCurrentRegion(pos))
+                                    if (part == null)
                                         continue;
 
-                                    // skip prim in non-finite position
-                                    if (Single.IsNaN(pos.X) || Single.IsNaN(pos.Y) ||
-                                        Single.IsInfinity(pos.X) || Single.IsInfinity(pos.Y))
-                                        continue;
-
-                                    // Figure out if object is under 256m above the height of the terrain
-                                    bool isBelow256AboveTerrain = false;
-
-                                    try
+                                    // Draw every real object part. Exact geometry handles small parts without box inflation.
+                                    if (part.Scale.X > 0f && part.Scale.Y > 0f && part.Scale.Z > 0f)
                                     {
-                                        isBelow256AboveTerrain = (pos.Z < ((float)hm[(int)pos.X, (int)pos.Y] + 256f));
-                                    }
-                                    catch (Exception)
-                                    {
-                                    }
+                                        Color mapdotspot = Color.Gray; // Default color when prim color is white
+                                        // Try to get the RGBA of the default texture entry..
+                                        //
+                                        try
+                                        {
+                                            // get the null checks out of the way
+                                            // skip the ones that break
+                                            if (part == null)
+                                                continue;
 
-                                    if (isBelow256AboveTerrain)
-                                    {
+                                            if (part.Shape == null)
+                                                continue;
+
+                                            mapdotspot = GetPartMapColor(part, mapdotspot, prettyObjectVolume,
+                                                sampleTextureAssets,
+                                                minimumBrightness, maximumBrightness,
+                                                textureBlend, objectSaturation, objectContrast);
+                                        }
+                                        catch (IndexOutOfRangeException)
+                                        {
+                                            // Windows Array
+                                        }
+                                        catch (ArgumentOutOfRangeException)
+                                        {
+                                            // Mono Array
+                                        }
+
+                                        Vector3 pos = part.GetWorldPosition();
+
+                                        // skip prim outside of region
+                                        if (!m_scene.PositionIsInCurrentRegion(pos))
+                                            continue;
+
+                                        // skip prim in non-finite position
+                                        if (Single.IsNaN(pos.X) || Single.IsNaN(pos.Y) ||
+                                            Single.IsInfinity(pos.X) || Single.IsInfinity(pos.Y))
+                                            continue;
+
+                                        // Figure out if object is under 256m above the height of the terrain
+                                        bool isBelow256AboveTerrain = false;
+
+                                        try
+                                        {
+                                            isBelow256AboveTerrain = (pos.Z < ((float)hm[(int)pos.X, (int)pos.Y] + 256f));
+                                        }
+                                        catch (Exception)
+                                        {
+                                        }
+
+                                        if (!isBelow256AboveTerrain)
+                                            continue;
+
                                         // Translate scale by rotation so scale is represented properly when object is rotated
                                         Vector3 lscale = new Vector3(part.Shape.Scale.X, part.Shape.Scale.Y, part.Shape.Scale.Z);
                                         lscale *= 0.5f;
@@ -498,9 +505,25 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
                                         if (renderMeshGeometry)
                                         {
-                                            if (TryAddMeshGeometryDraws(meshGeometry, part, mapdotspot,
-                                                    fillOpacity, outlineOpacity, drawObjectOutlines,
-                                                    faceShading, meshDetailLevel))
+                                            bool drewExactGeometry = false;
+                                            try
+                                            {
+                                                drewExactGeometry = TryDrawMeshGeometry(g, meshBrushes, meshPens,
+                                                    part, mapdotspot, fillOpacity, outlineOpacity,
+                                                    drawMeshTriangleOutlines, faceShading, meshDetailLevel);
+                                            }
+                                            catch (OutOfMemoryException e)
+                                            {
+                                                m_log.WarnFormat("[MAPTILE]: Exact geometry draw skipped for object '{0}' ({1}) after memory pressure: {2}",
+                                                    part.Name, part.UUID, e.Message);
+                                            }
+                                            catch (Exception e)
+                                            {
+                                                m_log.DebugFormat("[MAPTILE]: Exact geometry draw skipped for object '{0}' ({1}): {2}",
+                                                    part.Name, part.UUID, e.Message);
+                                            }
+
+                                            if (drewExactGeometry)
                                             {
                                                 continue;
                                             }
@@ -709,65 +732,41 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     // Sort prim by Z position
                     Array.Sort(sortedZHeights, sortedlocalIds);
 
-                    using (Graphics g = Graphics.FromImage(mapbmp))
+                    for (int s = 0; s < sortedZHeights.Length; s++)
                     {
-                        if (prettyObjectVolume)
-                        {
-                            g.SmoothingMode = SmoothingMode.AntiAlias;
-                            g.PixelOffsetMode = PixelOffsetMode.Half;
-                            g.CompositingQuality = CompositingQuality.HighQuality;
-                        }
+                        YieldMaptileWork(ref yieldCounter, ref lastYieldMS);
 
-                        for (int s = 0; s < sortedZHeights.Length; s++)
+                        if (z_sort.ContainsKey(sortedlocalIds[s]))
                         {
-                            YieldMaptileWork(ref yieldCounter, ref lastYieldMS);
-
-                            if (z_sort.ContainsKey(sortedlocalIds[s]))
+                            DrawStruct rectDrawStruct = z_sort[sortedlocalIds[s]];
+                            for (int r = 0; r < rectDrawStruct.trns.Length; r++)
                             {
-                                DrawStruct rectDrawStruct = z_sort[sortedlocalIds[s]];
-                                for (int r = 0; r < rectDrawStruct.trns.Length; r++)
-                                {
-                                    if (rectDrawStruct.shadowBrush != null && shadowOffset > 0)
-                                        g.FillPolygon(rectDrawStruct.shadowBrush,
-                                            OffsetPoints(rectDrawStruct.trns[r].pts, shadowOffset, shadowOffset));
-                                }
+                                if (rectDrawStruct.shadowBrush != null && shadowOffset > 0)
+                                    g.FillPolygon(rectDrawStruct.shadowBrush,
+                                        OffsetPoints(rectDrawStruct.trns[r].pts, shadowOffset, shadowOffset));
                             }
                         }
+                    }
 
-                        meshGeometry.Sort(delegate(MapPolygonDraw left, MapPolygonDraw right)
+                    for (int s = 0; s < sortedZHeights.Length; s++)
+                    {
+                        YieldMaptileWork(ref yieldCounter, ref lastYieldMS);
+
+                        if (z_sort.ContainsKey(sortedlocalIds[s]))
                         {
-                            return left.z.CompareTo(right.z);
-                        });
-
-                        foreach (MapPolygonDraw mesh in meshGeometry)
-                        {
-                            YieldMaptileWork(ref yieldCounter, ref lastYieldMS);
-
-                            g.FillPolygon(mesh.brush, mesh.points);
-                            if (mesh.outlinePen != null)
-                                g.DrawPolygon(mesh.outlinePen, mesh.points);
-                        }
-
-                        for (int s = 0; s < sortedZHeights.Length; s++)
-                        {
-                            YieldMaptileWork(ref yieldCounter, ref lastYieldMS);
-
-                            if (z_sort.ContainsKey(sortedlocalIds[s]))
+                            DrawStruct rectDrawStruct = z_sort[sortedlocalIds[s]];
+                            for (int r = 0; r < rectDrawStruct.trns.Length; r++)
                             {
-                                DrawStruct rectDrawStruct = z_sort[sortedlocalIds[s]];
-                                for (int r = 0; r < rectDrawStruct.trns.Length; r++)
-                                {
-                                    SolidBrush fillBrush = rectDrawStruct.faceBrushes != null &&
-                                        r < rectDrawStruct.faceBrushes.Length &&
-                                        rectDrawStruct.faceBrushes[r] != null
-                                        ? rectDrawStruct.faceBrushes[r]
-                                        : rectDrawStruct.brush;
-                                    g.FillPolygon(fillBrush,rectDrawStruct.trns[r].pts);
-                                    if (rectDrawStruct.outlinePen != null)
-                                        g.DrawPolygon(rectDrawStruct.outlinePen, rectDrawStruct.trns[r].pts);
-                                }
-                                //g.FillRectangle(rectDrawStruct.brush , rectDrawStruct.rect);
+                                SolidBrush fillBrush = rectDrawStruct.faceBrushes != null &&
+                                    r < rectDrawStruct.faceBrushes.Length &&
+                                    rectDrawStruct.faceBrushes[r] != null
+                                    ? rectDrawStruct.faceBrushes[r]
+                                    : rectDrawStruct.brush;
+                                g.FillPolygon(fillBrush,rectDrawStruct.trns[r].pts);
+                                if (rectDrawStruct.outlinePen != null)
+                                    g.DrawPolygon(rectDrawStruct.outlinePen, rectDrawStruct.trns[r].pts);
                             }
+                            //g.FillRectangle(rectDrawStruct.brush , rectDrawStruct.rect);
                         }
                     }
                 } // lock entities objs
@@ -792,12 +791,13 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                         ds.outlinePen.Dispose();
                 }
 
-                foreach (MapPolygonDraw mesh in meshGeometry)
-                {
-                    mesh.brush.Dispose();
-                    if (mesh.outlinePen != null)
-                        mesh.outlinePen.Dispose();
-                }
+                foreach (SolidBrush brush in meshBrushes.Values)
+                    brush.Dispose();
+                foreach (Pen pen in meshPens.Values)
+                    pen.Dispose();
+
+                if (!keepMeshCache)
+                    m_renderMeshCache.Clear();
             }
 
             m_log.Debug("[MAPTILE]: Generating Maptile Step 2: Done in " + (Environment.TickCount - tc) + " ms");
@@ -835,25 +835,43 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         private static void YieldMaptileWork(ref int counter, ref int lastYieldMS)
         {
             counter++;
-            if ((counter & 0x7f) != 0)
+            if ((counter & 0x1f) != 0)
                 return;
 
             int now = Environment.TickCount;
-            if (Util.EnvironmentTickCountSubtract(now, lastYieldMS) < 20)
+            if (Util.EnvironmentTickCountSubtract(now, lastYieldMS) < 10)
                 return;
 
             Thread.Sleep(1);
             lastYieldMS = Environment.TickCount;
         }
 
-        private bool TryAddMeshGeometryDraws(List<MapPolygonDraw> meshGeometry, SceneObjectPart part,
+        private bool TryDrawMeshGeometry(Graphics g, Dictionary<int, SolidBrush> meshBrushes,
+            Dictionary<int, Pen> meshPens, SceneObjectPart part,
             Color fallbackColor, int opacity, int outlineOpacity, bool drawOutlines,
             bool faceShading, DetailLevel lod)
         {
             if (m_primMesher == null)
                 return false;
 
-            FacetedMesh renderMesh = GetRenderMesh(part, lod);
+            FacetedMesh renderMesh;
+            try
+            {
+                renderMesh = GetRenderMesh(part, lod);
+            }
+            catch (OutOfMemoryException e)
+            {
+                m_log.WarnFormat("[MAPTILE]: Exact geometry skipped for object '{0}' ({1}) after memory pressure: {2}",
+                    part.Name, part.UUID, e.Message);
+                return false;
+            }
+            catch (Exception e)
+            {
+                m_log.DebugFormat("[MAPTILE]: Exact geometry skipped for object '{0}' ({1}): {2}",
+                    part.Name, part.UUID, e.Message);
+                return false;
+            }
+
             if (renderMesh == null || renderMesh.Faces == null || renderMesh.Faces.Count == 0)
                 return false;
 
@@ -907,6 +925,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                         continue;
 
                     Color drawColor = faceShading ? ShadeFaceColor(faceColor, world0, world1, world2) : faceColor;
+                    drawColor = QuantizeMapColor(drawColor);
                     Point[] points = new Point[]
                     {
                         WorldToMapPoint(world0),
@@ -914,20 +933,73 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                         WorldToMapPoint(world2)
                     };
 
-                    meshGeometry.Add(new MapPolygonDraw
+                    if (MapTriangleIsSubPixel(points))
+                        continue;
+
+                    SolidBrush brush = GetCachedBrush(meshBrushes, Color.FromArgb(faceOpacity, drawColor));
+                    g.FillPolygon(brush, points);
+
+                    if (drawOutlines)
                     {
-                        points = points,
-                        brush = new SolidBrush(Color.FromArgb(faceOpacity, drawColor)),
-                        outlinePen = drawOutlines
-                            ? new Pen(Color.FromArgb(Math.Min(outlineOpacity, 72), Darken(drawColor, 0.50f)), 1f)
-                            : null,
-                        z = (world0.Z + world1.Z + world2.Z) / 3f
-                    });
+                        Pen pen = GetCachedPen(meshPens,
+                            Color.FromArgb(Math.Min(outlineOpacity, 72), Darken(drawColor, 0.50f)));
+                        g.DrawPolygon(pen, points);
+                    }
+
                     added = true;
                 }
             }
 
             return added;
+        }
+
+        private static SolidBrush GetCachedBrush(Dictionary<int, SolidBrush> brushes, Color color)
+        {
+            int key = color.ToArgb();
+            if (!brushes.TryGetValue(key, out SolidBrush brush))
+            {
+                brush = new SolidBrush(color);
+                brushes[key] = brush;
+            }
+
+            return brush;
+        }
+
+        private static Pen GetCachedPen(Dictionary<int, Pen> pens, Color color)
+        {
+            int key = color.ToArgb();
+            if (!pens.TryGetValue(key, out Pen pen))
+            {
+                pen = new Pen(color, 1f);
+                pens[key] = pen;
+            }
+
+            return pen;
+        }
+
+        private static bool MapTriangleIsSubPixel(Point[] points)
+        {
+            if (points.Length < 3)
+                return true;
+
+            int area2 = Math.Abs(
+                (points[0].X * (points[1].Y - points[2].Y)) +
+                (points[1].X * (points[2].Y - points[0].Y)) +
+                (points[2].X * (points[0].Y - points[1].Y)));
+
+            return area2 == 0 &&
+                Math.Abs(points[0].X - points[1].X) <= 1 &&
+                Math.Abs(points[0].X - points[2].X) <= 1 &&
+                Math.Abs(points[0].Y - points[1].Y) <= 1 &&
+                Math.Abs(points[0].Y - points[2].Y) <= 1;
+        }
+
+        private static Color QuantizeMapColor(Color color)
+        {
+            return Color.FromArgb(
+                color.R & 0xf8,
+                color.G & 0xf8,
+                color.B & 0xf8);
         }
 
         private FacetedMesh GetRenderMesh(SceneObjectPart part, DetailLevel lod)
@@ -1033,9 +1105,27 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             if (!rawCodestream && !jp2Container)
                 return false;
 
+            // CSJ2K emits COM marker warnings from malformed codestreams and those
+            // assets have been observed destabilizing map generation.  The map pass
+            // should skip suspicious textures/sculpts instead of feeding them into
+            // a deep image decoder on a live simulator.
+            if (ContainsJpeg2000CommentMarker(data))
+                return false;
+
             for (int i = data.Length - 2; i >= 0; i--)
             {
                 if (data[i] == 0xff && data[i + 1] == 0xd9)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool ContainsJpeg2000CommentMarker(byte[] data)
+        {
+            for (int i = 0; i + 1 < data.Length; i++)
+            {
+                if (data[i] == 0xff && data[i + 1] == 0x64)
                     return true;
             }
 

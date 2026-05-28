@@ -1429,7 +1429,8 @@ namespace OpenSim.Region.CoreModules.World.WorldMap
             if (consoleScene != null && consoleScene != m_scene)
                 return;
 
-            m_scene.RegenerateMaptileAndReregister(this, null);
+            m_log.InfoFormat("[WORLD MAP]: Queuing background map image generation for {0}", m_scene.Name);
+            m_scene.RegenerateMaptileAndReregisterInBackground();
         }
 
         public void HandleRemoteMapItemRequest(IOSHttpRequest request, IOSHttpResponse response)

@@ -422,6 +422,10 @@
     ;; Delay expensive high-quality map rendering so scripts, physics and packet threads settle before map work starts.
     ; MaptileStartupDelaySeconds = 180
 
+    ;# {MaptileThreadStackSizeKB} {GenerateMaptilesInBackground} {Background maptile thread stack size in KB?} {} 8192
+    ;; Mesh and JPEG2000 decoding can use deeper call stacks than ordinary simulator threads on Windows.
+    ; MaptileThreadStackSizeKB = 8192
+
     ;# {MaptileDeferIfAgentsPresent} {GenerateMaptilesInBackground} {Defer background maptile generation while avatars are in this simulator?} {true false} true
     ;; Prevent expensive background map work from competing with active avatar sessions in any local region.
     ; MaptileDeferIfAgentsPresent = true
@@ -472,8 +476,8 @@
     ;# {MapObjectVolumeRenderMeshGeometry} {PrettyPrimVolumeOnMapTile} {Exact object geometry rendering is always used; legacy bounding-box fallbacks are disabled.} {true false} true
     ; MapObjectVolumeRenderMeshGeometry = true
 
-    ;# {MapObjectVolumeMeshDetailLevel} {MapObjectVolumeRenderMeshGeometry} {Mesh and sculpt map detail level: 0=Low, 1=Medium, 2=High, 3=Highest} {} 3
-    ; MapObjectVolumeMeshDetailLevel = 3
+    ;# {MapObjectVolumeMeshDetailLevel} {MapObjectVolumeRenderMeshGeometry} {Mesh and sculpt map detail level: 0=Low, 1=Medium, 2=High, 3=Highest} {} 1
+    ; MapObjectVolumeMeshDetailLevel = 1
 
     ;# {MapObjectVolumeMaxTextureSamples} {PrettyPrimVolumeOnMapTile} {Maximum uncached texture assets sampled per map tile object pass; 0 means unlimited} {} 0
     ; MapObjectVolumeMaxTextureSamples = 0
@@ -490,6 +494,10 @@
     ;# {MapObjectVolumeOutlineOpacity} {PrettyPrimVolumeOnMapTile} {Object outline opacity} {} 85
     ; MapObjectVolumeOutlineOpacity = 85
 
+    ;# {MapObjectVolumeMeshTriangleOutlines} {MapObjectVolumeRenderMeshGeometry} {Draw outlines around every exact mesh triangle?} {true false} false
+    ;; Disabled by default because per-triangle GDI strokes are expensive and noisy on 256px map tiles.
+    ; MapObjectVolumeMeshTriangleOutlines = false
+
     ;# {MapObjectVolumeShadows} {PrettyPrimVolumeOnMapTile} {Draw soft map shadows under objects?} {true false} true
     ; MapObjectVolumeShadows = true
 
@@ -504,6 +512,10 @@
 
     ;# {MapObjectVolumeMaximumBrightness} {PrettyPrimVolumeOnMapTile} {Maximum object overlay brightness} {} 235
     ; MapObjectVolumeMaximumBrightness = 235
+
+    ;# {MapObjectVolumeKeepMeshCache} {MapObjectVolumeRenderMeshGeometry} {Keep decoded mesh/sculpt geometry cached after each map pass?} {true false} false
+    ;; Disabled by default so high-quality map rendering does not retain large mesh geometry in memory.
+    ; MapObjectVolumeKeepMeshCache = false
 
     ;# {MapTileAerialStyle} {} {Apply final aerial-photo style tone and softening pass?} {true false} true
     ; MapTileAerialStyle = true
