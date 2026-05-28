@@ -42,6 +42,11 @@ The scripts use:
 - `04_experience_quest_tracker.lsl`: persistent per-avatar quest progress.
 - `05_vehicle_preference_rezzer.lsl`: remembers per-avatar vehicle model/color preferences.
 - `06_ai_build_memory_panel.lsl`: stores AI build project notes and command history.
+- `07_daily_reward_vendor.lsl`: daily reward cooldown remembered per avatar.
+- `08_region_passport_station.lsl`: persistent travel passport stamps.
+- `09_persistent_rental_meter.lsl`: owner-controlled rental tenant/expiry memory.
+- `10_scene_preset_controller.lsl`: persistent estate scene preset switcher.
+- `11_experience_leaderboard.lsl`: persistent player score storage and listing.
 
 Stock OpenSim may fail to compile or run these scripts because Experience events
 and KVP functions are not available there.
