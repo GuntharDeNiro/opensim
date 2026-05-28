@@ -909,6 +909,12 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public LSL_Integer llSitOnLink(string agent, int link)
+        {
+            return m_LSL_Functions.llSitOnLink(agent, link);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public LSL_String llGetExperienceErrorMessage(int error)
         {
             return m_LSL_Functions.llGetExperienceErrorMessage(error);

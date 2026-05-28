@@ -27,6 +27,7 @@ The scripts use:
 - `experience_permissions_denied`
 - `llAgentInExperience`
 - `llGetExperienceDetails`
+- `llSitOnLink`
 - `llCreateKeyValue`
 - `llReadKeyValue`
 - `llUpdateKeyValue`
@@ -50,6 +51,7 @@ The scripts use:
 - `09_persistent_rental_meter.lsl`: owner-controlled rental tenant/expiry memory.
 - `10_scene_preset_controller.lsl`: persistent estate scene preset switcher.
 - `11_experience_leaderboard.lsl`: persistent player score storage and listing.
+- `12_experience_seat_manager.lsl`: Experience scripted sitting on linked seats.
 
 Stock OpenSim may fail to compile or run these scripts because Experience events
 and KVP functions are not available there.

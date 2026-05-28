@@ -1095,6 +1095,14 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         public const int SIT_FLAG_NO_DAMAGE     = 0x20; // unsupported always true
         public const int SIT_FLAG_OPENSIMFORCED = SIT_FLAG_ALLOW_UNSIT | SIT_FLAG_NO_COLLIDE | SIT_FLAG_NO_DAMAGE;
 
+        public const int SIT_NOT_EXPERIENCE = -1;
+        public const int SIT_NO_EXPERIENCE_PERMISSION = -2;
+        public const int SIT_NO_SIT_TARGET = -3;
+        public const int SIT_INVALID_AGENT = -4;
+        public const int SIT_INVALID_LINK = -5;
+        public const int SIT_NO_ACCESS = -6;
+        public const int SIT_INVALID_OBJECT = -7;
+
         public const int ERR_GENERIC              = -1;
         public const int ERR_PARCEL_PERMISSIONS   = -2;
         public const int ERR_MALFORMED_PARAMS     = -3;

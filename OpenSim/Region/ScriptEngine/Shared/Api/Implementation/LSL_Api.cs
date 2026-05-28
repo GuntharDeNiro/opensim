@@ -5023,6 +5023,55 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             return details;
         }
 
+        public LSL_Integer llSitOnLink(string agent, int link)
+        {
+            if (!IsScriptExperienceTrusted())
+                return ScriptBaseClass.SIT_NOT_EXPERIENCE;
+
+            if (!UUID.TryParse(agent, out UUID agentID) || agentID.IsZero())
+                return ScriptBaseClass.SIT_INVALID_AGENT;
+
+            ScenePresence presence = World.GetScenePresence(agentID);
+            if (presence == null || presence.IsDeleted || presence.IsChildAgent)
+                return ScriptBaseClass.SIT_INVALID_AGENT;
+
+            if (!m_item.PermsGranter.Equals(agentID) || m_item.PermsMask == 0)
+                return ScriptBaseClass.SIT_NO_EXPERIENCE_PERMISSION;
+
+            if (m_host.ParentGroup == null || m_host.ParentGroup.IsDeleted || m_host.ParentGroup.IsAttachment)
+                return ScriptBaseClass.SIT_INVALID_OBJECT;
+
+            if (link <= 0 && link != ScriptBaseClass.LINK_ROOT && link != ScriptBaseClass.LINK_THIS)
+                return ScriptBaseClass.SIT_INVALID_LINK;
+
+            SceneObjectPart targetPart;
+            if (link == ScriptBaseClass.LINK_THIS)
+                targetPart = m_host;
+            else if (link == ScriptBaseClass.LINK_ROOT)
+                targetPart = m_host.ParentGroup.RootPart;
+            else
+                targetPart = m_host.ParentGroup.GetLinkNumPart(link);
+
+            if (targetPart == null || targetPart.ParentGroup == null || targetPart.ParentGroup != m_host.ParentGroup)
+                return ScriptBaseClass.SIT_INVALID_LINK;
+
+            bool hasAvailableSitTarget = false;
+            foreach (SceneObjectPart part in targetPart.ParentGroup.Parts)
+            {
+                if (part.IsSitTargetSet && part.SitTargetAvatar.IsZero() && part.SitActiveRange >= 0)
+                {
+                    hasAvailableSitTarget = true;
+                    break;
+                }
+            }
+
+            if (!hasAvailableSitTarget)
+                return ScriptBaseClass.SIT_NO_SIT_TARGET;
+
+            presence.HandleAgentRequestSit(presence.ControllingClient, agentID, targetPart.UUID, Vector3.Zero);
+            return 1;
+        }
+
         public LSL_String llGetExperienceErrorMessage(int error)
         {
             switch (error)
