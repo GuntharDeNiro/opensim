@@ -5113,7 +5113,8 @@ namespace OpenSim.Region.Framework.Scenes
 
             TotalMass = GetMass();
             CenterOfMass = GetCenterOfMass() - AbsolutePosition;
-            CenterOfMass *= Quaternion.Conjugate(RootPart.RotationOffset);
+            Quaternion rootRotationOffset = RootPart.RotationOffset;
+            CenterOfMass *= Quaternion.Conjugate(in rootRotationOffset);
             Inertia = Vector3.Zero;
             aux =  Vector4.Zero;
         }

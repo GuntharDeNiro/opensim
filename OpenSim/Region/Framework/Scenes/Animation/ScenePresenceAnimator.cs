@@ -659,8 +659,6 @@ namespace OpenSim.Region.Framework.Scenes.Animation
                     return "STAND";
             }
             #endregion Ground Movement
-
-            return CurrentMovementAnimation;
         }
 
         /// <summary>
