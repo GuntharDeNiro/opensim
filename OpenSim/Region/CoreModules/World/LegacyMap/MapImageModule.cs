@@ -379,11 +379,11 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             DetailLevel meshDetailLevel = GetMapMeshDetailLevel(Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeMeshDetailLevel", MapConfigSections, 1));
             bool drawMissingGeometryFootprints = Util.GetConfigVarFromSections<bool>(
-                m_config, "MapObjectVolumeDrawMissingGeometryFootprints", MapConfigSections, true);
+                m_config, "MapObjectVolumeDrawMissingGeometryFootprints", MapConfigSections, false);
             int missingGeometryMaxArea = Math.Max(1, Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeMissingGeometryMaxArea", MapConfigSections, 4096));
             int missingGeometryOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
-                m_config, "MapObjectVolumeMissingGeometryOpacity", MapConfigSections, 95));
+                m_config, "MapObjectVolumeMissingGeometryOpacity", MapConfigSections, 55));
             float missingGeometryMinAlpha = Math.Max(0f, Math.Min(1f, Util.GetConfigVarFromSections<float>(
                 m_config, "MapObjectVolumeMissingGeometryMinAlpha", MapConfigSections, 0.08f)));
             m_maxTextureAssetSamplesThisPass = Math.Max(0, Util.GetConfigVarFromSections<int>(
@@ -568,6 +568,18 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                                     || mapdrawendY < 0
                                                     || mapdrawendY > (hm.Height - 1))
                                             continue;
+
+                                        if (missingGeometryFootprint)
+                                        {
+                                            DrawStruct ds = CreateMissingGeometryDrawStruct(hm, pos, rot, lscale,
+                                                axPos, mapdotspot, fillOpacity, outlineOpacity,
+                                                prettyObjectVolume && drawObjectOutlines, textureAlpha);
+
+                                            z_sort.Add(part.LocalId, ds);
+                                            z_localIDs.Add(part.LocalId);
+                                            z_sortheights.Add(pos.Z);
+                                            continue;
+                                        }
 
                                         #region obb face reconstruction part duex
                                         Vector3[] vertexes = new Vector3[8];
@@ -755,9 +767,18 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
                     if (geometryFailures > 0)
                     {
-                        m_log.DebugFormat(
-                            "[MAPTILE]: Exact sculpt/mesh geometry unavailable for {0} object parts; drew {1} bounded footprints and skipped {2} oversized/missing parts",
-                            geometryFailures, geometryFootprints, geometrySkipped);
+                        if (geometryFootprints > 0)
+                        {
+                            m_log.DebugFormat(
+                                "[MAPTILE]: Exact sculpt/mesh geometry unavailable for {0} object parts; drew {1} bounded footprints and skipped {2} unavailable parts",
+                                geometryFailures, geometryFootprints, geometrySkipped);
+                        }
+                        else
+                        {
+                            m_log.DebugFormat(
+                                "[MAPTILE]: Exact sculpt/mesh geometry unavailable for {0} object parts; skipped them because missing-geometry fallback is disabled",
+                                geometryFailures);
+                        }
                     }
 
                     // Sort prim by Z position
@@ -870,6 +891,91 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 part.Shape != null &&
                 part.Shape.SculptTexture.IsNotZero() &&
                 (part.Shape.SculptType & 0x07) != (byte)SculptType.None;
+        }
+
+        private DrawStruct CreateMissingGeometryDrawStruct(ITerrainChannel hm,
+            Vector3 pos, Quaternion rot, Vector3 halfScale, Vector3 axPos,
+            Color color, int opacity, int outlineOpacity, bool drawOutline,
+            float textureAlpha)
+        {
+            bool rounded = ShouldRoundMissingGeometryFootprint(halfScale, textureAlpha);
+            Point[] points = rounded
+                ? CreateRoundedFootprintPoints(hm, pos, rot, halfScale, axPos)
+                : CreateRectangleFootprintPoints(hm, pos, rot, halfScale, axPos);
+
+            face footprint = new face
+            {
+                pts = points
+            };
+
+            DrawStruct ds = new DrawStruct
+            {
+                brush = new SolidBrush(Color.FromArgb(opacity, color)),
+                faceBrushes = null,
+                shadowBrush = null,
+                outlinePen = null,
+                trns = new face[] { footprint }
+            };
+
+            if (drawOutline)
+            {
+                int partOutlineOpacity = Math.Min(outlineOpacity, rounded ? 18 : 28);
+                ds.outlinePen = new Pen(Color.FromArgb(partOutlineOpacity, Darken(color, 0.45f)), 1f);
+            }
+
+            return ds;
+        }
+
+        private static bool ShouldRoundMissingGeometryFootprint(Vector3 halfScale, float textureAlpha)
+        {
+            float width = Math.Max(halfScale.X, 0.001f);
+            float height = Math.Max(halfScale.Y, 0.001f);
+            float aspect = Math.Max(width, height) / Math.Min(width, height);
+
+            return textureAlpha < 0.98f || aspect < 2.25f;
+        }
+
+        private Point[] CreateRoundedFootprintPoints(ITerrainChannel hm,
+            Vector3 pos, Quaternion rot, Vector3 halfScale, Vector3 axPos)
+        {
+            const int sides = 12;
+            Point[] points = new Point[sides + 1];
+
+            for (int i = 0; i <= sides; i++)
+            {
+                double angle = Math.PI * 2.0 * i / sides;
+                Vector3 local = new Vector3(
+                    (float)Math.Cos(angle) * halfScale.X,
+                    (float)Math.Sin(angle) * halfScale.Y,
+                    0f);
+                local *= rot;
+                points[i] = project(hm, pos + local, axPos);
+            }
+
+            return points;
+        }
+
+        private Point[] CreateRectangleFootprintPoints(ITerrainChannel hm,
+            Vector3 pos, Quaternion rot, Vector3 halfScale, Vector3 axPos)
+        {
+            Vector3[] corners = new Vector3[]
+            {
+                new Vector3(halfScale.X, halfScale.Y, 0f),
+                new Vector3(halfScale.X, -halfScale.Y, 0f),
+                new Vector3(-halfScale.X, -halfScale.Y, 0f),
+                new Vector3(-halfScale.X, halfScale.Y, 0f),
+                new Vector3(halfScale.X, halfScale.Y, 0f)
+            };
+            Point[] points = new Point[corners.Length];
+
+            for (int i = 0; i < corners.Length; i++)
+            {
+                Vector3 local = corners[i];
+                local *= rot;
+                points[i] = project(hm, pos + local, axPos);
+            }
+
+            return points;
         }
 
         private static void YieldMaptileWork(ref int counter, ref int lastYieldMS)
@@ -1137,7 +1243,18 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             if (!rawCodestream && !jp2Container)
                 return false;
 
-            return true;
+            return HasJpeg2000EocMarker(data);
+        }
+
+        private static bool HasJpeg2000EocMarker(byte[] data)
+        {
+            for (int i = data.Length - 2; i >= 0; i--)
+            {
+                if (data[i] == 0xff && data[i + 1] == 0xd9)
+                    return true;
+            }
+
+            return false;
         }
 
         private byte[] GetAssetDataForMap(string assetID)
@@ -1482,13 +1599,15 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
         private static MapTextureSample ComputeTextureSample(Bitmap bitmap)
         {
-            long r = 0;
-            long g = 0;
-            long b = 0;
+            long weightedR = 0;
+            long weightedG = 0;
+            long weightedB = 0;
+            long visibleWeight = 0;
             long a = 0;
             long detailR = 0;
             long detailG = 0;
             long detailB = 0;
+            long detailWeight = 0;
             int pixels = Math.Max(1, bitmap.Width * bitmap.Height);
             int detailPixels = 0;
 
@@ -1497,35 +1616,54 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 for (int x = 0; x < bitmap.Width; x++)
                 {
                     Color color = bitmap.GetPixel(x, y);
-                    r += color.R;
-                    g += color.G;
-                    b += color.B;
                     a += color.A;
+                    if (color.A > 0)
+                    {
+                        weightedR += color.R * color.A;
+                        weightedG += color.G * color.A;
+                        weightedB += color.B * color.A;
+                        visibleWeight += color.A;
+                    }
+
                     float gray = (color.R * 0.299f) + (color.G * 0.587f) + (color.B * 0.114f);
                     if (gray > 28f && gray < 236f && color.A > 24)
                     {
-                        detailR += color.R;
-                        detailG += color.G;
-                        detailB += color.B;
+                        detailR += color.R * color.A;
+                        detailG += color.G * color.A;
+                        detailB += color.B * color.A;
+                        detailWeight += color.A;
                         detailPixels++;
                     }
                 }
             }
 
-            if (detailPixels > Math.Max(8, pixels / 20))
+            int r;
+            int g;
+            int b;
+            if (visibleWeight > 0)
             {
-                r = (long)((r * 0.35f) + ((detailR / detailPixels) * pixels * 0.65f));
-                g = (long)((g * 0.35f) + ((detailG / detailPixels) * pixels * 0.65f));
-                b = (long)((b * 0.35f) + ((detailB / detailPixels) * pixels * 0.65f));
+                r = ClampByte((int)(weightedR / visibleWeight));
+                g = ClampByte((int)(weightedG / visibleWeight));
+                b = ClampByte((int)(weightedB / visibleWeight));
+            }
+            else
+            {
+                r = 0;
+                g = 0;
+                b = 0;
+            }
+
+            if (detailWeight > 0 && detailPixels > Math.Max(8, pixels / 20))
+            {
+                r = ClampByte((int)((r * 0.35f) + (((float)detailR / detailWeight) * 0.65f)));
+                g = ClampByte((int)((g * 0.35f) + (((float)detailG / detailWeight) * 0.65f)));
+                b = ClampByte((int)((b * 0.35f) + (((float)detailB / detailWeight) * 0.65f)));
             }
 
             return new MapTextureSample
             {
                 valid = true,
-                color = Color.FromArgb(
-                    ClampByte((int)(r / pixels)),
-                    ClampByte((int)(g / pixels)),
-                    ClampByte((int)(b / pixels))),
+                color = Color.FromArgb(r, g, b),
                 alpha = Math.Max(0f, Math.Min(1f, (float)a / (255f * pixels)))
             };
         }
