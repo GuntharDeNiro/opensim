@@ -105,6 +105,84 @@ namespace OpenSim.Region.ScriptEngine.Shared.Tests
             CheckllAngleBetween(new Vector3(1, 1, 1), 180, -7.9f, -8.0f);
         }
 
+        [Test]
+        public void TestSecondLifeListSliceSemantics()
+        {
+            TestHelpers.InMethod();
+
+            LSL_Types.list src = new LSL_Types.list(
+                new LSL_Types.LSLInteger(0),
+                new LSL_Types.LSLInteger(1),
+                new LSL_Types.LSLInteger(2),
+                new LSL_Types.LSLInteger(3),
+                new LSL_Types.LSLInteger(4),
+                new LSL_Types.LSLInteger(5),
+                new LSL_Types.LSLInteger(6));
+
+            AssertListValues(m_lslApi.llList2ListSlice(src, 0, -1, 3, 0), 0, 3, 6);
+            AssertListValues(m_lslApi.llList2ListSlice(src, 0, -1, 3, 1), 1, 4);
+            AssertListValues(m_lslApi.llList2ListSlice(src, 1, -1, 3, 1), 2, 5);
+            AssertListValues(m_lslApi.llList2ListSlice(src, 2, -1, 3, -1), 4);
+            AssertListValues(m_lslApi.llList2ListSlice(src, 4, 2, 1, 0), 0, 1, 2, 4, 5, 6);
+        }
+
+        [Test]
+        public void TestSecondLifeListFindNextAndStridedSemantics()
+        {
+            TestHelpers.InMethod();
+
+            LSL_Types.list src = new LSL_Types.list(
+                new LSL_Types.LSLString("A"),
+                new LSL_Types.LSLInteger(0),
+                new LSL_Types.LSLString("B"),
+                new LSL_Types.LSLInteger(1),
+                new LSL_Types.LSLString("C"),
+                new LSL_Types.LSLInteger(2),
+                new LSL_Types.LSLString("A"),
+                new LSL_Types.LSLInteger(0),
+                new LSL_Types.LSLString("A"),
+                new LSL_Types.LSLInteger(1),
+                new LSL_Types.LSLString("A"),
+                new LSL_Types.LSLString("A"),
+                new LSL_Types.LSLInteger(0),
+                new LSL_Types.Vector3(1, 2, 3),
+                new LSL_Types.LSLString("c"));
+
+            LSL_Types.list pattern = new LSL_Types.list(
+                new LSL_Types.LSLString("A"),
+                new LSL_Types.LSLInteger(0));
+
+            Assert.AreEqual(0, m_lslApi.llListFindListNext(src, pattern, 0).value);
+            Assert.AreEqual(6, m_lslApi.llListFindListNext(src, pattern, 1).value);
+            Assert.AreEqual(11, m_lslApi.llListFindListNext(src, pattern, -1).value);
+            Assert.AreEqual(-1, m_lslApi.llListFindListNext(src,
+                new LSL_Types.list(new LSL_Types.LSLInteger(3)), 0).value);
+
+            LSL_Types.list strided = new LSL_Types.list(
+                new LSL_Types.LSLString("a"), new LSL_Types.LSLInteger(0),
+                new LSL_Types.LSLString("b"), new LSL_Types.LSLInteger(1),
+                new LSL_Types.LSLString("c"), new LSL_Types.LSLInteger(2),
+                new LSL_Types.LSLString("b"), new LSL_Types.LSLInteger(1));
+
+            Assert.AreEqual(2, m_lslApi.llListFindStrided(strided,
+                new LSL_Types.list(new LSL_Types.LSLString("b")), 0, -1, 1).value);
+            Assert.AreEqual(6, m_lslApi.llListFindStrided(strided,
+                new LSL_Types.list(new LSL_Types.LSLString("b"), new LSL_Types.LSLInteger(1)), 3, -1, 1).value);
+            Assert.AreEqual(-1, m_lslApi.llListFindStrided(strided,
+                new LSL_Types.list(new LSL_Types.LSLString("b"), new LSL_Types.LSLInteger(1)), 3, -2, 1).value);
+            Assert.AreEqual(4, m_lslApi.llListFindStrided(strided,
+                new LSL_Types.list(new LSL_Types.LSLString("c")), 0, -1, 2).value);
+            Assert.AreEqual(-1, m_lslApi.llListFindStrided(strided,
+                new LSL_Types.list(new LSL_Types.LSLString("c")), 1, -1, 2).value);
+        }
+
+        private static void AssertListValues(LSL_Types.list actual, params int[] expected)
+        {
+            Assert.AreEqual(expected.Length, actual.Length);
+            for (int i = 0; i < expected.Length; i++)
+                Assert.AreEqual(new LSL_Types.LSLInteger(expected[i]), actual.Data[i]);
+        }
+
         private void CheckllAngleBetween(Vector3 axis,float originalAngle, float denorm1, float denorm2)
         {
             Quaternion rotation1 = Quaternion.CreateFromAxisAngle(axis, 0);

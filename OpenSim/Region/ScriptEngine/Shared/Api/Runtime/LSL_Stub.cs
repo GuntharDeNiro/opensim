@@ -1083,6 +1083,12 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public LSL_String llGetStartString()
+        {
+            return m_LSL_Functions.llGetStartString();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public LSL_Integer llGetStatus(int status)
         {
             return m_LSL_Functions.llGetStatus(status);
@@ -1128,6 +1134,12 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         public LSL_Float llGetTimeOfDay()
         {
             return m_LSL_Functions.llGetTimeOfDay();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public LSL_Float llGetRegionTimeOfDay()
+        {
+            return m_LSL_Functions.llGetRegionTimeOfDay();
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

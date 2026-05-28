@@ -311,31 +311,20 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 return null;
             }
 
-            ManagedImage managedImage;
-            Image image;
-
             try
             {
-                if (OpenJPEG.DecodeToImage(asset.Data, out managedImage, out image))
-                    return new Bitmap(image);
-                else
-                    return null;
+                using (Image image = DecodeMapImage(asset.Data))
+                {
+                    if (image != null)
+                        return new Bitmap(image);
+                }
             }
-            catch (DllNotFoundException)
+            catch (Exception e)
             {
-                m_log.ErrorFormat("[MAPTILE]: OpenJpeg is not installed correctly on this system.   Asset Data is empty for {0}", id);
-
+                m_log.ErrorFormat("[MAPTILE]: Static map image texture {0} could not be decoded for {1}: {2}",
+                    id, m_scene.Name, e.Message);
             }
-            catch (IndexOutOfRangeException)
-            {
-                m_log.ErrorFormat("[MAPTILE]: OpenJpeg was unable to decode this.   Asset Data is empty for {0}", id);
 
-            }
-            catch (Exception)
-            {
-                m_log.ErrorFormat("[MAPTILE]: OpenJpeg was unable to decode this.   Asset Data is empty for {0}", id);
-
-            }
             return null;
 
         }
@@ -1003,13 +992,22 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
         private static Image DecodeMapImage(byte[] data)
         {
-            ManagedImage managedImage;
-            Image image;
+            if (data == null || data.Length == 0)
+                return null;
 
-            if (OpenJPEG.DecodeToImage(data, out managedImage, out image))
-                return image;
-
-            return J2kImage.FromBytes(data, null, true, 12);
+            try
+            {
+                // Map generation is background/diagnostic work.  Do not use the
+                // native OpenJPEG path here: corrupted in-world texture assets can
+                // raise AccessViolationException in native decode and take down the
+                // whole simulator.  The managed CSJ2K decoder may fail, but it fails
+                // as a normal exception that callers can recover from.
+                return J2kImage.FromBytes(data, null, true, 12);
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private byte[] GetAssetDataForMap(string assetID)

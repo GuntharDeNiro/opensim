@@ -3118,6 +3118,14 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             return (double)((DateTime.Now.TimeOfDay.TotalMilliseconds / 1000) % (3600 * 4));
         }
 
+        public LSL_Float llGetRegionTimeOfDay()
+        {
+            if (m_envModule != null)
+                return m_envModule.GetRegionDayFractionTime() * m_envModule.GetRegionDayLength();
+
+            return llGetTimeOfDay();
+        }
+
         public LSL_Float llGetWallclock()
         {
             return DateTime.Now.TimeOfDay.TotalSeconds;
@@ -7020,74 +7028,50 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public LSL_List llList2ListSlice(LSL_List src, int start, int end, int stride, int stride_index)
         {
-            if (start < 0)
-            {
-                start += src.Length;
-                if (start < 0)
-                    start = 0;
-            }
-            if (end < 0)
-            {
-                end += src.Length;
-                if (end < 0)
-                    end = 0;
-            }
-
-            if (start > end)
-            {
-                start = 0;
-                end = src.Length - 1;
-            }
-            else
-            {
-                if (start >= src.Length)
-                    return new LSL_List();
-                if (end >= src.Length)
-                    end = src.Length - 1;
-            }
-
             if (stride < 1)
                 stride = 1;
 
             if (stride_index < 0)
-            {
                 stride_index += stride;
-                if (stride_index < 0)
-                    return new LSL_List();
-            }
-            else if (stride_index >= stride)
+
+            if (stride_index < 0 || stride_index >= stride)
                 return new LSL_List();
 
-            int size;
-            if (stride > 1)
-            {
-                if (start > 0)
-                {
-                    int sst = start / stride;
-                    sst *= stride;
-                    if (sst != start)
-                        start = sst + stride;
+            int len = src.Length;
+            if (len == 0)
+                return new LSL_List();
 
-                    if (start > end)
-                        return new LSL_List();
+            if (start < 0)
+                start += len;
+            if (end < 0)
+                end += len;
+
+            List<object> result = new List<object>();
+            int ordinal = 0;
+
+            if (start <= end)
+            {
+                for (int i = start; i <= end; i++)
+                {
+                    if (i >= 0 && i < len && ordinal % stride == stride_index)
+                        result.Add(src.Data[i]);
+                    ordinal++;
                 }
-                start += stride_index;
-                size = end - start + 1;
-                int sz = size / stride;
-                if (sz * stride < size)
-                    sz++;
-                size = sz;
             }
             else
-                size = end - start + 1;
+            {
+                for (int i = 0; i < len; i++)
+                {
+                    if (i <= end || i >= start)
+                    {
+                        if (ordinal % stride == stride_index)
+                            result.Add(src.Data[i]);
+                        ordinal++;
+                    }
+                }
+            }
 
-            object[] res = new object[size];
-            int j = 0;
-            for (int i = start; i <= end; i += stride, j++)
-                res[j] = src.Data[i];
-
-            //m_log.Debug($" test {size} {j}");
-            return new LSL_List(res);
+            return new LSL_List(result.ToArray());
         }
 
         public LSL_Integer llGetRegionAgentCount()
@@ -7366,7 +7350,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             int srclen = lsrc.Length;
             int testlen = ltest.Length;
             if (srclen == 0)
-                return -1;
+                return testlen == 0 ? 0 : -1;
             if (testlen == 0)
                 return 0;
             if (testlen > srclen)
@@ -7374,24 +7358,17 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
             int start = lstart.value;
             if (start < 0)
-            {
                 start += srclen;
-                if (start < 0)
-                    return -1;
-            }
-            else if (start >= srclen)
-                return -1;
 
             int end = lend.value;
             if (end < 0)
-            {
                 end += srclen;
-                if (end < 0)
-                    return -1;
-                end -= testlen - 1;
-            }
-            else if (end >= srclen)
-                end = srclen - testlen;
+
+            if (start < 0 || start >= srclen || end < 0)
+                return -1;
+
+            if (end >= srclen)
+                end = srclen - 1;
 
             int stride = lstride.value;
             if (stride < 1)
@@ -7403,6 +7380,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             object test0 = test[0];
             for (int i = start; i <= end; i += stride)
             {
+                if (i + testlen - 1 > end || i + testlen > srclen)
+                    continue;
+
                 if (LSL_List.ListFind_areEqual(test0, src[i]))
                 {
                     int k = i + 1;
