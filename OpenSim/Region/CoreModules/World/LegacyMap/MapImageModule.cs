@@ -571,11 +571,11 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
                                         if (missingGeometryFootprint)
                                         {
-                                            DrawStruct ds = CreateMissingGeometryDrawStruct(hm, pos, rot, lscale,
+                                            DrawStruct fallbackDraw = CreateMissingGeometryDrawStruct(hm, pos, rot, lscale,
                                                 axPos, mapdotspot, fillOpacity, outlineOpacity,
                                                 prettyObjectVolume && drawObjectOutlines, textureAlpha);
 
-                                            z_sort.Add(part.LocalId, ds);
+                                            z_sort.Add(part.LocalId, fallbackDraw);
                                             z_localIDs.Add(part.LocalId);
                                             z_sortheights.Add(pos.Z);
                                             continue;
