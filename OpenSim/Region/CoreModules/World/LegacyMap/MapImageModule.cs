@@ -105,6 +105,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         private bool m_Enabled = false;
         private static readonly string[] MapConfigSections = new string[] { "Map", "Startup" };
         private readonly Dictionary<UUID, MapTextureSample> m_textureSampleCache = new Dictionary<UUID, MapTextureSample>();
+        private readonly Dictionary<string, FacetedMesh> m_renderMeshCache = new Dictionary<string, FacetedMesh>();
         private int m_textureAssetSamplesThisPass = 0;
         private int m_maxTextureAssetSamplesThisPass = 0;
         private int m_meshAssetFetchesThisPass = 0;
@@ -404,6 +405,10 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 m_config, "MapObjectVolumeMaximumBrightness", MapConfigSections, 235));
             int largeObjectArea = Math.Max(1, Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeLargeArea", MapConfigSections, 1800));
+            int meshFallbackOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeMeshFallbackOpacity", MapConfigSections, 72));
+            int largeMeshFallbackOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeLargeMeshFallbackOpacity", MapConfigSections, 24));
             bool sampleTextureAssets = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeSampleTextureAssets", MapConfigSections, true);
             float textureBlend = Math.Max(0f, Math.Min(1f, Util.GetConfigVarFromSections<float>(
@@ -590,17 +595,30 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                         if (isWaterLikeObject && fillOpacity <= 0)
                                             continue;
 
+                                        bool sculptOrMesh = IsSculptOrMesh(part);
                                         if (prettyObjectVolume && renderMeshGeometry &&
-                                            IsSculptOrMesh(part) &&
-                                            (maxMeshParts == 0 || meshPartsRendered < maxMeshParts) &&
-                                            TryAddMeshGeometryDraws(meshGeometry, part, mapdotspot,
-                                                fillOpacity, outlineOpacity, drawObjectOutlines,
-                                                faceShading, meshDetailLevel, maxMeshTriangles,
-                                                ref meshTrianglesRendered, objectPassStartMS,
-                                                maxObjectPassSeconds))
+                                            sculptOrMesh &&
+                                            (maxMeshParts == 0 || meshPartsRendered < maxMeshParts))
                                         {
-                                            meshPartsRendered++;
-                                            continue;
+                                            if (TryAddMeshGeometryDraws(meshGeometry, part, mapdotspot,
+                                                    fillOpacity, outlineOpacity, drawObjectOutlines,
+                                                    faceShading, meshDetailLevel, maxMeshTriangles,
+                                                    ref meshTrianglesRendered, objectPassStartMS,
+                                                    maxObjectPassSeconds))
+                                            {
+                                                meshPartsRendered++;
+                                                continue;
+                                            }
+
+                                            int fallbackOpacity = objectArea >= largeObjectArea
+                                                ? largeMeshFallbackOpacity
+                                                : meshFallbackOpacity;
+
+                                            if (fallbackOpacity <= 0)
+                                                continue;
+
+                                            fillOpacity = Math.Min(fillOpacity, fallbackOpacity);
+                                            outlineOpacity = Math.Min(outlineOpacity, Math.Max(28, fallbackOpacity + 24));
                                         }
 
                                         // If object is beyond the edge of the map, don't draw it to avoid errors
@@ -1072,6 +1090,10 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
             if (omvPrim.Sculpt != null && omvPrim.Sculpt.SculptTexture.IsNotZero())
             {
+                string cacheKey = omvPrim.Sculpt.SculptTexture + ":" + omvPrim.Sculpt.Type + ":" + lod;
+                if (m_renderMeshCache.TryGetValue(cacheKey, out renderMesh))
+                    return renderMesh;
+
                 if (m_maxMeshAssetFetchesThisPass > 0 &&
                     m_meshAssetFetchesThisPass >= m_maxMeshAssetFetchesThisPass)
                     return null;
@@ -1102,6 +1124,9 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     {
                         m_log.DebugFormat("[MAPTILE]: Mesh geometry decode failed for {0}: {1}", part.Name, e.Message);
                     }
+
+                    if (renderMesh != null)
+                        m_renderMeshCache[cacheKey] = renderMesh;
                 }
             }
 
