@@ -457,40 +457,17 @@
     ;# {MapObjectVolumeFaceShading} {PrettyPrimVolumeOnMapTile} {Shade individual object faces for sharper geographic relief?} {true false} true
     ; MapObjectVolumeFaceShading = true
 
-    ;# {MapObjectVolumeRenderMeshGeometry} {PrettyPrimVolumeOnMapTile} {Render sculpt and mesh geometry instead of their bounding boxes?} {true false} true
+    ;# {MapObjectVolumeRenderMeshGeometry} {PrettyPrimVolumeOnMapTile} {Exact object geometry rendering is always used; legacy bounding-box fallbacks are disabled.} {true false} true
     ; MapObjectVolumeRenderMeshGeometry = true
 
     ;# {MapObjectVolumeMeshDetailLevel} {MapObjectVolumeRenderMeshGeometry} {Mesh and sculpt map detail level: 0=Low, 1=Medium, 2=High, 3=Highest} {} 3
     ; MapObjectVolumeMeshDetailLevel = 3
 
-    ;# {MapObjectVolumeMaxPassSeconds} {PrettyPrimVolumeOnMapTile} {Maximum expensive object map pass time before falling back to simpler rendering} {} 90
-    ;; Prevents high quality map generation from starving simulator packet, login and asset threads.
-    ; MapObjectVolumeMaxPassSeconds = 90
-
-    ;# {MapObjectVolumeMaxTextureSamples} {PrettyPrimVolumeOnMapTile} {Maximum uncached texture assets sampled per map tile object pass} {} 384
-    ; MapObjectVolumeMaxTextureSamples = 384
-
-    ;# {MapObjectVolumeMaxMeshAssetFetches} {MapObjectVolumeRenderMeshGeometry} {Maximum uncached sculpt/mesh assets fetched per map tile object pass} {} 128
-    ; MapObjectVolumeMaxMeshAssetFetches = 128
-
-    ;# {MapObjectVolumeMaxMeshParts} {MapObjectVolumeRenderMeshGeometry} {Maximum sculpt/mesh parts rendered with true geometry per map tile} {} 240
-    ; MapObjectVolumeMaxMeshParts = 240
-
-    ;# {MapObjectVolumeMaxMeshTriangles} {MapObjectVolumeRenderMeshGeometry} {Maximum mesh triangles drawn per map tile object pass} {} 60000
-    ; MapObjectVolumeMaxMeshTriangles = 60000
+    ;# {MapObjectVolumeMaxTextureSamples} {PrettyPrimVolumeOnMapTile} {Maximum uncached texture assets sampled per map tile object pass; 0 means unlimited} {} 0
+    ; MapObjectVolumeMaxTextureSamples = 0
 
     ;# {MapObjectVolumeMinimumOpacity} {PrettyPrimVolumeOnMapTile} {Minimum opacity after texture alpha is applied} {} 35
     ; MapObjectVolumeMinimumOpacity = 35
-
-    ;# {MapObjectVolumeMeshFallbackOpacity} {MapObjectVolumeRenderMeshGeometry} {Fallback opacity for sculpt/mesh objects whose true geometry cannot be decoded} {} 0
-    ; MapObjectVolumeMeshFallbackOpacity = 0
-
-    ;# {MapObjectVolumeLargeMeshFallbackOpacity} {MapObjectVolumeRenderMeshGeometry} {Fallback opacity for large sculpt/mesh objects whose true geometry cannot be decoded} {} 0
-    ; MapObjectVolumeLargeMeshFallbackOpacity = 0
-
-    ;# {MapWaterObjectVolumeOpacity} {PrettyPrimVolumeOnMapTile} {Opacity for large flat water-like overlays} {} 0
-    ;; Set to 0 to hide animated wave planes and other water overlays from map tiles.
-    ; MapWaterObjectVolumeOpacity = 0
 
     ;# {MapObjectVolumeLargeArea} {PrettyPrimVolumeOnMapTile} {Footprint area where large-object opacity starts} {} 1800
     ; MapObjectVolumeLargeArea = 1800
@@ -509,18 +486,6 @@
 
     ;# {MapObjectVolumeShadowOffset} {MapObjectVolumeShadows} {Object shadow offset in map pixels} {} 2
     ; MapObjectVolumeShadowOffset = 2
-
-    ;# {MapVegetationOnMapTile} {PrettyPrimVolumeOnMapTile} {Draw tree and grass canopies on map tiles?} {true false} true
-    ; MapVegetationOnMapTile = true
-
-    ;# {MapVegetationOpacity} {MapVegetationOnMapTile} {Vegetation overlay opacity} {} 86
-    ; MapVegetationOpacity = 86
-
-    ;# {MapVegetationMinSize} {MapVegetationOnMapTile} {Minimum vegetation canopy size in map pixels} {} 7
-    ; MapVegetationMinSize = 7
-
-    ;# {MapVegetationMaxSize} {MapVegetationOnMapTile} {Maximum vegetation canopy size in map pixels} {} 18
-    ; MapVegetationMaxSize = 18
 
     ;# {MapObjectVolumeMinimumBrightness} {PrettyPrimVolumeOnMapTile} {Minimum object overlay brightness} {} 72
     ; MapObjectVolumeMinimumBrightness = 72

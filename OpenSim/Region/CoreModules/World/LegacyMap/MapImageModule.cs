@@ -36,6 +36,7 @@ using log4net;
 using Mono.Addins;
 using Nini.Config;
 using OpenMetaverse;
+using OpenMetaverse.Assets;
 using OpenMetaverse.Imaging;
 using OpenMetaverse.Rendering;
 using OpenSim.Framework;
@@ -65,16 +66,6 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         public SolidBrush shadowBrush;
         public Pen outlinePen;
         public face[] trns;
-    }
-
-    public struct MapEllipseDraw
-    {
-        public RectangleF rect;
-        public SolidBrush brush;
-        public SolidBrush innerBrush;
-        public RectangleF innerRect;
-        public Pen outlinePen;
-        public float z;
     }
 
     public struct MapPolygonDraw
@@ -108,8 +99,6 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         private readonly Dictionary<string, FacetedMesh> m_renderMeshCache = new Dictionary<string, FacetedMesh>();
         private int m_textureAssetSamplesThisPass = 0;
         private int m_maxTextureAssetSamplesThisPass = 0;
-        private int m_meshAssetFetchesThisPass = 0;
-        private int m_maxMeshAssetFetchesThisPass = 0;
 
         #region IMapImageGenerator Members
 
@@ -355,17 +344,12 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         {
             int tc = 0;
             ITerrainChannel hm = whichScene.Heightmap;
-            float waterHeight = whichScene.RegionInfo != null &&
-                whichScene.RegionInfo.RegionSettings != null
-                ? (float)whichScene.RegionInfo.RegionSettings.WaterHeight
-                : 20f;
             tc = Environment.TickCount;
             m_log.Debug("[MAPTILE]: Generating Maptile Step 2: Object Volume Profile");
             EntityBase[] objs = whichScene.GetEntities();
             List<float> z_sortheights = new List<float>();
             List<uint> z_localIDs = new List<uint>();
             Dictionary<uint, DrawStruct> z_sort = new Dictionary<uint, DrawStruct>();
-            List<MapEllipseDraw> vegetation = new List<MapEllipseDraw>();
             List<MapPolygonDraw> meshGeometry = new List<MapPolygonDraw>();
             int yieldCounter = 0;
             int lastYieldMS = Environment.TickCount;
@@ -379,14 +363,6 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 m_config, "MapObjectVolumeShadowOpacity", MapConfigSections, 24));
             int shadowOffset = Math.Max(0, Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeShadowOffset", MapConfigSections, 2));
-            bool drawVegetation = Util.GetConfigVarFromSections<bool>(
-                m_config, "MapVegetationOnMapTile", MapConfigSections, true);
-            int vegetationOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
-                m_config, "MapVegetationOpacity", MapConfigSections, 86));
-            float vegetationMinSize = Math.Max(1f, Util.GetConfigVarFromSections<float>(
-                m_config, "MapVegetationMinSize", MapConfigSections, 7f));
-            float vegetationMaxSize = Math.Max(vegetationMinSize, Util.GetConfigVarFromSections<float>(
-                m_config, "MapVegetationMaxSize", MapConfigSections, 18f));
             int objectOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeOpacity", MapConfigSections, 175));
             int largeObjectOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
@@ -397,18 +373,12 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 m_config, "MapObjectVolumeUseTextureAlpha", MapConfigSections, true);
             int minimumOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeMinimumOpacity", MapConfigSections, 35));
-            int waterObjectOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
-                m_config, "MapWaterObjectVolumeOpacity", MapConfigSections, 0));
             int minimumBrightness = ClampByte(Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeMinimumBrightness", MapConfigSections, 72));
             int maximumBrightness = ClampByte(Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeMaximumBrightness", MapConfigSections, 235));
             int largeObjectArea = Math.Max(1, Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeLargeArea", MapConfigSections, 1800));
-            int meshFallbackOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
-                m_config, "MapObjectVolumeMeshFallbackOpacity", MapConfigSections, 0));
-            int largeMeshFallbackOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
-                m_config, "MapObjectVolumeLargeMeshFallbackOpacity", MapConfigSections, 0));
             bool sampleTextureAssets = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeSampleTextureAssets", MapConfigSections, true);
             float textureBlend = Math.Max(0f, Math.Min(1f, Util.GetConfigVarFromSections<float>(
@@ -419,26 +389,13 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 m_config, "MapObjectVolumeColorContrast", MapConfigSections, 1.08f)));
             bool faceShading = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeFaceShading", MapConfigSections, true);
-            bool renderMeshGeometry = Util.GetConfigVarFromSections<bool>(
-                m_config, "MapObjectVolumeRenderMeshGeometry", MapConfigSections, true);
+            bool renderMeshGeometry = true;
             DetailLevel meshDetailLevel = GetMapMeshDetailLevel(Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeMeshDetailLevel", MapConfigSections, 2));
-            int maxObjectPassSeconds = Math.Max(0, Util.GetConfigVarFromSections<int>(
-                m_config, "MapObjectVolumeMaxPassSeconds", MapConfigSections, 45));
-            int maxMeshParts = Math.Max(0, Util.GetConfigVarFromSections<int>(
-                m_config, "MapObjectVolumeMaxMeshParts", MapConfigSections, 80));
-            int maxMeshTriangles = Math.Max(0, Util.GetConfigVarFromSections<int>(
-                m_config, "MapObjectVolumeMaxMeshTriangles", MapConfigSections, 6000));
             m_maxTextureAssetSamplesThisPass = Math.Max(0, Util.GetConfigVarFromSections<int>(
-                m_config, "MapObjectVolumeMaxTextureSamples", MapConfigSections, 96));
-            m_maxMeshAssetFetchesThisPass = Math.Max(0, Util.GetConfigVarFromSections<int>(
-                m_config, "MapObjectVolumeMaxMeshAssetFetches", MapConfigSections, 32));
+                m_config, "MapObjectVolumeMaxTextureSamples", MapConfigSections, 0));
             m_textureAssetSamplesThisPass = 0;
-            m_meshAssetFetchesThisPass = 0;
-            int meshPartsRendered = 0;
-            int meshTrianglesRendered = 0;
-            int objectPassStartMS = Environment.TickCount;
-            bool objectPassBudgetLogged = false;
+            int geometryFailures = 0;
 
             EnsurePrimMesher(renderMeshGeometry);
 
@@ -460,22 +417,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                 if (part == null)
                                     continue;
 
-                                if (MapObjectPassTimedOut(objectPassStartMS, maxObjectPassSeconds))
-                                {
-                                    if (!objectPassBudgetLogged)
-                                    {
-                                        m_log.WarnFormat(
-                                            "[MAPTILE]: Object volume pass exceeded MapObjectVolumeMaxPassSeconds ({0}s); disabling expensive texture and mesh sampling for this tile",
-                                            maxObjectPassSeconds);
-                                        objectPassBudgetLogged = true;
-                                    }
-
-                                    sampleTextureAssets = false;
-                                    renderMeshGeometry = false;
-                                }
-
-                                // Draw if the object is at least 1 meter wide in any direction
-                                if (part.Scale.X > 1f || part.Scale.Y > 1f || part.Scale.Z > 1f)
+                                // Draw every real object part. Exact geometry handles small parts without box inflation.
+                                if (part.Scale.X > 0f && part.Scale.Y > 0f && part.Scale.Z > 0f)
                                 {
                                     Color mapdotspot = Color.Gray; // Default color when prim color is white
                                     // Try to get the RGBA of the default texture entry..
@@ -490,16 +433,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                         if (part.Shape == null)
                                             continue;
 
-                                        if (IsVegetation(part))
-                                        {
-                                            if (prettyObjectVolume && drawVegetation)
-                                                AddVegetationDraw(vegetation, part, hm, vegetationOpacity,
-                                                    vegetationMinSize, vegetationMaxSize);
-                                            continue;
-                                        }
-
                                         mapdotspot = GetPartMapColor(part, mapdotspot, prettyObjectVolume,
-                                            sampleTextureAssets && !MapObjectPassTimedOut(objectPassStartMS, maxObjectPassSeconds),
+                                            sampleTextureAssets,
                                             minimumBrightness, maximumBrightness,
                                             textureBlend, objectSaturation, objectContrast);
                                     }
@@ -565,60 +500,23 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                         if (prettyObjectVolume && useTextureAlpha)
                                         {
                                             textureAlpha = GetPartTextureAlpha(part,
-                                                sampleTextureAssets && !MapObjectPassTimedOut(objectPassStartMS, maxObjectPassSeconds));
+                                                sampleTextureAssets);
                                             fillOpacity = ApplyTextureAlpha(fillOpacity,
                                                 textureAlpha,
                                                 minimumOpacity);
                                         }
 
-                                        if (prettyObjectVolume && useTextureAlpha && textureAlpha >= 0.99f &&
-                                            IsLargeFlatNearWaterMapCandidate(part.Scale, objectArea,
-                                                largeObjectArea, pos, waterHeight))
-                                        {
-                                            float priorityTextureAlpha = GetPartTextureAlpha(part, true, true);
-                                            if (priorityTextureAlpha < textureAlpha)
-                                            {
-                                                textureAlpha = priorityTextureAlpha;
-                                                fillOpacity = ApplyTextureAlpha(fillOpacity,
-                                                    textureAlpha,
-                                                    minimumOpacity);
-                                            }
-                                        }
-
-                                        bool isWaterLikeObject = prettyObjectVolume &&
-                                            IsWaterLikeMapObject(part, mapdotspot, objectArea, part.Scale,
-                                                largeObjectArea, pos, waterHeight, textureAlpha);
-
-                                        if (isWaterLikeObject)
-                                            fillOpacity = Math.Min(fillOpacity, waterObjectOpacity);
-
-                                        if (isWaterLikeObject && fillOpacity <= 0)
-                                            continue;
-
-                                        bool sculptOrMesh = IsSculptOrMesh(part);
-                                        if (prettyObjectVolume && renderMeshGeometry &&
-                                            sculptOrMesh &&
-                                            (maxMeshParts == 0 || meshPartsRendered < maxMeshParts))
+                                        if (renderMeshGeometry)
                                         {
                                             if (TryAddMeshGeometryDraws(meshGeometry, part, mapdotspot,
                                                     fillOpacity, outlineOpacity, drawObjectOutlines,
-                                                    faceShading, meshDetailLevel, maxMeshTriangles,
-                                                    ref meshTrianglesRendered, objectPassStartMS,
-                                                    maxObjectPassSeconds))
+                                                    faceShading, meshDetailLevel))
                                             {
-                                                meshPartsRendered++;
                                                 continue;
                                             }
 
-                                            int fallbackOpacity = objectArea >= largeObjectArea
-                                                ? largeMeshFallbackOpacity
-                                                : meshFallbackOpacity;
-
-                                            if (fallbackOpacity <= 0)
-                                                continue;
-
-                                            fillOpacity = Math.Min(fillOpacity, fallbackOpacity);
-                                            outlineOpacity = Math.Min(outlineOpacity, Math.Max(28, fallbackOpacity + 24));
+                                            geometryFailures++;
+                                            continue;
                                         }
 
                                         // If object is beyond the edge of the map, don't draw it to avoid errors
@@ -746,16 +644,16 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                             ? Color.FromArgb(fillOpacity, mapdotspot)
                                             : mapdotspot);
                                         ds.faceBrushes = null;
-                                        ds.shadowBrush = prettyObjectVolume && drawObjectShadows && shadowOpacity > 0 && !isWaterLikeObject
+                                        ds.shadowBrush = prettyObjectVolume && drawObjectShadows && shadowOpacity > 0
                                             ? new SolidBrush(Color.FromArgb(shadowOpacity, 18, 22, 22))
                                             : null;
                                         ds.outlinePen = null;
-                                        if (prettyObjectVolume && drawObjectOutlines && !isWaterLikeObject)
+                                        if (prettyObjectVolume && drawObjectOutlines)
                                             ds.outlinePen = new Pen(Color.FromArgb(outlineOpacity, Darken(mapdotspot, 0.55f)), 1f);
                                         //ds.rect = new Rectangle(mapdrawstartX, (255 - mapdrawstartY), mapdrawendX - mapdrawstartX, mapdrawendY - mapdrawstartY);
 
                                         ds.trns = new face[FaceA.Length];
-                                        if (prettyObjectVolume && faceShading && !isWaterLikeObject)
+                                        if (prettyObjectVolume && faceShading)
                                             ds.faceBrushes = new SolidBrush[FaceA.Length];
 
                                         for (int i = 0; i < FaceA.Length; i++)
@@ -811,6 +709,13 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     float[] sortedZHeights = z_sortheights.ToArray();
                     uint[] sortedlocalIds = z_localIDs.ToArray();
 
+                    if (geometryFailures > 0)
+                    {
+                        m_log.DebugFormat(
+                            "[MAPTILE]: {0} object parts could not be drawn because exact geometry was unavailable",
+                            geometryFailures);
+                    }
+
                     // Sort prim by Z position
                     Array.Sort(sortedZHeights, sortedlocalIds);
 
@@ -837,20 +742,6 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                             OffsetPoints(rectDrawStruct.trns[r].pts, shadowOffset, shadowOffset));
                                 }
                             }
-                        }
-
-                        vegetation.Sort(delegate(MapEllipseDraw left, MapEllipseDraw right)
-                        {
-                            return left.z.CompareTo(right.z);
-                        });
-
-                        foreach (MapEllipseDraw veg in vegetation)
-                        {
-                            if (veg.outlinePen != null)
-                                g.DrawEllipse(veg.outlinePen, veg.rect);
-                            g.FillEllipse(veg.brush, veg.rect);
-                            if (veg.innerBrush != null)
-                                g.FillEllipse(veg.innerBrush, veg.innerRect);
                         }
 
                         meshGeometry.Sort(delegate(MapPolygonDraw left, MapPolygonDraw right)
@@ -911,15 +802,6 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                         ds.outlinePen.Dispose();
                 }
 
-                foreach (MapEllipseDraw veg in vegetation)
-                {
-                    veg.brush.Dispose();
-                    if (veg.innerBrush != null)
-                        veg.innerBrush.Dispose();
-                    if (veg.outlinePen != null)
-                        veg.outlinePen.Dispose();
-                }
-
                 foreach (MapPolygonDraw mesh in meshGeometry)
                 {
                     mesh.brush.Dispose();
@@ -946,7 +828,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             }
             else
             {
-                m_log.Debug("[MAPTILE]: No mesh geometry renderer available; sculpt and mesh map tiles will use volume fallback");
+                m_log.Warn("[MAPTILE]: No mesh geometry renderer available; object map tiles cannot draw exact object geometry");
             }
         }
 
@@ -974,29 +856,11 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             lastYieldMS = Environment.TickCount;
         }
 
-        private static bool MapObjectPassTimedOut(int startMS, int maxSeconds)
-        {
-            return maxSeconds > 0 &&
-                Util.EnvironmentTickCountSubtract(Environment.TickCount, startMS) > maxSeconds * 1000;
-        }
-
-        private static bool IsSculptOrMesh(SceneObjectPart part)
-        {
-            return part != null &&
-                part.Shape != null &&
-                part.Shape.SculptEntry &&
-                part.Shape.SculptTexture.IsNotZero();
-        }
-
         private bool TryAddMeshGeometryDraws(List<MapPolygonDraw> meshGeometry, SceneObjectPart part,
             Color fallbackColor, int opacity, int outlineOpacity, bool drawOutlines,
-            bool faceShading, DetailLevel lod, int maxTriangles, ref int trianglesRendered,
-            int objectPassStartMS, int maxObjectPassSeconds)
+            bool faceShading, DetailLevel lod)
         {
             if (m_primMesher == null)
-                return false;
-
-            if (MapObjectPassTimedOut(objectPassStartMS, maxObjectPassSeconds))
                 return false;
 
             FacetedMesh renderMesh = GetRenderMesh(part, lod);
@@ -1018,15 +882,13 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             {
                 YieldMaptileWork(ref yieldCounter, ref lastYieldMS);
 
-                if (MapObjectPassTimedOut(objectPassStartMS, maxObjectPassSeconds) ||
-                    (maxTriangles > 0 && trianglesRendered >= maxTriangles))
-                    return added;
-
                 Face face = renderMesh.Faces[i];
                 if (face.Vertices == null || face.Indices == null)
                     continue;
 
                 Primitive.TextureEntryFace textureFace = textureEntry.GetFace((uint)i);
+                if (textureFace == null)
+                    textureFace = textureEntry.DefaultTexture;
                 if (textureFace == null || textureFace.RGBA.A <= 0f)
                     continue;
 
@@ -1036,10 +898,6 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 for (int j = 0; j + 2 < face.Indices.Count; j += 3)
                 {
                     YieldMaptileWork(ref yieldCounter, ref lastYieldMS);
-
-                    if (MapObjectPassTimedOut(objectPassStartMS, maxObjectPassSeconds) ||
-                        (maxTriangles > 0 && trianglesRendered >= maxTriangles))
-                        return added;
 
                     int index0 = face.Indices[j];
                     int index1 = face.Indices[j + 1];
@@ -1055,7 +913,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     Vector3 world1 = MeshVertexToWorld(face.Vertices[index1].Position, scale, rot, pos);
                     Vector3 world2 = MeshVertexToWorld(face.Vertices[index2].Position, scale, rot, pos);
 
-                    if (!MapPointIsDrawable(world0) || !MapPointIsDrawable(world1) || !MapPointIsDrawable(world2))
+                    if (!MapTriangleTouchesMap(world0, world1, world2))
                         continue;
 
                     Color drawColor = faceShading ? ShadeFaceColor(faceColor, world0, world1, world2) : faceColor;
@@ -1075,7 +933,6 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                             : null,
                         z = (world0.Z + world1.Z + world2.Z) / 3f
                     });
-                    trianglesRendered++;
                     added = true;
                 }
             }
@@ -1094,23 +951,20 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 if (m_renderMeshCache.TryGetValue(cacheKey, out renderMesh))
                     return renderMesh;
 
-                if (m_maxMeshAssetFetchesThisPass > 0 &&
-                    m_meshAssetFetchesThisPass >= m_maxMeshAssetFetchesThisPass)
-                    return null;
-
-                m_meshAssetFetchesThisPass++;
-                AssetBase sculptAsset = m_scene.AssetService.Get(omvPrim.Sculpt.SculptTexture.ToString());
-                if (sculptAsset != null && sculptAsset.Data != null)
+                string assetID = omvPrim.Sculpt.SculptTexture.ToString();
+                byte[] sculptData = GetAssetDataForMap(assetID);
+                if (sculptData != null && sculptData.Length > 0)
                 {
                     try
                     {
                         if (omvPrim.Sculpt.Type == SculptType.Mesh)
                         {
-                            FacetedMesh.TryDecodeFromBytes(sculptAsset.Data, lod, out renderMesh, true);
+                            AssetMesh meshAsset = new AssetMesh(omvPrim.Sculpt.SculptTexture, sculptData);
+                            FacetedMesh.TryDecodeFromAsset(omvPrim, meshAsset, lod, out renderMesh);
                         }
-                        else if (IsLikelyDecodableTexture(sculptAsset.Data))
+                        else
                         {
-                            Image sculpt = J2kImage.FromBytes(sculptAsset.Data, null, true, 12);
+                            Image sculpt = DecodeMapImage(sculptData);
                             if (sculpt != null)
                             {
                                 using (sculpt)
@@ -1122,22 +976,71 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     }
                     catch (Exception e)
                     {
-                        m_log.DebugFormat("[MAPTILE]: Mesh geometry decode failed for {0}: {1}", part.Name, e.Message);
+                        m_log.WarnFormat("[MAPTILE]: Exact geometry decode failed for object '{0}' ({1}), asset {2}, sculpt type {3}: {4}",
+                            part.Name, part.UUID, omvPrim.Sculpt.SculptTexture, omvPrim.Sculpt.Type, e.Message);
                     }
 
                     if (renderMesh != null)
                         m_renderMeshCache[cacheKey] = renderMesh;
                 }
+                else
+                {
+                    m_log.WarnFormat("[MAPTILE]: Exact geometry asset missing for object '{0}' ({1}), asset {2}, sculpt type {3}",
+                        part.Name, part.UUID, omvPrim.Sculpt.SculptTexture, omvPrim.Sculpt.Type);
+                }
+
+                if (renderMesh == null)
+                {
+                    m_log.WarnFormat("[MAPTILE]: Object '{0}' ({1}) was not drawn because exact sculpt/mesh geometry was unavailable",
+                        part.Name, part.UUID);
+                }
+
+                return renderMesh;
             }
 
-            return renderMesh;
+            return m_primMesher.GenerateFacetedMesh(omvPrim, lod);
+        }
+
+        private static Image DecodeMapImage(byte[] data)
+        {
+            ManagedImage managedImage;
+            Image image;
+
+            if (OpenJPEG.DecodeToImage(data, out managedImage, out image))
+                return image;
+
+            return J2kImage.FromBytes(data, null, true, 12);
+        }
+
+        private byte[] GetAssetDataForMap(string assetID)
+        {
+            try
+            {
+                AssetBase asset = m_scene.AssetService.Get(assetID);
+                if (asset != null && asset.Data != null && asset.Data.Length > 0)
+                    return asset.Data;
+            }
+            catch (Exception e)
+            {
+                m_log.WarnFormat("[MAPTILE]: AssetService.Get failed for map asset {0}: {1}", assetID, e.Message);
+            }
+
+            try
+            {
+                return m_scene.AssetService.GetData(assetID);
+            }
+            catch (Exception e)
+            {
+                m_log.WarnFormat("[MAPTILE]: AssetService.GetData failed for map asset {0}: {1}", assetID, e.Message);
+                return null;
+            }
         }
 
         private Color GetTextureFaceMapColor(Primitive.TextureEntryFace textureFace, Color fallback)
         {
             MapTextureSample sample = GetTextureFaceSample(textureFace);
             if (sample.valid)
-                return ClampBrightness(sample.color, 56, 242);
+                return sample.color;
 
             return fallback;
         }
@@ -1149,88 +1052,30 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             return pos + local;
         }
 
-        private bool MapPointIsDrawable(Vector3 point)
+        private bool MapTriangleTouchesMap(Vector3 a, Vector3 b, Vector3 c)
         {
-            if (Single.IsNaN(point.X) || Single.IsNaN(point.Y) ||
-                Single.IsInfinity(point.X) || Single.IsInfinity(point.Y))
+            if (!MapPointIsFinite(a) || !MapPointIsFinite(b) || !MapPointIsFinite(c))
                 return false;
 
-            return point.X >= 0f && point.X < m_scene.RegionInfo.RegionSizeX &&
-                point.Y >= 0f && point.Y < m_scene.RegionInfo.RegionSizeY;
+            float minX = Math.Min(a.X, Math.Min(b.X, c.X));
+            float maxX = Math.Max(a.X, Math.Max(b.X, c.X));
+            float minY = Math.Min(a.Y, Math.Min(b.Y, c.Y));
+            float maxY = Math.Max(a.Y, Math.Max(b.Y, c.Y));
+
+            return maxX >= 0f && minX < m_scene.RegionInfo.RegionSizeX &&
+                maxY >= 0f && minY < m_scene.RegionInfo.RegionSizeY;
+        }
+
+        private static bool MapPointIsFinite(Vector3 point)
+        {
+            return !Single.IsNaN(point.X) && !Single.IsNaN(point.Y) &&
+                !Single.IsInfinity(point.X) && !Single.IsInfinity(point.Y);
         }
 
         private Point WorldToMapPoint(Vector3 point)
         {
             int regionHeight = (int)m_scene.RegionInfo.RegionSizeY;
             return new Point((int)point.X, (int)(regionHeight - 1 - point.Y));
-        }
-
-        private bool IsVegetation(SceneObjectPart part)
-        {
-            if (part == null || part.Shape == null)
-                return false;
-
-            byte pcode = part.Shape.PCode;
-            return pcode == (byte)PCode.Tree ||
-                pcode == (byte)PCode.NewTree ||
-                pcode == (byte)PCode.Grass;
-        }
-
-        private void AddVegetationDraw(List<MapEllipseDraw> vegetation, SceneObjectPart part,
-            ITerrainChannel hm, int opacity, float minSize, float maxSize)
-        {
-            Vector3 pos = part.GetWorldPosition();
-            if (!m_scene.PositionIsInCurrentRegion(pos) ||
-                Single.IsNaN(pos.X) || Single.IsNaN(pos.Y) ||
-                Single.IsInfinity(pos.X) || Single.IsInfinity(pos.Y))
-                return;
-
-            int x = (int)pos.X;
-            int y = (int)pos.Y;
-            if (x < 0 || x >= hm.Width || y < 0 || y >= hm.Height)
-                return;
-
-            if (pos.Z >= ((float)hm[x, y] + 256f))
-                return;
-
-            bool grass = part.Shape.PCode == (byte)PCode.Grass;
-            float diameter = Math.Max(part.Scale.X, part.Scale.Y);
-            diameter = Math.Max(minSize, Math.Min(maxSize, diameter * (grass ? 0.8f : 1.7f)));
-
-            int variation = StableNoise(part.LocalId, x, y) - 128;
-            Color canopy = grass
-                ? Color.FromArgb(
-                    ClampByte(132 + (variation / 8)),
-                    ClampByte(145 + (variation / 7)),
-                    ClampByte(104 + (variation / 10)))
-                : Color.FromArgb(
-                    ClampByte(102 + (variation / 9)),
-                    ClampByte(119 + (variation / 7)),
-                    ClampByte(82 + (variation / 11)));
-            Color outline = Darken(canopy, 0.58f);
-            Color inner = Lighten(canopy, grass ? 1.08f : 1.14f);
-
-            RectangleF rect = new RectangleF(
-                pos.X - (diameter * 0.5f),
-                (hm.Height - pos.Y) - (diameter * 0.5f),
-                diameter,
-                diameter);
-            float innerDiameter = diameter * (grass ? 0.42f : 0.52f);
-            RectangleF innerRect = new RectangleF(
-                pos.X - (innerDiameter * 0.35f),
-                (hm.Height - pos.Y) - (innerDiameter * 0.65f),
-                innerDiameter,
-                innerDiameter);
-
-            vegetation.Add(new MapEllipseDraw
-            {
-                rect = rect,
-                brush = new SolidBrush(Color.FromArgb(opacity, canopy)),
-                innerBrush = new SolidBrush(Color.FromArgb(Math.Min(opacity, grass ? 42 : 58), inner)),
-                innerRect = innerRect,
-                outlinePen = new Pen(Color.FromArgb(Math.Min(opacity, 55), outline), 1f),
-                z = pos.Z
-            });
         }
 
         private static Point[] OffsetPoints(Point[] source, int offsetX, int offsetY)
@@ -1479,19 +1324,17 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 return sample;
 
             m_textureAssetSamplesThisPass++;
-            AssetBase asset = m_scene.AssetService.Get(textureID.ToString());
-            if (asset == null || asset.Type != (sbyte)AssetType.Texture ||
-                asset.Data == null || !IsLikelyDecodableTexture(asset.Data))
+            byte[] textureData = GetAssetDataForMap(textureID.ToString());
+            if (textureData == null || textureData.Length == 0)
             {
                 m_textureSampleCache[textureID] = sample;
                 return sample;
             }
 
-            ManagedImage managedImage;
-            Image image;
             try
             {
-                if (OpenJPEG.DecodeToImage(asset.Data, out managedImage, out image))
+                Image image = DecodeMapImage(textureData);
+                if (image != null)
                 {
                     using (image)
                     using (Bitmap bitmap = new Bitmap(image))
@@ -1507,48 +1350,6 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
             m_textureSampleCache[textureID] = sample;
             return sample;
-        }
-
-        private static bool IsLikelyDecodableTexture(byte[] data)
-        {
-            if (data == null || data.Length < 42)
-                return false;
-
-            int siz = FindMarker(data, 0xff, 0x51);
-            if (siz < 0 || siz + 40 > data.Length)
-                return false;
-
-            uint xsiz = ReadUInt32BE(data, siz + 6);
-            uint ysiz = ReadUInt32BE(data, siz + 10);
-            uint xosiz = ReadUInt32BE(data, siz + 14);
-            uint yosiz = ReadUInt32BE(data, siz + 18);
-            ushort components = ReadUInt16BE(data, siz + 38);
-
-            return xsiz > xosiz && ysiz > yosiz && components > 0 && components <= 4;
-        }
-
-        private static int FindMarker(byte[] data, byte first, byte second)
-        {
-            for (int i = 0; i < data.Length - 1; i++)
-            {
-                if (data[i] == first && data[i + 1] == second)
-                    return i;
-            }
-
-            return -1;
-        }
-
-        private static ushort ReadUInt16BE(byte[] data, int offset)
-        {
-            return (ushort)((data[offset] << 8) | data[offset + 1]);
-        }
-
-        private static uint ReadUInt32BE(byte[] data, int offset)
-        {
-            return (uint)((data[offset] << 24) |
-                (data[offset + 1] << 16) |
-                (data[offset + 2] << 8) |
-                data[offset + 3]);
         }
 
         private static MapTextureSample ComputeTextureSample(Bitmap bitmap)
@@ -1609,65 +1410,6 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             return Math.Max(minimumOpacity, ClampByte((int)(opacity * textureAlpha)));
         }
 
-        private bool IsWaterLikeMapObject(SceneObjectPart part, Color color, int objectArea,
-            Vector3 scale, int largeObjectArea, Vector3 pos, float waterHeight,
-            float textureAlpha)
-        {
-            if (objectArea < largeObjectArea)
-                return false;
-
-            float largestSide = Math.Max(scale.X, Math.Max(scale.Y, scale.Z));
-            float thinnestSide = Math.Min(scale.X, Math.Min(scale.Y, scale.Z));
-
-            if (largestSide < 24f || thinnestSide > 3f)
-                return false;
-
-            int max = Math.Max(color.R, Math.Max(color.G, color.B));
-            int min = Math.Min(color.R, Math.Min(color.G, color.B));
-            int brightness = (max + min) / 2;
-            bool animated = part.TextureAnimation != null && part.TextureAnimation.Length > 0;
-            bool translucent = textureAlpha < 0.82f;
-            bool mostlyTransparent = textureAlpha < 0.08f;
-            bool neutralOverlay = brightness > 48 && brightness < 220 && (max - min) < 54;
-            bool brightNeutralOverlay = brightness >= 210 && (max - min) < 42;
-            bool blueOrCyan = color.B >= color.R - 8 && color.G >= color.R - 35;
-            bool nearWater = Math.Abs(pos.Z - waterHeight) < 10f || pos.Z < waterHeight + 4f;
-            bool namedWater = false;
-
-            if (!String.IsNullOrEmpty(part.Name))
-            {
-                string name = part.Name.ToLowerInvariant();
-                namedWater = name.Contains("water") || name.Contains("wave") ||
-                    name.Contains("ocean") || name.Contains("sea");
-            }
-
-            if (mostlyTransparent)
-                return true;
-
-            if ((animated || namedWater) && nearWater &&
-                (blueOrCyan || neutralOverlay || brightNeutralOverlay))
-                return true;
-
-            if (!translucent)
-                return false;
-
-            return (animated || namedWater ||
-                (nearWater && (blueOrCyan || neutralOverlay)));
-        }
-
-        private static bool IsLargeFlatNearWaterMapCandidate(Vector3 scale, int objectArea,
-            int largeObjectArea, Vector3 pos, float waterHeight)
-        {
-            if (objectArea < largeObjectArea)
-                return false;
-
-            float largestSide = Math.Max(scale.X, Math.Max(scale.Y, scale.Z));
-            float thinnestSide = Math.Min(scale.X, Math.Min(scale.Y, scale.Z));
-            bool nearWater = Math.Abs(pos.Z - waterHeight) < 10f || pos.Z < waterHeight + 4f;
-
-            return nearWater && largestSide >= 24f && thinnestSide <= 3f;
-        }
-
         private static Color ClampBrightness(Color color, int minimumBrightness, int maximumBrightness)
         {
             int max = Math.Max(color.R, Math.Max(color.G, color.B));
@@ -1686,15 +1428,6 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         private static Color Darken(Color color, float amount)
         {
             amount = Math.Max(0f, Math.Min(1f, amount));
-            return Color.FromArgb(
-                ClampByte((int)(color.R * amount)),
-                ClampByte((int)(color.G * amount)),
-                ClampByte((int)(color.B * amount)));
-        }
-
-        private static Color Lighten(Color color, float amount)
-        {
-            amount = Math.Max(1f, Math.Min(2f, amount));
             return Color.FromArgb(
                 ClampByte((int)(color.R * amount)),
                 ClampByte((int)(color.G * amount)),
@@ -1728,15 +1461,6 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 ClampByte((int)(color.R * shade)),
                 ClampByte((int)(color.G * shade)),
                 ClampByte((int)(color.B * shade)));
-        }
-
-        private static int StableNoise(uint localId, int x, int y)
-        {
-            uint value = localId;
-            value ^= (uint)(x * 374761393);
-            value ^= (uint)(y * 668265263);
-            value = (value ^ (value >> 13)) * 1274126177u;
-            return (int)((value ^ (value >> 16)) & 0xff);
         }
 
         private static Color Blend(Color from, Color to, float amount)
