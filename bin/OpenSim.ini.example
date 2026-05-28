@@ -461,6 +461,15 @@
     ;# {MapObjectVolumeUseTextureAlpha} {PrettyPrimVolumeOnMapTile} {Use prim texture alpha for map overlays?} {true false} true
     ; MapObjectVolumeUseTextureAlpha = true
 
+    ;# {MapObjectVolumeSkipAlphaMaskedFaces} {MapObjectVolumeUseTextureAlpha} {Skip large texture-alpha cutout faces instead of drawing their transparent pixels as solid rectangles?} {true false} true
+    ; MapObjectVolumeSkipAlphaMaskedFaces = true
+
+    ;# {MapObjectVolumeAlphaMaskedFaceMaxAlpha} {MapObjectVolumeSkipAlphaMaskedFaces} {Average sampled texture alpha below this is treated as alpha-masked/cutout geometry} {} 0.90
+    ; MapObjectVolumeAlphaMaskedFaceMaxAlpha = 0.90
+
+    ;# {MapObjectVolumeAlphaMaskedFaceMinArea} {MapObjectVolumeSkipAlphaMaskedFaces} {Minimum projected triangle area in map pixels before alpha-masked faces are skipped} {} 6
+    ; MapObjectVolumeAlphaMaskedFaceMinArea = 6
+
     ;# {MapObjectVolumeTextureBlend} {MapObjectVolumeSampleTextureAssets} {How strongly sampled texture colors influence object map colors} {} 1.00
     ; MapObjectVolumeTextureBlend = 1.00
 

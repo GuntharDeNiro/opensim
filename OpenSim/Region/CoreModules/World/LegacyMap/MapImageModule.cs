@@ -71,6 +71,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
     public struct MapTextureSample
     {
         public bool valid;
+        public bool assetSampled;
         public Color color;
         public float alpha;
     }
@@ -364,6 +365,12 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 m_config, "MapObjectVolumeOutlineOpacity", MapConfigSections, 85));
             bool useTextureAlpha = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeUseTextureAlpha", MapConfigSections, true);
+            bool skipAlphaMaskedFaces = Util.GetConfigVarFromSections<bool>(
+                m_config, "MapObjectVolumeSkipAlphaMaskedFaces", MapConfigSections, true);
+            float alphaMaskedFaceMaxAlpha = Math.Max(0f, Math.Min(1f, Util.GetConfigVarFromSections<float>(
+                m_config, "MapObjectVolumeAlphaMaskedFaceMaxAlpha", MapConfigSections, 0.90f)));
+            int alphaMaskedFaceMinArea = Math.Max(1, Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeAlphaMaskedFaceMinArea", MapConfigSections, 6));
             int minimumOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeMinimumOpacity", MapConfigSections, 35));
             int minimumBrightness = ClampByte(Util.GetConfigVarFromSections<int>(
@@ -542,7 +549,9 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                             {
                                                 drewExactGeometry = TryDrawMeshGeometry(g, meshBrushes, meshPens,
                                                     part, mapdotspot, fillOpacity, outlineOpacity,
-                                                    drawMeshTriangleOutlines, faceShading, meshDetailLevel);
+                                                    drawMeshTriangleOutlines, faceShading, meshDetailLevel,
+                                                    useTextureAlpha, minimumOpacity, skipAlphaMaskedFaces,
+                                                    alphaMaskedFaceMaxAlpha, alphaMaskedFaceMinArea);
                                             }
                                             catch (OutOfMemoryException e)
                                             {
@@ -1025,7 +1034,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         private bool TryDrawMeshGeometry(Graphics g, Dictionary<int, SolidBrush> meshBrushes,
             Dictionary<int, Pen> meshPens, SceneObjectPart part,
             Color fallbackColor, int opacity, int outlineOpacity, bool drawOutlines,
-            bool faceShading, DetailLevel lod)
+            bool faceShading, DetailLevel lod, bool useTextureAlpha, int minimumOpacity,
+            bool skipAlphaMaskedFaces, float alphaMaskedFaceMaxAlpha, int alphaMaskedFaceMinArea)
         {
             if (m_primMesher == null)
                 return false;
@@ -1059,6 +1069,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             Quaternion rot = part.GetWorldRotation();
             Vector3 scale = part.Scale;
             bool added = false;
+            bool handled = false;
             int yieldCounter = 0;
             int lastYieldMS = Environment.TickCount;
 
@@ -1073,11 +1084,32 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 Primitive.TextureEntryFace textureFace = textureEntry.GetFace((uint)i);
                 if (textureFace == null)
                     textureFace = textureEntry.DefaultTexture;
-                if (textureFace == null || textureFace.RGBA.A <= 0f)
+                if (textureFace == null)
                     continue;
 
-                Color faceColor = GetTextureFaceMapColor(textureFace, fallbackColor);
-                int faceOpacity = ApplyTextureAlpha(opacity, textureFace.RGBA.A, 0);
+                if (textureFace.RGBA.A <= 0f)
+                {
+                    handled = true;
+                    continue;
+                }
+
+                MapTextureSample faceSample = GetTextureFaceSample(textureFace);
+                Color faceColor = faceSample.valid ? faceSample.color : fallbackColor;
+                float faceAlpha = faceSample.valid
+                    ? faceSample.alpha
+                    : Math.Max(0f, Math.Min(1f, textureFace.RGBA.A));
+                if (faceAlpha <= 0f)
+                {
+                    handled = true;
+                    continue;
+                }
+
+                int faceOpacity = useTextureAlpha
+                    ? ApplyTextureAlpha(opacity, faceAlpha, minimumOpacity)
+                    : opacity;
+                bool alphaMaskedFace = useTextureAlpha &&
+                    faceSample.assetSampled &&
+                    faceAlpha < alphaMaskedFaceMaxAlpha;
 
                 for (int j = 0; j + 2 < face.Indices.Count; j += 3)
                 {
@@ -1112,10 +1144,17 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     if (MapTriangleIsSubPixel(points))
                         continue;
 
+                    if (skipAlphaMaskedFaces && alphaMaskedFace &&
+                        MapTriangleDoubleArea(points) >= alphaMaskedFaceMinArea * 2)
+                    {
+                        handled = true;
+                        continue;
+                    }
+
                     SolidBrush brush = GetCachedBrush(meshBrushes, Color.FromArgb(faceOpacity, drawColor));
                     g.FillPolygon(brush, points);
 
-                    if (drawOutlines)
+                    if (drawOutlines && !alphaMaskedFace)
                     {
                         Pen pen = GetCachedPen(meshPens,
                             Color.FromArgb(Math.Min(outlineOpacity, 72), Darken(drawColor, 0.50f)));
@@ -1123,10 +1162,11 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     }
 
                     added = true;
+                    handled = true;
                 }
             }
 
-            return added;
+            return added || handled;
         }
 
         private static SolidBrush GetCachedBrush(Dictionary<int, SolidBrush> brushes, Color color)
@@ -1158,16 +1198,24 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             if (points.Length < 3)
                 return true;
 
-            int area2 = Math.Abs(
-                (points[0].X * (points[1].Y - points[2].Y)) +
-                (points[1].X * (points[2].Y - points[0].Y)) +
-                (points[2].X * (points[0].Y - points[1].Y)));
+            int area2 = MapTriangleDoubleArea(points);
 
             return area2 == 0 &&
                 Math.Abs(points[0].X - points[1].X) <= 1 &&
                 Math.Abs(points[0].X - points[2].X) <= 1 &&
                 Math.Abs(points[0].Y - points[1].Y) <= 1 &&
                 Math.Abs(points[0].Y - points[2].Y) <= 1;
+        }
+
+        private static int MapTriangleDoubleArea(Point[] points)
+        {
+            if (points.Length < 3)
+                return 0;
+
+            return Math.Abs(
+                (points[0].X * (points[1].Y - points[2].Y)) +
+                (points[1].X * (points[2].Y - points[0].Y)) +
+                (points[2].X * (points[0].Y - points[1].Y)));
         }
 
         private static Color QuantizeMapColor(Color color)
@@ -1630,6 +1678,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     using (Bitmap bitmap = new Bitmap(image))
                     {
                         sample = ComputeTextureSample(bitmap);
+                        sample.assetSampled = sample.valid;
                     }
                 }
             }
