@@ -51,6 +51,7 @@ using System.Collections.Specialized;
 using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
+using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
@@ -132,10 +133,12 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         protected int m_scriptExperienceKvpMaxKeyBytes = 1011;
         protected int m_scriptExperienceKvpMaxValueBytes = 4095;
         protected int m_scriptExperienceKvpMaxStoreBytes = 131072;
+        protected string m_scriptExperienceKvpPath = "ScriptExperienceKVP";
         protected readonly HashSet<UUID> m_scriptExperienceTrustedOwners = new();
         protected readonly HashSet<UUID> m_scriptExperienceTrustedObjects = new();
         private static readonly object m_scriptExperienceKvpLock = new();
         private static readonly Dictionary<string, Dictionary<string, string>> m_scriptExperienceKvpStores = new();
+        private static readonly HashSet<string> m_scriptExperienceKvpLoadedScopes = new();
 
         protected AsyncCommandManager m_AsyncCommands = null;
         protected IUrlModule m_UrlModule = null;
@@ -539,6 +542,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     m_scriptExperienceKvpMaxKeyBytes = Math.Max(1, experiencesConfig.GetInt("KeyValueStoreMaxKeyBytes", m_scriptExperienceKvpMaxKeyBytes));
                     m_scriptExperienceKvpMaxValueBytes = Math.Max(1, experiencesConfig.GetInt("KeyValueStoreMaxValueBytes", m_scriptExperienceKvpMaxValueBytes));
                     m_scriptExperienceKvpMaxStoreBytes = Math.Max(0, experiencesConfig.GetInt("KeyValueStoreMaxStoreBytes", m_scriptExperienceKvpMaxStoreBytes));
+                    m_scriptExperienceKvpPath = experiencesConfig.GetString("KeyValueStorePath", m_scriptExperienceKvpPath);
                     LoadExperienceTrustedUUIDs(experiencesConfig.GetString("TrustedOwners", string.Empty), m_scriptExperienceTrustedOwners);
                     LoadExperienceTrustedUUIDs(experiencesConfig.GetString("TrustedObjects", string.Empty), m_scriptExperienceTrustedObjects);
                 }
@@ -702,6 +706,108 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 : UUID.Zero;
 
             return regionID + ":" + m_host.OwnerID;
+        }
+
+        private string ExperienceStoreDirectory()
+        {
+            if (Path.IsPathRooted(m_scriptExperienceKvpPath))
+                return m_scriptExperienceKvpPath;
+
+            return Path.Combine(Util.ExecutingDirectory(), m_scriptExperienceKvpPath);
+        }
+
+        private string ExperienceStoreFile(string scope)
+        {
+            string safeName = Convert.ToBase64String(Encoding.UTF8.GetBytes(scope))
+                .Replace('+', '-')
+                .Replace('/', '_')
+                .TrimEnd('=');
+
+            return Path.Combine(ExperienceStoreDirectory(), safeName + ".kvp");
+        }
+
+        private void EnsureExperienceStoreLoaded(string scope)
+        {
+            string loadedKey = ExperienceStoreDirectory() + "|" + scope;
+            if (m_scriptExperienceKvpLoadedScopes.Contains(loadedKey))
+                return;
+
+            Dictionary<string, string> store = new Dictionary<string, string>();
+            string file = ExperienceStoreFile(scope);
+
+            try
+            {
+                if (File.Exists(file))
+                {
+                    foreach (string line in File.ReadAllLines(file, Encoding.UTF8))
+                    {
+                        if (String.IsNullOrWhiteSpace(line))
+                            continue;
+
+                        string[] parts = line.Split(new[] { '\t' }, 2);
+                        if (parts.Length != 2)
+                            continue;
+
+                        try
+                        {
+                            string key = Encoding.UTF8.GetString(Convert.FromBase64String(parts[0]));
+                            string value = Encoding.UTF8.GetString(Convert.FromBase64String(parts[1]));
+                            if (!String.IsNullOrEmpty(key))
+                                store[key] = value;
+                        }
+                        catch
+                        {
+                        }
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                m_log.WarnFormat("[SCRIPT EXPERIENCE KVP]: Could not load store {0}: {1}", file, e.Message);
+            }
+
+            m_scriptExperienceKvpStores[scope] = store;
+            m_scriptExperienceKvpLoadedScopes.Add(loadedKey);
+        }
+
+        private bool SaveExperienceStore(string scope, Dictionary<string, string> store)
+        {
+            string file = ExperienceStoreFile(scope);
+            string tempFile = file + ".tmp";
+
+            try
+            {
+                Directory.CreateDirectory(ExperienceStoreDirectory());
+
+                StringBuilder data = new StringBuilder();
+                foreach (KeyValuePair<string, string> kvp in store)
+                {
+                    data.Append(Convert.ToBase64String(Encoding.UTF8.GetBytes(kvp.Key)));
+                    data.Append('\t');
+                    data.Append(Convert.ToBase64String(Encoding.UTF8.GetBytes(kvp.Value ?? String.Empty)));
+                    data.Append('\n');
+                }
+
+                File.WriteAllText(tempFile, data.ToString(), new UTF8Encoding(false));
+                if (File.Exists(file))
+                    File.Delete(file);
+                File.Move(tempFile, file);
+                return true;
+            }
+            catch (Exception e)
+            {
+                m_log.WarnFormat("[SCRIPT EXPERIENCE KVP]: Could not save store {0}: {1}", file, e.Message);
+                try
+                {
+                    if (File.Exists(tempFile))
+                        File.Delete(tempFile);
+                }
+                catch
+                {
+                }
+
+                return false;
+            }
         }
 
         private static int Utf8ByteCount(string value)
@@ -4907,6 +5013,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             lock (m_scriptExperienceKvpLock)
             {
                 string scope = ExperienceStoreScope();
+                EnsureExperienceStoreLoaded(scope);
                 if (!m_scriptExperienceKvpStores.TryGetValue(scope, out Dictionary<string, string> store))
                 {
                     store = new Dictionary<string, string>();
@@ -4922,6 +5029,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     return PostKeyValueError(ScriptBaseClass.XP_ERROR_QUOTA_EXCEEDED);
 
                 store[key] = value;
+                if (!SaveExperienceStore(scope, store))
+                {
+                    store.Remove(key);
+                    return PostKeyValueError(ScriptBaseClass.XP_ERROR_STORAGE_EXCEPTION);
+                }
             }
 
             return PostKeyValueResult(true, String.Empty);
@@ -4938,7 +5050,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             string value;
             lock (m_scriptExperienceKvpLock)
             {
-                if (!m_scriptExperienceKvpStores.TryGetValue(ExperienceStoreScope(), out Dictionary<string, string> store) ||
+                string scope = ExperienceStoreScope();
+                EnsureExperienceStoreLoaded(scope);
+                if (!m_scriptExperienceKvpStores.TryGetValue(scope, out Dictionary<string, string> store) ||
                     !store.TryGetValue(key, out value))
                     return PostKeyValueError(ScriptBaseClass.XP_ERROR_KEY_NOT_FOUND);
             }
@@ -4957,6 +5071,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             lock (m_scriptExperienceKvpLock)
             {
                 string scope = ExperienceStoreScope();
+                EnsureExperienceStoreLoaded(scope);
                 if (!m_scriptExperienceKvpStores.TryGetValue(scope, out Dictionary<string, string> store) ||
                     !store.TryGetValue(key, out string existingValue))
                     return PostKeyValueError(ScriptBaseClass.XP_ERROR_KEY_NOT_FOUND);
@@ -4970,6 +5085,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     return PostKeyValueError(ScriptBaseClass.XP_ERROR_QUOTA_EXCEEDED);
 
                 store[key] = value;
+                if (!SaveExperienceStore(scope, store))
+                {
+                    store[key] = existingValue;
+                    return PostKeyValueError(ScriptBaseClass.XP_ERROR_STORAGE_EXCEPTION);
+                }
             }
 
             return PostKeyValueResult(true, String.Empty);
@@ -4985,9 +5105,18 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
             lock (m_scriptExperienceKvpLock)
             {
-                if (!m_scriptExperienceKvpStores.TryGetValue(ExperienceStoreScope(), out Dictionary<string, string> store) ||
-                    !store.Remove(key))
+                string scope = ExperienceStoreScope();
+                EnsureExperienceStoreLoaded(scope);
+                if (!m_scriptExperienceKvpStores.TryGetValue(scope, out Dictionary<string, string> store) ||
+                    !store.TryGetValue(key, out string existingValue))
                     return PostKeyValueError(ScriptBaseClass.XP_ERROR_KEY_NOT_FOUND);
+
+                store.Remove(key);
+                if (!SaveExperienceStore(scope, store))
+                {
+                    store[key] = existingValue;
+                    return PostKeyValueError(ScriptBaseClass.XP_ERROR_STORAGE_EXCEPTION);
+                }
             }
 
             return PostKeyValueResult(true, String.Empty);
@@ -5001,7 +5130,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             int count = 0;
             lock (m_scriptExperienceKvpLock)
             {
-                if (m_scriptExperienceKvpStores.TryGetValue(ExperienceStoreScope(), out Dictionary<string, string> store))
+                string scope = ExperienceStoreScope();
+                EnsureExperienceStoreLoaded(scope);
+                if (m_scriptExperienceKvpStores.TryGetValue(scope, out Dictionary<string, string> store))
                     count = store.Count;
             }
 
@@ -5019,7 +5150,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             List<string> keys = new List<string>();
             lock (m_scriptExperienceKvpLock)
             {
-                if (m_scriptExperienceKvpStores.TryGetValue(ExperienceStoreScope(), out Dictionary<string, string> store))
+                string scope = ExperienceStoreScope();
+                EnsureExperienceStoreLoaded(scope);
+                if (m_scriptExperienceKvpStores.TryGetValue(scope, out Dictionary<string, string> store))
                 {
                     keys.AddRange(store.Keys);
                     keys.Sort(StringComparer.Ordinal);

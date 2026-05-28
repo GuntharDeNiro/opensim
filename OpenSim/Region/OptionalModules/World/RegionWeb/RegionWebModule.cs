@@ -587,7 +587,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             EnsureFeature(content.Features, "Viewer polish",
                 "Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.");
             EnsureFeature(content.Features, "Second Life-style script engine",
-                "The script engine is moving closer to Second Life behavior with Experience-style permissions, key-value storage and familiar dataserver replies for modern in-world systems.");
+                "The script engine is moving closer to Second Life behavior with Experience-style permissions, persistent key-value storage and familiar dataserver replies for modern in-world systems.");
 
             return content;
         }
@@ -734,7 +734,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 case "experience-lite-key-value-store":
                     content.Title = "Second Life-style script engine";
                     content.Summary = "The script engine is moving closer to Second Life behavior with Experience-style permissions, key-value storage and familiar dataserver replies for modern in-world systems.";
-                    content.Overview = "The script engine now includes Experience-Lite features aimed at closing practical gaps with Second Life scripting. Trusted estate scripts can request selected permissions without repeated viewer popups, and they can use a small key-value store with SL-style dataserver replies for shared in-world state.";
+                    content.Overview = "The script engine now includes Experience-Lite features aimed at closing practical gaps with Second Life scripting. Trusted estate scripts can request selected permissions without repeated viewer popups, and they can use a persistent key-value store with SL-style dataserver replies for shared in-world state.";
                     content.Usage.Add("Enable [ScriptExperiences] only in trusted estate environments.");
                     content.Usage.Add("Add trusted script owner UUIDs to TrustedOwners, or specific root object/prim UUIDs to TrustedObjects.");
                     content.Usage.Add("Keep AutoGrantPermissions limited to the permissions your estate systems actually need.");
@@ -746,8 +746,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Usage.Add("Use llGetExperienceErrorMessage(errorCode) to turn failure codes into readable script diagnostics.");
                     content.Notes.Add("The default permission bitmask excludes PERMISSION_DEBIT and ownership changes.");
                     content.Notes.Add("Untrusted scripts keep the normal viewer permission prompt behavior.");
-                    content.Notes.Add("The store is currently process-local and scoped per region/owner, so it is useful for estate tools, games, rides and AI build workflows but is not yet persistent across simulator restarts.");
-                    content.Notes.Add("Use KeyValueStoreMaxKeys, KeyValueStoreMaxKeyBytes, KeyValueStoreMaxValueBytes and KeyValueStoreMaxStoreBytes to tune limits.");
+                    content.Notes.Add("The store is scoped per region/owner and persisted under KeyValueStorePath, making it useful for estate tools, games, rides and AI build workflows.");
+                    content.Notes.Add("Use KeyValueStoreMaxKeys, KeyValueStoreMaxKeyBytes, KeyValueStoreMaxValueBytes, KeyValueStoreMaxStoreBytes and KeyValueStorePath to tune storage.");
                     break;
             }
 
@@ -973,7 +973,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 + "Feature8 = \"Automatic cloud avatar recovery|If an avatar becomes a cloud, the server automatically handles the recovery and restores the normal appearance within a few seconds.\"\n"
                 + "Feature9 = \"Group auto invite|Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects.\"\n"
                 + "Feature10 = \"Viewer polish|Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.\"\n"
-                + "Feature11 = \"Second Life-style script engine|The script engine is moving closer to Second Life behavior with Experience-style permissions, key-value storage and familiar dataserver replies for modern in-world systems.\"\n",
+                + "Feature11 = \"Second Life-style script engine|The script engine is moving closer to Second Life behavior with Experience-style permissions, persistent key-value storage and familiar dataserver replies for modern in-world systems.\"\n",
                 new UTF8Encoding(false));
         }
 
@@ -1222,7 +1222,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                         normalized.Add(new FeatureItem
                         {
                             Title = "Second Life-style script engine",
-                            Body = "The script engine is moving closer to Second Life behavior with Experience-style permissions, key-value storage and familiar dataserver replies for modern in-world systems."
+                            Body = "The script engine is moving closer to Second Life behavior with Experience-style permissions, persistent key-value storage and familiar dataserver replies for modern in-world systems."
                         });
                         scriptEngineFeatureAdded = true;
                     }
@@ -1330,7 +1330,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             features.Add(new FeatureItem
             {
                 Title = "Second Life-style script engine",
-                Body = "The script engine is moving closer to Second Life behavior with Experience-style permissions, key-value storage and familiar dataserver replies for modern in-world systems."
+                Body = "The script engine is moving closer to Second Life behavior with Experience-style permissions, persistent key-value storage and familiar dataserver replies for modern in-world systems."
             });
         }
 
