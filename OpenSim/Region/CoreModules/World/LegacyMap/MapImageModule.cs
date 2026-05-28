@@ -374,13 +374,24 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 m_config, "MapObjectVolumeColorContrast", MapConfigSections, 1.08f)));
             bool faceShading = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeFaceShading", MapConfigSections, true);
-            bool renderMeshGeometry = true;
+            bool renderMeshGeometry = Util.GetConfigVarFromSections<bool>(
+                m_config, "MapObjectVolumeRenderMeshGeometry", MapConfigSections, true);
             DetailLevel meshDetailLevel = GetMapMeshDetailLevel(Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeMeshDetailLevel", MapConfigSections, 1));
+            bool drawMissingGeometryFootprints = Util.GetConfigVarFromSections<bool>(
+                m_config, "MapObjectVolumeDrawMissingGeometryFootprints", MapConfigSections, true);
+            int missingGeometryMaxArea = Math.Max(1, Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeMissingGeometryMaxArea", MapConfigSections, 4096));
+            int missingGeometryOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeMissingGeometryOpacity", MapConfigSections, 95));
+            float missingGeometryMinAlpha = Math.Max(0f, Math.Min(1f, Util.GetConfigVarFromSections<float>(
+                m_config, "MapObjectVolumeMissingGeometryMinAlpha", MapConfigSections, 0.08f)));
             m_maxTextureAssetSamplesThisPass = Math.Max(0, Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeMaxTextureSamples", MapConfigSections, 0));
             m_textureAssetSamplesThisPass = 0;
             int geometryFailures = 0;
+            int geometryFootprints = 0;
+            int geometrySkipped = 0;
             bool keepMeshCache = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeKeepMeshCache", MapConfigSections, false);
 
@@ -503,9 +514,11 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                                 minimumOpacity);
                                         }
 
+                                        bool missingGeometryFootprint = false;
                                         if (renderMeshGeometry)
                                         {
                                             bool drewExactGeometry = false;
+                                            bool externalGeometry = UsesExternalGeometry(part);
                                             try
                                             {
                                                 drewExactGeometry = TryDrawMeshGeometry(g, meshBrushes, meshPens,
@@ -528,8 +541,21 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                                 continue;
                                             }
 
-                                            geometryFailures++;
-                                            continue;
+                                            if (externalGeometry)
+                                            {
+                                                geometryFailures++;
+                                                if (!drawMissingGeometryFootprints ||
+                                                    objectArea > missingGeometryMaxArea ||
+                                                    textureAlpha <= missingGeometryMinAlpha)
+                                                {
+                                                    geometrySkipped++;
+                                                    continue;
+                                                }
+
+                                                missingGeometryFootprint = true;
+                                                geometryFootprints++;
+                                                fillOpacity = Math.Min(fillOpacity, missingGeometryOpacity);
+                                            }
                                         }
 
                                         // If object is beyond the edge of the map, don't draw it to avoid errors
@@ -657,12 +683,17 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                             ? Color.FromArgb(fillOpacity, mapdotspot)
                                             : mapdotspot);
                                         ds.faceBrushes = null;
-                                        ds.shadowBrush = prettyObjectVolume && drawObjectShadows && shadowOpacity > 0
+                                        ds.shadowBrush = prettyObjectVolume && drawObjectShadows && shadowOpacity > 0 && !missingGeometryFootprint
                                             ? new SolidBrush(Color.FromArgb(shadowOpacity, 18, 22, 22))
                                             : null;
                                         ds.outlinePen = null;
                                         if (prettyObjectVolume && drawObjectOutlines)
-                                            ds.outlinePen = new Pen(Color.FromArgb(outlineOpacity, Darken(mapdotspot, 0.55f)), 1f);
+                                        {
+                                            int partOutlineOpacity = missingGeometryFootprint
+                                                ? Math.Min(outlineOpacity, 45)
+                                                : outlineOpacity;
+                                            ds.outlinePen = new Pen(Color.FromArgb(partOutlineOpacity, Darken(mapdotspot, 0.55f)), 1f);
+                                        }
                                         //ds.rect = new Rectangle(mapdrawstartX, (255 - mapdrawstartY), mapdrawendX - mapdrawstartX, mapdrawendY - mapdrawstartY);
 
                                         ds.trns = new face[FaceA.Length];
@@ -725,8 +756,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     if (geometryFailures > 0)
                     {
                         m_log.DebugFormat(
-                            "[MAPTILE]: {0} object parts could not be drawn because exact geometry was unavailable",
-                            geometryFailures);
+                            "[MAPTILE]: Exact sculpt/mesh geometry unavailable for {0} object parts; drew {1} bounded footprints and skipped {2} oversized/missing parts",
+                            geometryFailures, geometryFootprints, geometrySkipped);
                     }
 
                     // Sort prim by Z position
@@ -798,6 +829,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
                 if (!keepMeshCache)
                     m_renderMeshCache.Clear();
+                m_failedRenderMeshCache.Clear();
             }
 
             m_log.Debug("[MAPTILE]: Generating Maptile Step 2: Done in " + (Environment.TickCount - tc) + " ms");
@@ -830,6 +862,14 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 configuredLevel = 3;
 
             return (DetailLevel)configuredLevel;
+        }
+
+        private static bool UsesExternalGeometry(SceneObjectPart part)
+        {
+            return part != null &&
+                part.Shape != null &&
+                part.Shape.SculptTexture.IsNotZero() &&
+                (part.Shape.SculptType & 0x07) != (byte)SculptType.None;
         }
 
         private static void YieldMaptileWork(ref int counter, ref int lastYieldMS)
@@ -1040,8 +1080,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     }
                     catch (Exception e)
                     {
-                        m_log.DebugFormat("[MAPTILE]: Exact geometry decode failed for object '{0}' ({1}), asset {2}, sculpt type {3}: {4}",
-                            part.Name, part.UUID, omvPrim.Sculpt.SculptTexture, omvPrim.Sculpt.Type, e.Message);
+                        m_log.DebugFormat("[MAPTILE]: Exact geometry decode failed for asset {0}, sculpt type {1}: {2}",
+                            omvPrim.Sculpt.SculptTexture, omvPrim.Sculpt.Type, e.Message);
                     }
 
                     if (renderMesh != null)
@@ -1051,15 +1091,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 }
                 else
                 {
-                    m_log.DebugFormat("[MAPTILE]: Exact geometry asset missing for object '{0}' ({1}), asset {2}, sculpt type {3}",
-                        part.Name, part.UUID, omvPrim.Sculpt.SculptTexture, omvPrim.Sculpt.Type);
                     m_failedRenderMeshCache.Add(cacheKey);
-                }
-
-                if (renderMesh == null)
-                {
-                    m_log.DebugFormat("[MAPTILE]: Object '{0}' ({1}) was not drawn because exact sculpt/mesh geometry was unavailable",
-                        part.Name, part.UUID);
                 }
 
                 return renderMesh;
@@ -1073,7 +1105,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             if (data == null || data.Length == 0)
                 return null;
 
-            if (!LooksLikeCompleteJpeg2000(data))
+            if (!LooksLikeJpeg2000(data))
                 return null;
 
             try
@@ -1091,7 +1123,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             }
         }
 
-        private static bool LooksLikeCompleteJpeg2000(byte[] data)
+        private static bool LooksLikeJpeg2000(byte[] data)
         {
             if (data.Length < 16)
                 return false;
@@ -1105,31 +1137,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             if (!rawCodestream && !jp2Container)
                 return false;
 
-            // CSJ2K emits COM marker warnings from malformed codestreams and those
-            // assets have been observed destabilizing map generation.  The map pass
-            // should skip suspicious textures/sculpts instead of feeding them into
-            // a deep image decoder on a live simulator.
-            if (ContainsJpeg2000CommentMarker(data))
-                return false;
-
-            for (int i = data.Length - 2; i >= 0; i--)
-            {
-                if (data[i] == 0xff && data[i + 1] == 0xd9)
-                    return true;
-            }
-
-            return false;
-        }
-
-        private static bool ContainsJpeg2000CommentMarker(byte[] data)
-        {
-            for (int i = 0; i + 1 < data.Length; i++)
-            {
-                if (data[i] == 0xff && data[i + 1] == 0x64)
-                    return true;
-            }
-
-            return false;
+            return true;
         }
 
         private byte[] GetAssetDataForMap(string assetID)

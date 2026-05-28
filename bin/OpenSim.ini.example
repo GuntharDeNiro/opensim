@@ -473,11 +473,23 @@
     ;# {MapObjectVolumeFaceShading} {PrettyPrimVolumeOnMapTile} {Shade individual object faces for sharper geographic relief?} {true false} true
     ; MapObjectVolumeFaceShading = true
 
-    ;# {MapObjectVolumeRenderMeshGeometry} {PrettyPrimVolumeOnMapTile} {Exact object geometry rendering is always used; legacy bounding-box fallbacks are disabled.} {true false} true
+    ;# {MapObjectVolumeRenderMeshGeometry} {PrettyPrimVolumeOnMapTile} {Use exact mesh/sculpt/prim geometry for object map rendering?} {true false} true
     ; MapObjectVolumeRenderMeshGeometry = true
 
     ;# {MapObjectVolumeMeshDetailLevel} {MapObjectVolumeRenderMeshGeometry} {Mesh and sculpt map detail level: 0=Low, 1=Medium, 2=High, 3=Highest} {} 1
     ; MapObjectVolumeMeshDetailLevel = 1
+
+    ;# {MapObjectVolumeDrawMissingGeometryFootprints} {MapObjectVolumeRenderMeshGeometry} {Draw bounded footprints when exact sculpt/mesh assets are unavailable?} {true false} true
+    ; MapObjectVolumeDrawMissingGeometryFootprints = true
+
+    ;# {MapObjectVolumeMissingGeometryMaxArea} {MapObjectVolumeDrawMissingGeometryFootprints} {Maximum map-pixel footprint area allowed for unavailable exact geometry; larger objects are skipped to avoid giant fake slabs} {} 4096
+    ; MapObjectVolumeMissingGeometryMaxArea = 4096
+
+    ;# {MapObjectVolumeMissingGeometryOpacity} {MapObjectVolumeDrawMissingGeometryFootprints} {Opacity for bounded missing-geometry footprints} {} 95
+    ; MapObjectVolumeMissingGeometryOpacity = 95
+
+    ;# {MapObjectVolumeMissingGeometryMinAlpha} {MapObjectVolumeDrawMissingGeometryFootprints} {Skip missing-geometry footprints when sampled texture alpha is at or below this value} {} 0.08
+    ; MapObjectVolumeMissingGeometryMinAlpha = 0.08
 
     ;# {MapObjectVolumeMaxTextureSamples} {PrettyPrimVolumeOnMapTile} {Maximum uncached texture assets sampled per map tile object pass; 0 means unlimited} {} 0
     ; MapObjectVolumeMaxTextureSamples = 0
