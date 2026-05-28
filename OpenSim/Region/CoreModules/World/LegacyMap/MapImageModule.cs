@@ -105,6 +105,10 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         private bool m_Enabled = false;
         private static readonly string[] MapConfigSections = new string[] { "Map", "Startup" };
         private readonly Dictionary<UUID, MapTextureSample> m_textureSampleCache = new Dictionary<UUID, MapTextureSample>();
+        private int m_textureAssetSamplesThisPass = 0;
+        private int m_maxTextureAssetSamplesThisPass = 0;
+        private int m_meshAssetFetchesThisPass = 0;
+        private int m_maxMeshAssetFetchesThisPass = 0;
 
         #region IMapImageGenerator Members
 
@@ -413,7 +417,23 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             bool renderMeshGeometry = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeRenderMeshGeometry", MapConfigSections, true);
             DetailLevel meshDetailLevel = GetMapMeshDetailLevel(Util.GetConfigVarFromSections<int>(
-                m_config, "MapObjectVolumeMeshDetailLevel", MapConfigSections, 3));
+                m_config, "MapObjectVolumeMeshDetailLevel", MapConfigSections, 2));
+            int maxObjectPassSeconds = Math.Max(0, Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeMaxPassSeconds", MapConfigSections, 45));
+            int maxMeshParts = Math.Max(0, Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeMaxMeshParts", MapConfigSections, 80));
+            int maxMeshTriangles = Math.Max(0, Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeMaxMeshTriangles", MapConfigSections, 6000));
+            m_maxTextureAssetSamplesThisPass = Math.Max(0, Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeMaxTextureSamples", MapConfigSections, 96));
+            m_maxMeshAssetFetchesThisPass = Math.Max(0, Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeMaxMeshAssetFetches", MapConfigSections, 32));
+            m_textureAssetSamplesThisPass = 0;
+            m_meshAssetFetchesThisPass = 0;
+            int meshPartsRendered = 0;
+            int meshTrianglesRendered = 0;
+            int objectPassStartMS = Environment.TickCount;
+            bool objectPassBudgetLogged = false;
 
             EnsurePrimMesher(renderMeshGeometry);
 
@@ -434,6 +454,20 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
                                 if (part == null)
                                     continue;
+
+                                if (MapObjectPassTimedOut(objectPassStartMS, maxObjectPassSeconds))
+                                {
+                                    if (!objectPassBudgetLogged)
+                                    {
+                                        m_log.WarnFormat(
+                                            "[MAPTILE]: Object volume pass exceeded MapObjectVolumeMaxPassSeconds ({0}s); disabling expensive texture and mesh sampling for this tile",
+                                            maxObjectPassSeconds);
+                                        objectPassBudgetLogged = true;
+                                    }
+
+                                    sampleTextureAssets = false;
+                                    renderMeshGeometry = false;
+                                }
 
                                 // Draw if the object is at least 1 meter wide in any direction
                                 if (part.Scale.X > 1f || part.Scale.Y > 1f || part.Scale.Z > 1f)
@@ -460,7 +494,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                         }
 
                                         mapdotspot = GetPartMapColor(part, mapdotspot, prettyObjectVolume,
-                                            sampleTextureAssets,
+                                            sampleTextureAssets && !MapObjectPassTimedOut(objectPassStartMS, maxObjectPassSeconds),
                                             minimumBrightness, maximumBrightness,
                                             textureBlend, objectSaturation, objectContrast);
                                     }
@@ -525,7 +559,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                         float textureAlpha = 1f;
                                         if (prettyObjectVolume && useTextureAlpha)
                                         {
-                                            textureAlpha = GetPartTextureAlpha(part, sampleTextureAssets);
+                                            textureAlpha = GetPartTextureAlpha(part,
+                                                sampleTextureAssets && !MapObjectPassTimedOut(objectPassStartMS, maxObjectPassSeconds));
                                             fillOpacity = ApplyTextureAlpha(fillOpacity,
                                                 textureAlpha,
                                                 minimumOpacity);
@@ -543,10 +578,16 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
                                         if (prettyObjectVolume && renderMeshGeometry &&
                                             IsSculptOrMesh(part) &&
+                                            (maxMeshParts == 0 || meshPartsRendered < maxMeshParts) &&
                                             TryAddMeshGeometryDraws(meshGeometry, part, mapdotspot,
                                                 fillOpacity, outlineOpacity, drawObjectOutlines,
-                                                faceShading, meshDetailLevel))
+                                                faceShading, meshDetailLevel, maxMeshTriangles,
+                                                ref meshTrianglesRendered, objectPassStartMS,
+                                                maxObjectPassSeconds))
+                                        {
+                                            meshPartsRendered++;
                                             continue;
+                                        }
 
                                         // If object is beyond the edge of the map, don't draw it to avoid errors
                                         if (mapdrawstartX < 0
@@ -901,6 +942,12 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             lastYieldMS = Environment.TickCount;
         }
 
+        private static bool MapObjectPassTimedOut(int startMS, int maxSeconds)
+        {
+            return maxSeconds > 0 &&
+                Util.EnvironmentTickCountSubtract(Environment.TickCount, startMS) > maxSeconds * 1000;
+        }
+
         private static bool IsSculptOrMesh(SceneObjectPart part)
         {
             return part != null &&
@@ -911,9 +958,13 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
         private bool TryAddMeshGeometryDraws(List<MapPolygonDraw> meshGeometry, SceneObjectPart part,
             Color fallbackColor, int opacity, int outlineOpacity, bool drawOutlines,
-            bool faceShading, DetailLevel lod)
+            bool faceShading, DetailLevel lod, int maxTriangles, ref int trianglesRendered,
+            int objectPassStartMS, int maxObjectPassSeconds)
         {
             if (m_primMesher == null)
+                return false;
+
+            if (MapObjectPassTimedOut(objectPassStartMS, maxObjectPassSeconds))
                 return false;
 
             FacetedMesh renderMesh = GetRenderMesh(part, lod);
@@ -935,6 +986,10 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             {
                 YieldMaptileWork(ref yieldCounter, ref lastYieldMS);
 
+                if (MapObjectPassTimedOut(objectPassStartMS, maxObjectPassSeconds) ||
+                    (maxTriangles > 0 && trianglesRendered >= maxTriangles))
+                    return added;
+
                 Face face = renderMesh.Faces[i];
                 if (face.Vertices == null || face.Indices == null)
                     continue;
@@ -949,6 +1004,10 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 for (int j = 0; j + 2 < face.Indices.Count; j += 3)
                 {
                     YieldMaptileWork(ref yieldCounter, ref lastYieldMS);
+
+                    if (MapObjectPassTimedOut(objectPassStartMS, maxObjectPassSeconds) ||
+                        (maxTriangles > 0 && trianglesRendered >= maxTriangles))
+                        return added;
 
                     int index0 = face.Indices[j];
                     int index1 = face.Indices[j + 1];
@@ -984,6 +1043,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                             : null,
                         z = (world0.Z + world1.Z + world2.Z) / 3f
                     });
+                    trianglesRendered++;
                     added = true;
                 }
             }
@@ -998,6 +1058,11 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
             if (omvPrim.Sculpt != null && omvPrim.Sculpt.SculptTexture.IsNotZero())
             {
+                if (m_maxMeshAssetFetchesThisPass > 0 &&
+                    m_meshAssetFetchesThisPass >= m_maxMeshAssetFetchesThisPass)
+                    return null;
+
+                m_meshAssetFetchesThisPass++;
                 AssetBase sculptAsset = m_scene.AssetService.Get(omvPrim.Sculpt.SculptTexture.ToString());
                 if (sculptAsset != null && sculptAsset.Data != null)
                 {
@@ -1349,6 +1414,11 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 alpha = 1f
             };
 
+            if (m_maxTextureAssetSamplesThisPass > 0 &&
+                m_textureAssetSamplesThisPass >= m_maxTextureAssetSamplesThisPass)
+                return sample;
+
+            m_textureAssetSamplesThisPass++;
             AssetBase asset = m_scene.AssetService.Get(textureID.ToString());
             if (asset == null || asset.Type != (sbyte)AssetType.Texture ||
                 asset.Data == null || !IsLikelyDecodableTexture(asset.Data))
