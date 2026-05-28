@@ -336,6 +336,13 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
        LSL_Integer llIsExperienceTrusted();
        LSL_Integer llGetExperiencePermissions();
        LSL_Integer llExperienceCanAutoGrant(int permissions);
+        LSL_String llGetExperienceErrorMessage(int error);
+           LSL_Key llCreateKeyValue(string key, string value);
+           LSL_Key llReadKeyValue(string key);
+           LSL_Key llUpdateKeyValue(string key, string value, int checkedUpdate, string originalValue);
+           LSL_Key llDeleteKeyValue(string key);
+           LSL_Key llKeyCountKeyValue();
+           LSL_Key llKeysKeyValue(int first, int count);
            LSL_Key llRequestSecureURL();
            LSL_Key llRequestSimulatorData(string simulator, int data);
          LSL_Float llGetSimStats(LSL_Integer stat_type);

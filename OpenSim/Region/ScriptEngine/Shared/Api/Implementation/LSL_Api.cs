@@ -127,8 +127,15 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         protected bool m_scriptExperiencesEnabled = false;
         protected bool m_scriptExperiencesAllowEstateManagers = false;
         protected int m_scriptExperienceAutoGrantPermissions = 0;
+        protected bool m_scriptExperienceKvpEnabled = true;
+        protected int m_scriptExperienceKvpMaxKeys = 1024;
+        protected int m_scriptExperienceKvpMaxKeyBytes = 1011;
+        protected int m_scriptExperienceKvpMaxValueBytes = 4095;
+        protected int m_scriptExperienceKvpMaxStoreBytes = 131072;
         protected readonly HashSet<UUID> m_scriptExperienceTrustedOwners = new();
         protected readonly HashSet<UUID> m_scriptExperienceTrustedObjects = new();
+        private static readonly object m_scriptExperienceKvpLock = new();
+        private static readonly Dictionary<string, Dictionary<string, string>> m_scriptExperienceKvpStores = new();
 
         protected AsyncCommandManager m_AsyncCommands = null;
         protected IUrlModule m_UrlModule = null;
@@ -527,6 +534,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     m_scriptExperiencesEnabled = experiencesConfig.GetBoolean("Enabled", m_scriptExperiencesEnabled);
                     m_scriptExperiencesAllowEstateManagers = experiencesConfig.GetBoolean("AllowEstateManagers", m_scriptExperiencesAllowEstateManagers);
                     m_scriptExperienceAutoGrantPermissions = experiencesConfig.GetInt("AutoGrantPermissions", DefaultExperienceAutoGrantPermissions());
+                    m_scriptExperienceKvpEnabled = experiencesConfig.GetBoolean("KeyValueStoreEnabled", m_scriptExperienceKvpEnabled);
+                    m_scriptExperienceKvpMaxKeys = Math.Max(0, experiencesConfig.GetInt("KeyValueStoreMaxKeys", m_scriptExperienceKvpMaxKeys));
+                    m_scriptExperienceKvpMaxKeyBytes = Math.Max(1, experiencesConfig.GetInt("KeyValueStoreMaxKeyBytes", m_scriptExperienceKvpMaxKeyBytes));
+                    m_scriptExperienceKvpMaxValueBytes = Math.Max(1, experiencesConfig.GetInt("KeyValueStoreMaxValueBytes", m_scriptExperienceKvpMaxValueBytes));
+                    m_scriptExperienceKvpMaxStoreBytes = Math.Max(0, experiencesConfig.GetInt("KeyValueStoreMaxStoreBytes", m_scriptExperienceKvpMaxStoreBytes));
                     LoadExperienceTrustedUUIDs(experiencesConfig.GetString("TrustedOwners", string.Empty), m_scriptExperienceTrustedOwners);
                     LoadExperienceTrustedUUIDs(experiencesConfig.GetString("TrustedObjects", string.Empty), m_scriptExperienceTrustedObjects);
                 }
@@ -645,6 +657,78 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     "experience_permissions_denied", new Object[] {
                     new LSL_Key(agentID.ToString()), new LSL_Integer(reason) },
                     Array.Empty<DetectParams>()));
+        }
+
+        private LSL_Key PostKeyValueResult(bool success, string valueOrError)
+        {
+            UUID queryID = UUID.Random();
+            string data = (success ? "1," : "0,") + valueOrError;
+
+            m_ScriptEngine.PostScriptEvent(m_item.ItemID, new EventParams(
+                    "dataserver", new Object[] {
+                    new LSL_Key(queryID.ToString()), new LSL_String(data) },
+                    Array.Empty<DetectParams>()));
+
+            return queryID.ToString();
+        }
+
+        private LSL_Key PostKeyValueError(int error)
+        {
+            return PostKeyValueResult(false, error.ToString());
+        }
+
+        private bool CanUseExperienceKeyValueStore(out int error)
+        {
+            if (!m_scriptExperiencesEnabled || !m_scriptExperienceKvpEnabled)
+            {
+                error = ScriptBaseClass.XP_ERROR_STORE_DISABLED;
+                return false;
+            }
+
+            if (!IsScriptExperienceTrusted())
+            {
+                error = ScriptBaseClass.XP_ERROR_EXPERIENCE_NOT_TRUSTED;
+                return false;
+            }
+
+            error = ScriptBaseClass.XP_ERROR_NONE;
+            return true;
+        }
+
+        private string ExperienceStoreScope()
+        {
+            UUID regionID = World != null && World.RegionInfo != null
+                ? World.RegionInfo.RegionID
+                : UUID.Zero;
+
+            return regionID + ":" + m_host.OwnerID;
+        }
+
+        private static int Utf8ByteCount(string value)
+        {
+            return value == null ? 0 : Encoding.UTF8.GetByteCount(value);
+        }
+
+        private int ExperienceStoreByteCount(Dictionary<string, string> store)
+        {
+            int bytes = 0;
+            foreach (KeyValuePair<string, string> kvp in store)
+                bytes += Utf8ByteCount(kvp.Key) + Utf8ByteCount(kvp.Value);
+
+            return bytes;
+        }
+
+        private bool ValidateExperienceKeyValue(string key, string value, out int error)
+        {
+            if (String.IsNullOrEmpty(key) || Utf8ByteCount(key) > m_scriptExperienceKvpMaxKeyBytes ||
+                value == null || Utf8ByteCount(value) > m_scriptExperienceKvpMaxValueBytes)
+            {
+                error = ScriptBaseClass.XP_ERROR_INVALID_PARAMETERS;
+                return false;
+            }
+
+            error = ScriptBaseClass.XP_ERROR_NONE;
+            return true;
         }
 
         protected SceneObjectPart MonitoringObject()
@@ -4781,6 +4865,180 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 return 0;
 
             return (permissions & ~m_scriptExperienceAutoGrantPermissions) == 0 ? 1 : 0;
+        }
+
+        public LSL_String llGetExperienceErrorMessage(int error)
+        {
+            switch (error)
+            {
+                case ScriptBaseClass.XP_ERROR_NONE:
+                    return "none";
+                case ScriptBaseClass.XP_ERROR_EXPERIENCE_DISABLED:
+                    return "experience disabled";
+                case ScriptBaseClass.XP_ERROR_EXPERIENCE_NOT_TRUSTED:
+                    return "experience not trusted";
+                case ScriptBaseClass.XP_ERROR_AGENT_NOT_FOUND:
+                    return "agent not found";
+                case ScriptBaseClass.XP_ERROR_INVALID_PARAMETERS:
+                    return "invalid parameters";
+                case ScriptBaseClass.XP_ERROR_QUOTA_EXCEEDED:
+                    return "quota exceeded";
+                case ScriptBaseClass.XP_ERROR_STORE_DISABLED:
+                    return "key-value store disabled";
+                case ScriptBaseClass.XP_ERROR_STORAGE_EXCEPTION:
+                    return "storage exception";
+                case ScriptBaseClass.XP_ERROR_KEY_NOT_FOUND:
+                    return "key not found";
+                case ScriptBaseClass.XP_ERROR_RETRY_UPDATE:
+                    return "retry update";
+                default:
+                    return "unknown experience error";
+            }
+        }
+
+        public LSL_Key llCreateKeyValue(string key, string value)
+        {
+            if (!CanUseExperienceKeyValueStore(out int error))
+                return PostKeyValueError(error);
+
+            if (!ValidateExperienceKeyValue(key, value, out error))
+                return PostKeyValueError(error);
+
+            lock (m_scriptExperienceKvpLock)
+            {
+                string scope = ExperienceStoreScope();
+                if (!m_scriptExperienceKvpStores.TryGetValue(scope, out Dictionary<string, string> store))
+                {
+                    store = new Dictionary<string, string>();
+                    m_scriptExperienceKvpStores[scope] = store;
+                }
+
+                if (store.ContainsKey(key))
+                    return PostKeyValueError(ScriptBaseClass.XP_ERROR_RETRY_UPDATE);
+
+                if ((m_scriptExperienceKvpMaxKeys > 0 && store.Count >= m_scriptExperienceKvpMaxKeys) ||
+                    (m_scriptExperienceKvpMaxStoreBytes > 0 &&
+                    ExperienceStoreByteCount(store) + Utf8ByteCount(key) + Utf8ByteCount(value) > m_scriptExperienceKvpMaxStoreBytes))
+                    return PostKeyValueError(ScriptBaseClass.XP_ERROR_QUOTA_EXCEEDED);
+
+                store[key] = value;
+            }
+
+            return PostKeyValueResult(true, String.Empty);
+        }
+
+        public LSL_Key llReadKeyValue(string key)
+        {
+            if (!CanUseExperienceKeyValueStore(out int error))
+                return PostKeyValueError(error);
+
+            if (String.IsNullOrEmpty(key) || Utf8ByteCount(key) > m_scriptExperienceKvpMaxKeyBytes)
+                return PostKeyValueError(ScriptBaseClass.XP_ERROR_INVALID_PARAMETERS);
+
+            string value;
+            lock (m_scriptExperienceKvpLock)
+            {
+                if (!m_scriptExperienceKvpStores.TryGetValue(ExperienceStoreScope(), out Dictionary<string, string> store) ||
+                    !store.TryGetValue(key, out value))
+                    return PostKeyValueError(ScriptBaseClass.XP_ERROR_KEY_NOT_FOUND);
+            }
+
+            return PostKeyValueResult(true, value);
+        }
+
+        public LSL_Key llUpdateKeyValue(string key, string value, int checkedUpdate, string originalValue)
+        {
+            if (!CanUseExperienceKeyValueStore(out int error))
+                return PostKeyValueError(error);
+
+            if (!ValidateExperienceKeyValue(key, value, out error))
+                return PostKeyValueError(error);
+
+            lock (m_scriptExperienceKvpLock)
+            {
+                string scope = ExperienceStoreScope();
+                if (!m_scriptExperienceKvpStores.TryGetValue(scope, out Dictionary<string, string> store) ||
+                    !store.TryGetValue(key, out string existingValue))
+                    return PostKeyValueError(ScriptBaseClass.XP_ERROR_KEY_NOT_FOUND);
+
+                if (checkedUpdate != 0 && existingValue != originalValue)
+                    return PostKeyValueError(ScriptBaseClass.XP_ERROR_RETRY_UPDATE);
+
+                int currentBytes = ExperienceStoreByteCount(store);
+                int newBytes = currentBytes - Utf8ByteCount(existingValue) + Utf8ByteCount(value);
+                if (m_scriptExperienceKvpMaxStoreBytes > 0 && newBytes > m_scriptExperienceKvpMaxStoreBytes)
+                    return PostKeyValueError(ScriptBaseClass.XP_ERROR_QUOTA_EXCEEDED);
+
+                store[key] = value;
+            }
+
+            return PostKeyValueResult(true, String.Empty);
+        }
+
+        public LSL_Key llDeleteKeyValue(string key)
+        {
+            if (!CanUseExperienceKeyValueStore(out int error))
+                return PostKeyValueError(error);
+
+            if (String.IsNullOrEmpty(key) || Utf8ByteCount(key) > m_scriptExperienceKvpMaxKeyBytes)
+                return PostKeyValueError(ScriptBaseClass.XP_ERROR_INVALID_PARAMETERS);
+
+            lock (m_scriptExperienceKvpLock)
+            {
+                if (!m_scriptExperienceKvpStores.TryGetValue(ExperienceStoreScope(), out Dictionary<string, string> store) ||
+                    !store.Remove(key))
+                    return PostKeyValueError(ScriptBaseClass.XP_ERROR_KEY_NOT_FOUND);
+            }
+
+            return PostKeyValueResult(true, String.Empty);
+        }
+
+        public LSL_Key llKeyCountKeyValue()
+        {
+            if (!CanUseExperienceKeyValueStore(out int error))
+                return PostKeyValueError(error);
+
+            int count = 0;
+            lock (m_scriptExperienceKvpLock)
+            {
+                if (m_scriptExperienceKvpStores.TryGetValue(ExperienceStoreScope(), out Dictionary<string, string> store))
+                    count = store.Count;
+            }
+
+            return PostKeyValueResult(true, count.ToString());
+        }
+
+        public LSL_Key llKeysKeyValue(int first, int count)
+        {
+            if (!CanUseExperienceKeyValueStore(out int error))
+                return PostKeyValueError(error);
+
+            if (first < 0 || count < 0)
+                return PostKeyValueError(ScriptBaseClass.XP_ERROR_INVALID_PARAMETERS);
+
+            List<string> keys = new List<string>();
+            lock (m_scriptExperienceKvpLock)
+            {
+                if (m_scriptExperienceKvpStores.TryGetValue(ExperienceStoreScope(), out Dictionary<string, string> store))
+                {
+                    keys.AddRange(store.Keys);
+                    keys.Sort(StringComparer.Ordinal);
+                }
+            }
+
+            if (first >= keys.Count || count == 0)
+                return PostKeyValueResult(true, String.Empty);
+
+            int end = Math.Min(keys.Count, first + count);
+            StringBuilder result = new StringBuilder();
+            for (int i = first; i < end; i++)
+            {
+                if (result.Length > 0)
+                    result.Append(",");
+                result.Append(keys[i]);
+            }
+
+            return PostKeyValueResult(true, result.ToString());
         }
 
         public LSL_Integer llGetLinkNumber()

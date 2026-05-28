@@ -94,6 +94,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         public const int XP_ERROR_EXPERIENCE_NOT_TRUSTED = 2;
         public const int XP_ERROR_AGENT_NOT_FOUND = 3;
         public const int XP_ERROR_INVALID_PARAMETERS = 4;
+        public const int XP_ERROR_QUOTA_EXCEEDED = 11;
+        public const int XP_ERROR_STORE_DISABLED = 12;
+        public const int XP_ERROR_STORAGE_EXCEPTION = 13;
+        public const int XP_ERROR_KEY_NOT_FOUND = 14;
+        public const int XP_ERROR_RETRY_UPDATE = 15;
 
         public const int AGENT_FLYING = 0x1;
         //ApiDesc The agent has attachments

@@ -586,8 +586,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 "Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects.");
             EnsureFeature(content.Features, "Viewer polish",
                 "Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.");
-            EnsureFeature(content.Features, "Experience-Lite script permissions",
-                "Trusted estate scripts can receive selected persistent permissions without repeatedly interrupting visitors with viewer popups.");
+            EnsureFeature(content.Features, "Second Life-style script engine",
+                "The script engine is moving closer to Second Life behavior with Experience-style permissions, key-value storage and familiar dataserver replies for modern in-world systems.");
 
             return content;
         }
@@ -729,16 +729,25 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Notes.Add("This is presentation polish only; keep the actual simulator binaries compatible for crossings and shared services.");
                     break;
 
+                case "second-life-style-script-engine":
                 case "experience-lite-script-permissions":
-                    content.Overview = "Experience-Lite adds an estate-controlled trust layer for script runtime permissions. Trusted owners or objects can auto-grant selected permissions such as controls, animations, camera, teleport and animation override, so visitors are not repeatedly interrupted by permission dialogs for estate systems they already trust.";
+                case "experience-lite-key-value-store":
+                    content.Title = "Second Life-style script engine";
+                    content.Summary = "The script engine is moving closer to Second Life behavior with Experience-style permissions, key-value storage and familiar dataserver replies for modern in-world systems.";
+                    content.Overview = "The script engine now includes Experience-Lite features aimed at closing practical gaps with Second Life scripting. Trusted estate scripts can request selected permissions without repeated viewer popups, and they can use a small key-value store with SL-style dataserver replies for shared in-world state.";
                     content.Usage.Add("Enable [ScriptExperiences] only in trusted estate environments.");
                     content.Usage.Add("Add trusted script owner UUIDs to TrustedOwners, or specific root object/prim UUIDs to TrustedObjects.");
                     content.Usage.Add("Keep AutoGrantPermissions limited to the permissions your estate systems actually need.");
                     content.Usage.Add("Use llRequestPermissions normally from scripts; trusted requests are granted automatically when covered by the configured bitmask.");
                     content.Usage.Add("Use llIsExperienceTrusted(), llGetExperiencePermissions() and llExperienceCanAutoGrant(mask) when scripts need to adapt to trusted or untrusted regions.");
                     content.Usage.Add("Use llRequestExperiencePermissions(agent, name) with experience_permissions(agent) and experience_permissions_denied(agent, reason) for SL-style Experience-Lite scripts.");
-                    content.Notes.Add("The default bitmask excludes PERMISSION_DEBIT and ownership changes.");
+                    content.Usage.Add("Use llCreateKeyValue(key, value), llReadKeyValue(key), llUpdateKeyValue(key, value, checked, originalValue), llDeleteKeyValue(key), llKeyCountKeyValue() and llKeysKeyValue(first, count).");
+                    content.Usage.Add("Handle dataserver(queryid, data). Replies use 1,value for success and 0,errorCode for failure.");
+                    content.Usage.Add("Use llGetExperienceErrorMessage(errorCode) to turn failure codes into readable script diagnostics.");
+                    content.Notes.Add("The default permission bitmask excludes PERMISSION_DEBIT and ownership changes.");
                     content.Notes.Add("Untrusted scripts keep the normal viewer permission prompt behavior.");
+                    content.Notes.Add("The store is currently process-local and scoped per region/owner, so it is useful for estate tools, games, rides and AI build workflows but is not yet persistent across simulator restarts.");
+                    content.Notes.Add("Use KeyValueStoreMaxKeys, KeyValueStoreMaxKeyBytes, KeyValueStoreMaxValueBytes and KeyValueStoreMaxStoreBytes to tune limits.");
                     break;
             }
 
@@ -964,7 +973,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 + "Feature8 = \"Automatic cloud avatar recovery|If an avatar becomes a cloud, the server automatically handles the recovery and restores the normal appearance within a few seconds.\"\n"
                 + "Feature9 = \"Group auto invite|Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects.\"\n"
                 + "Feature10 = \"Viewer polish|Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.\"\n"
-                + "Feature11 = \"Experience-Lite script permissions|Trusted estate scripts can receive selected persistent permissions without repeatedly interrupting visitors with viewer popups.\"\n",
+                + "Feature11 = \"Second Life-style script engine|The script engine is moving closer to Second Life behavior with Experience-style permissions, key-value storage and familiar dataserver replies for modern in-world systems.\"\n",
                 new UTF8Encoding(false));
         }
 
@@ -1187,6 +1196,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         {
             List<FeatureItem> normalized = new List<FeatureItem>();
             bool mapFeatureAdded = false;
+            bool scriptEngineFeatureAdded = false;
 
             foreach (FeatureItem feature in features)
             {
@@ -1200,6 +1210,21 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                             Body = "Terrain textures, water depth shading, land detail, aerial tone mapping, mesh/sculpt geometry projection, cleaner water alpha handling, background generation and cooperative rendering make map tiles sharper, more geographic and safer for simulator responsiveness."
                         });
                         mapFeatureAdded = true;
+                    }
+
+                    continue;
+                }
+
+                if (IsScriptEngineFeature(feature.Title))
+                {
+                    if (!scriptEngineFeatureAdded)
+                    {
+                        normalized.Add(new FeatureItem
+                        {
+                            Title = "Second Life-style script engine",
+                            Body = "The script engine is moving closer to Second Life behavior with Experience-style permissions, key-value storage and familiar dataserver replies for modern in-world systems."
+                        });
+                        scriptEngineFeatureAdded = true;
                     }
 
                     continue;
@@ -1234,6 +1259,20 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 || normalized == "cleaner water overlays"
                 || normalized == "background map generation"
                 || normalized == "cooperative heavy rendering";
+        }
+
+        private static bool IsScriptEngineFeature(string title)
+        {
+            if (string.IsNullOrEmpty(title))
+                return false;
+
+            string normalized = title.Trim().ToLowerInvariant();
+            return normalized == "second life-style script engine"
+                || normalized == "second-life-style script engine"
+                || normalized == "second life compatible script engine"
+                || normalized == "experience-lite script permissions"
+                || normalized == "experience-lite key-value store"
+                || normalized == "experience-lite script engine";
         }
 
         private static void AddDefaultFeatures(List<FeatureItem> features)
@@ -1290,8 +1329,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             });
             features.Add(new FeatureItem
             {
-                Title = "Experience-Lite script permissions",
-                Body = "Trusted estate scripts can receive selected persistent permissions without repeatedly interrupting visitors with viewer popups."
+                Title = "Second Life-style script engine",
+                Body = "The script engine is moving closer to Second Life behavior with Experience-style permissions, key-value storage and familiar dataserver replies for modern in-world systems."
             });
         }
 

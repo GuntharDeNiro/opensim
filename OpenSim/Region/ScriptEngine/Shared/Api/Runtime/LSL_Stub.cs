@@ -897,6 +897,48 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public LSL_String llGetExperienceErrorMessage(int error)
+        {
+            return m_LSL_Functions.llGetExperienceErrorMessage(error);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public LSL_Key llCreateKeyValue(string key, string value)
+        {
+            return m_LSL_Functions.llCreateKeyValue(key, value);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public LSL_Key llReadKeyValue(string key)
+        {
+            return m_LSL_Functions.llReadKeyValue(key);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public LSL_Key llUpdateKeyValue(string key, string value, int checkedUpdate, string originalValue)
+        {
+            return m_LSL_Functions.llUpdateKeyValue(key, value, checkedUpdate, originalValue);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public LSL_Key llDeleteKeyValue(string key)
+        {
+            return m_LSL_Functions.llDeleteKeyValue(key);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public LSL_Key llKeyCountKeyValue()
+        {
+            return m_LSL_Functions.llKeyCountKeyValue();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public LSL_Key llKeysKeyValue(int first, int count)
+        {
+            return m_LSL_Functions.llKeysKeyValue(first, count);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public LSL_Key llGetPermissionsKey()
         {
             return m_LSL_Functions.llGetPermissionsKey();

@@ -1218,6 +1218,16 @@
     ;; handle experience_permissions(agent) or experience_permissions_denied(agent, reason).
     ; AutoGrantPermissions = 39956
 
+    ;; Enables Experience-Lite key-value storage for trusted scripts.
+    ;; Provides llCreateKeyValue, llReadKeyValue, llUpdateKeyValue,
+    ;; llDeleteKeyValue, llKeyCountKeyValue and llKeysKeyValue.
+    ;; Storage is process-local and scoped per region/owner.
+    ; KeyValueStoreEnabled = true
+    ; KeyValueStoreMaxKeys = 1024
+    ; KeyValueStoreMaxKeyBytes = 1011
+    ; KeyValueStoreMaxValueBytes = 4095
+    ; KeyValueStoreMaxStoreBytes = 131072
+
 
 [OSSL]
     ;# {Include-osslDefaultEnable} {} {Include file for enabling and permissions for OSSL functions} {}
