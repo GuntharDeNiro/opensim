@@ -725,10 +725,10 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         private string ExperienceStoreDirectory()
         {
-            if (Path.IsPathRooted(m_scriptExperienceKvpPath))
+            if (System.IO.Path.IsPathRooted(m_scriptExperienceKvpPath))
                 return m_scriptExperienceKvpPath;
 
-            return Path.Combine(Util.ExecutingDirectory(), m_scriptExperienceKvpPath);
+            return System.IO.Path.Combine(Util.ExecutingDirectory(), m_scriptExperienceKvpPath);
         }
 
         private string ExperienceStoreFile(string scope)
@@ -738,7 +738,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 .Replace('/', '_')
                 .TrimEnd('=');
 
-            return Path.Combine(ExperienceStoreDirectory(), safeName + ".kvp");
+            return System.IO.Path.Combine(ExperienceStoreDirectory(), safeName + ".kvp");
         }
 
         private void EnsureExperienceStoreLoaded(string scope)
@@ -5018,7 +5018,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             details.Add(new LSL_Key(m_host.OwnerID.ToString()));
             details.Add(new LSL_Key(actualID.ToString()));
             details.Add(new LSL_Integer(ScriptBaseClass.XP_ERROR_NONE));
-            details.Add(new LSL_String(llGetExperienceErrorMessage(ScriptBaseClass.XP_ERROR_NONE)));
+            details.Add(llGetExperienceErrorMessage(ScriptBaseClass.XP_ERROR_NONE));
             details.Add(new LSL_Key(m_host.GroupID.ToString()));
             return details;
         }
