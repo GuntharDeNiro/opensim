@@ -733,8 +733,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 case "experience-lite-script-permissions":
                 case "experience-lite-key-value-store":
                     content.Title = "Second Life-style script engine";
-                    content.Summary = "The script engine is moving closer to Second Life behavior with Experience-style permissions, scripted sitting, key-value storage and familiar dataserver replies for modern in-world systems.";
-                    content.Overview = "The script engine now includes Experience-Lite features aimed at closing practical gaps with Second Life scripting. Trusted estate scripts can request selected permissions without repeated viewer popups, seat avatars on scripted link sit targets, and use a persistent key-value store with SL-style dataserver replies for shared in-world state.";
+                    content.Summary = "The script engine is moving closer to Second Life behavior with Experience-style permissions, scripted-only sitting, key-value storage and familiar dataserver replies for modern in-world systems.";
+                    content.Overview = "The script engine now includes Experience-Lite features aimed at closing practical gaps with Second Life scripting. Trusted estate scripts can request selected permissions without repeated viewer popups, seat avatars on scripted link sit targets, mark seats as scripted-only, and use a persistent key-value store with SL-style dataserver replies for shared in-world state.";
                     content.Usage.Add("Enable [ScriptExperiences] only in trusted estate environments.");
                     content.Usage.Add("Add trusted script owner UUIDs to TrustedOwners, or specific root object/prim UUIDs to TrustedObjects.");
                     content.Usage.Add("Keep AutoGrantPermissions limited to the permissions your estate systems actually need.");
@@ -742,6 +742,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Usage.Add("Use llIsExperienceTrusted(), llAgentInExperience(agent), llGetExperienceDetails(NULL_KEY), llGetExperiencePermissions() and llExperienceCanAutoGrant(mask) when scripts need to adapt to trusted or untrusted regions.");
                     content.Usage.Add("Use llRequestExperiencePermissions(agent, name) with experience_permissions(agent) and experience_permissions_denied(agent, reason) for SL-style Experience-Lite scripts.");
                     content.Usage.Add("Use llSitOnLink(agent, link) after experience_permissions(agent) to seat visitors on a specific linked sit target; it returns SL-style SIT_* result codes.");
+                    content.Usage.Add("Use llSetLinkSitFlags(link, flags), llGetLinkSitFlags(link), PRIM_SCRIPTED_SIT_ONLY and PRIM_ALLOW_UNSIT to create seats that cannot be taken by a normal viewer sit click but can be controlled by trusted scripts.");
                     content.Usage.Add("Use llCreateKeyValue(key, value), llReadKeyValue(key), llUpdateKeyValue(key, value, checked, originalValue), llDeleteKeyValue(key), llDataSizeKeyValue(), llKeyCountKeyValue() and llKeysKeyValue(first, count).");
                     content.Usage.Add("Use llGetExperienceKeyValueStoreStats() to inspect enabled/trusted state, key counts, byte usage and configured KVP limits.");
                     content.Usage.Add("Handle dataserver(queryid, data). Replies use 1,value for success and 0,errorCode for failure.");
@@ -975,7 +976,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 + "Feature8 = \"Automatic cloud avatar recovery|If an avatar becomes a cloud, the server automatically handles the recovery and restores the normal appearance within a few seconds.\"\n"
                 + "Feature9 = \"Group auto invite|Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects.\"\n"
                 + "Feature10 = \"Viewer polish|Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.\"\n"
-                + "Feature11 = \"Second Life-style script engine|The script engine is moving closer to Second Life behavior with Experience-style permissions, scripted sitting, persistent key-value storage and familiar dataserver replies for modern in-world systems.\"\n",
+                + "Feature11 = \"Second Life-style script engine|The script engine is moving closer to Second Life behavior with Experience-style permissions, scripted-only sitting, persistent key-value storage and familiar dataserver replies for modern in-world systems.\"\n",
                 new UTF8Encoding(false));
         }
 
@@ -1224,7 +1225,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                         normalized.Add(new FeatureItem
                         {
                             Title = "Second Life-style script engine",
-                            Body = "The script engine is moving closer to Second Life behavior with Experience-style permissions, scripted sitting, persistent key-value storage and familiar dataserver replies for modern in-world systems."
+                            Body = "The script engine is moving closer to Second Life behavior with Experience-style permissions, scripted-only sitting, persistent key-value storage and familiar dataserver replies for modern in-world systems."
                         });
                         scriptEngineFeatureAdded = true;
                     }

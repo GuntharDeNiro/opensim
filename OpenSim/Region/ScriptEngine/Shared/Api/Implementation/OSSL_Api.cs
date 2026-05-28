@@ -1160,7 +1160,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             if (part is not null && part.SitTargetAvatar.IsZero())
                 presence.HandleAgentRequestSit(presence.ControllingClient,
                     agentID, targetID,
-                    part.SitTargetPosition);
+                    part.SitTargetPosition, true);
         }
 
         // Get a list of all the avatars/agents in the region

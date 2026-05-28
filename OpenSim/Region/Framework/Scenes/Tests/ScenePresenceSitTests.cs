@@ -164,6 +164,45 @@ namespace OpenSim.Region.Framework.Scenes.Tests
         }
 
         [Test]
+        public void TestScriptedOnlySitFlagBlocksViewerSit()
+        {
+            TestHelpers.InMethod();
+
+            m_sp.AbsolutePosition = new Vector3(1, 1, 1);
+
+            SceneObjectPart part = SceneHelpers.AddSceneObject(m_scene).RootPart;
+            part.SetLslSitFlag(SceneObjectPart.LslSitFlagScriptedOnly, true);
+
+            m_sp.HandleAgentRequestSit(m_sp.ControllingClient, m_sp.UUID, part.UUID, Vector3.Zero);
+
+            Assert.That(part.HasLslSitFlag(SceneObjectPart.LslSitFlagScriptedOnly), Is.True);
+            Assert.That(part.SitTargetAvatar, Is.EqualTo(UUID.Zero));
+            Assert.That(part.GetSittingAvatarsCount(), Is.EqualTo(0));
+            Assert.That(part.GetSittingAvatars(), Is.Null);
+            Assert.That(m_sp.ParentID, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void TestScriptedOnlySitFlagAllowsScriptedSit()
+        {
+            TestHelpers.InMethod();
+
+            m_sp.AbsolutePosition = new Vector3(1, 1, 1);
+
+            SceneObjectPart part = SceneHelpers.AddSceneObject(m_scene).RootPart;
+            part.SetLslSitFlag(SceneObjectPart.LslSitFlagScriptedOnly, true);
+
+            m_sp.HandleAgentRequestSit(m_sp.ControllingClient, m_sp.UUID, part.UUID, Vector3.Zero, true);
+
+            Assert.That(part.HasLslSitFlag(SceneObjectPart.LslSitFlagScriptedOnly), Is.True);
+            Assert.That(part.GetSittingAvatarsCount(), Is.EqualTo(1));
+            HashSet<ScenePresence> sittingAvatars = part.GetSittingAvatars();
+            Assert.That(sittingAvatars.Count, Is.EqualTo(1));
+            Assert.That(sittingAvatars.Contains(m_sp));
+            Assert.That(m_sp.ParentID, Is.EqualTo(part.LocalId));
+        }
+
+        [Test]
         public void TestSitAndStandWithSitTarget()
         {
 /*  sit position math as changed, this needs to be fixed later

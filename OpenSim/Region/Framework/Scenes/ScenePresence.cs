@@ -3301,14 +3301,20 @@ namespace OpenSim.Region.Framework.Scenes
             TriggerScenePresenceUpdated();
         }
 
-        private SceneObjectPart FindNextAvailableSitTarget(UUID targetID)
+        private static bool CanUseSitTarget(SceneObjectPart part, bool scriptedSit)
+        {
+            return scriptedSit || !part.HasLslSitFlag(SceneObjectPart.LslSitFlagScriptedOnly);
+        }
+
+        private SceneObjectPart FindNextAvailableSitTarget(UUID targetID, bool scriptedSit)
         {
             SceneObjectPart targetPart = m_scene.GetSceneObjectPart(targetID);
             if (targetPart == null)
                 return null;
 
             // If the primitive the player clicked on has a sit target and that sit target is not full, that sit target is used.
-            if (targetPart.IsSitTargetSet && targetPart.SitTargetAvatar.IsZero() && targetPart.SitActiveRange >= 0)
+            if (targetPart.IsSitTargetSet && targetPart.SitTargetAvatar.IsZero() && targetPart.SitActiveRange >= 0
+                && CanUseSitTarget(targetPart, scriptedSit))
                 return targetPart;
 
             // If the primitive the player clicked on has no sit target, and one or more other linked objects
@@ -3322,7 +3328,8 @@ namespace OpenSim.Region.Framework.Scenes
             //look for prims with explicit sit targets that are available
             foreach (SceneObjectPart part in partArray)
             {
-                if (part.IsSitTargetSet && part.SitTargetAvatar.IsZero() && part.SitActiveRange >= 0)
+                if (part.IsSitTargetSet && part.SitTargetAvatar.IsZero() && part.SitActiveRange >= 0
+                    && CanUseSitTarget(part, scriptedSit))
                 {
                     if(lastPart == null)
                     {
@@ -3339,12 +3346,15 @@ namespace OpenSim.Region.Framework.Scenes
             }
 
             // no explicit sit target found - use original target
-            return lastPart ?? targetPart;
+            if (lastPart != null)
+                return lastPart;
+
+            return CanUseSitTarget(targetPart, scriptedSit) ? targetPart : null;
         }
 
-        private void SendSitResponse(UUID targetID, Vector3 offset, Quaternion sitOrientation)
+        private void SendSitResponse(UUID targetID, Vector3 offset, Quaternion sitOrientation, bool scriptedSit)
         {
-            SceneObjectPart part = FindNextAvailableSitTarget(targetID);
+            SceneObjectPart part = FindNextAvailableSitTarget(targetID, scriptedSit);
             if (part == null)
                 return;
 
@@ -3428,7 +3438,7 @@ namespace OpenSim.Region.Framework.Scenes
             //m_scene.EventManager.TriggerParcelPrimCountTainted(); // update select/ sat on
         }
 
-        public void HandleAgentRequestSit(IClientAPI remoteClient, UUID agentID, UUID targetID, Vector3 offset)
+        public void HandleAgentRequestSit(IClientAPI remoteClient, UUID agentID, UUID targetID, Vector3 offset, bool scriptedSit = false)
         {
             if (IsChildAgent)
                 return;
@@ -3442,7 +3452,7 @@ namespace OpenSim.Region.Framework.Scenes
             else if (SitGround)
                 StandUp();
 
-            SendSitResponse(targetID, offset, Quaternion.Identity);
+            SendSitResponse(targetID, offset, Quaternion.Identity, scriptedSit);
         }
 
         // returns  false if does not suport so older sit can be tried

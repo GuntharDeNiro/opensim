@@ -37,6 +37,10 @@ The scripts use:
 - `llKeysKeyValue`
 - `llGetExperienceKeyValueStoreStats`
 - `llGetExperienceErrorMessage`
+- `llSetLinkSitFlags`
+- `llGetLinkSitFlags`
+- `PRIM_SCRIPTED_SIT_ONLY`
+- `PRIM_ALLOW_UNSIT`
 
 ## Files
 
@@ -52,6 +56,7 @@ The scripts use:
 - `10_scene_preset_controller.lsl`: persistent estate scene preset switcher.
 - `11_experience_leaderboard.lsl`: persistent player score storage and listing.
 - `12_experience_seat_manager.lsl`: Experience scripted sitting on linked seats.
+- `13_scripted_only_sit_flags.lsl`: blocks manual sit and seats avatars only through `llSitOnLink`.
 
-Stock OpenSim may fail to compile or run these scripts because Experience events
-and KVP functions are not available there.
+Stock OpenSim may fail to compile or run these scripts because Experience events,
+KVP functions and scripted-only sit flags are not available there.

@@ -464,10 +464,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         public const int PRIM_SPECULAR = 36;
         public const int PRIM_NORMAL = 37;
         public const int PRIM_ALPHA_MODE = 38;
-        //ApiDesc not supported
-        public const int PRIM_ALLOW_UNSIT = 39; // experiences related. unsupported
-        //ApiDesc not supported
-        public const int PRIM_SCRIPTED_SIT_ONLY = 40; // experiences related. unsupported
+        public const int PRIM_ALLOW_UNSIT = 39;
+        public const int PRIM_SCRIPTED_SIT_ONLY = 40;
         public const int PRIM_SIT_TARGET = 41;
         public const int PRIM_PROJECTOR = 42;
 
@@ -1089,10 +1087,10 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         public const int REZ_PARAM_STRING = 13;
 
         public const int SIT_FLAG_SIT_TARGET    = 0x01;
-        public const int SIT_FLAG_ALLOW_UNSIT   = 0x02; // unsupported always true
-        public const int SIT_FLAG_SCRIPTED_ONLY = 0x04; // unsupported always false
-        public const int SIT_FLAG_NO_COLLIDE    = 0x10; // unsupported always true
-        public const int SIT_FLAG_NO_DAMAGE     = 0x20; // unsupported always true
+        public const int SIT_FLAG_ALLOW_UNSIT   = 0x02;
+        public const int SIT_FLAG_SCRIPTED_ONLY = 0x04;
+        public const int SIT_FLAG_NO_COLLIDE    = 0x10;
+        public const int SIT_FLAG_NO_DAMAGE     = 0x20;
         public const int SIT_FLAG_OPENSIMFORCED = SIT_FLAG_ALLOW_UNSIT | SIT_FLAG_NO_COLLIDE | SIT_FLAG_NO_DAMAGE;
 
         public const int SIT_NOT_EXPERIENCE = -1;

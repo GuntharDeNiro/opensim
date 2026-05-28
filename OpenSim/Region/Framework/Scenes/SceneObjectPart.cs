@@ -38,6 +38,7 @@ using System.Xml.Serialization;
 using log4net;
 using OpenMetaverse;
 using OpenMetaverse.Packets;
+using OpenMetaverse.StructuredData;
 using OpenSim.Framework;
 using OpenSim.Region.Framework.Interfaces;
 using OpenSim.Region.Framework.Scenes.Serialization;
@@ -120,6 +121,22 @@ namespace OpenSim.Region.Framework.Scenes
         /// </summary>
         public DAMap DynAttrs { get; set; }
 
+        public const int LslSitFlagSitTarget = 0x01;
+        public const int LslSitFlagAllowUnsit = 0x02;
+        public const int LslSitFlagScriptedOnly = 0x04;
+        public const int LslSitFlagNoCollide = 0x10;
+        public const int LslSitFlagNoDamage = 0x20;
+
+        private const int LslStoredSitFlagsMask =
+            LslSitFlagAllowUnsit | LslSitFlagScriptedOnly | LslSitFlagNoCollide | LslSitFlagNoDamage;
+
+        private const int LslDefaultSitFlags =
+            LslSitFlagAllowUnsit | LslSitFlagNoCollide | LslSitFlagNoDamage;
+
+        private const string LslSitFlagsDynAttrsNamespace = "OpenSim";
+        private const string LslSitFlagsDynAttrsStore = "LSLSitFlags";
+        private const string LslSitFlagsDynAttrsKey = "flags";
+
         private DOMap m_dynObjs;
 
         /// <summary>
@@ -163,6 +180,69 @@ namespace OpenSim.Region.Framework.Scenes
                     return true;
                 return false;
             }
+        }
+
+        private int GetStoredLslSitFlags()
+        {
+            if (DynAttrs == null)
+                return LslDefaultSitFlags;
+
+            lock (DynAttrs)
+            {
+                if (DynAttrs.TryGetStore(LslSitFlagsDynAttrsNamespace, LslSitFlagsDynAttrsStore, out OSDMap store)
+                    && store != null
+                    && store.TryGetValue(LslSitFlagsDynAttrsKey, out OSD flagsOSD))
+                {
+                    return flagsOSD.AsInteger() & LslStoredSitFlagsMask;
+                }
+            }
+
+            return LslDefaultSitFlags;
+        }
+
+        public int GetLslSitFlags()
+        {
+            int flags = GetStoredLslSitFlags();
+            if (IsSitTargetSet)
+                flags |= LslSitFlagSitTarget;
+            return flags;
+        }
+
+        public bool HasLslSitFlag(int flag)
+        {
+            return (GetLslSitFlags() & flag) != 0;
+        }
+
+        public void SetLslSitFlags(int flags)
+        {
+            DynAttrs ??= new DAMap();
+
+            lock (DynAttrs)
+            {
+                if (!DynAttrs.TryGetStore(LslSitFlagsDynAttrsNamespace, LslSitFlagsDynAttrsStore, out OSDMap store)
+                    || store == null)
+                {
+                    store = new OSDMap();
+                }
+
+                store[LslSitFlagsDynAttrsKey] = new OSDInteger(flags & LslStoredSitFlagsMask);
+                DynAttrs.SetStore(LslSitFlagsDynAttrsNamespace, LslSitFlagsDynAttrsStore, store);
+            }
+
+            if (ParentGroup != null)
+                ParentGroup.HasGroupChanged = true;
+        }
+
+        public void SetLslSitFlag(int flag, bool enabled)
+        {
+            int storedFlags = GetStoredLslSitFlags();
+
+            if (enabled)
+                storedFlags |= flag;
+            else
+                storedFlags &= ~flag;
+
+            SetLslSitFlags(storedFlags);
         }
 
         #region Fields
