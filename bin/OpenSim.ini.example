@@ -482,11 +482,11 @@
     ;# {MapObjectVolumeMinimumOpacity} {PrettyPrimVolumeOnMapTile} {Minimum opacity after texture alpha is applied} {} 35
     ; MapObjectVolumeMinimumOpacity = 35
 
-    ;# {MapObjectVolumeMeshFallbackOpacity} {MapObjectVolumeRenderMeshGeometry} {Fallback opacity for sculpt/mesh objects whose true geometry cannot be decoded} {} 72
-    ; MapObjectVolumeMeshFallbackOpacity = 72
+    ;# {MapObjectVolumeMeshFallbackOpacity} {MapObjectVolumeRenderMeshGeometry} {Fallback opacity for sculpt/mesh objects whose true geometry cannot be decoded} {} 0
+    ; MapObjectVolumeMeshFallbackOpacity = 0
 
-    ;# {MapObjectVolumeLargeMeshFallbackOpacity} {MapObjectVolumeRenderMeshGeometry} {Fallback opacity for large sculpt/mesh objects whose true geometry cannot be decoded} {} 24
-    ; MapObjectVolumeLargeMeshFallbackOpacity = 24
+    ;# {MapObjectVolumeLargeMeshFallbackOpacity} {MapObjectVolumeRenderMeshGeometry} {Fallback opacity for large sculpt/mesh objects whose true geometry cannot be decoded} {} 0
+    ; MapObjectVolumeLargeMeshFallbackOpacity = 0
 
     ;# {MapWaterObjectVolumeOpacity} {PrettyPrimVolumeOnMapTile} {Opacity for large flat water-like overlays} {} 0
     ;; Set to 0 to hide animated wave planes and other water overlays from map tiles.

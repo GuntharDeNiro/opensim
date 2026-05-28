@@ -406,9 +406,9 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             int largeObjectArea = Math.Max(1, Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeLargeArea", MapConfigSections, 1800));
             int meshFallbackOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
-                m_config, "MapObjectVolumeMeshFallbackOpacity", MapConfigSections, 72));
+                m_config, "MapObjectVolumeMeshFallbackOpacity", MapConfigSections, 0));
             int largeMeshFallbackOpacity = ClampByte(Util.GetConfigVarFromSections<int>(
-                m_config, "MapObjectVolumeLargeMeshFallbackOpacity", MapConfigSections, 24));
+                m_config, "MapObjectVolumeLargeMeshFallbackOpacity", MapConfigSections, 0));
             bool sampleTextureAssets = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeSampleTextureAssets", MapConfigSections, true);
             float textureBlend = Math.Max(0f, Math.Min(1f, Util.GetConfigVarFromSections<float>(
@@ -1610,7 +1610,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         }
 
         private bool IsWaterLikeMapObject(SceneObjectPart part, Color color, int objectArea,
-            Vector3 scale, int largeObjectArea, Vector3 pos, float waterHeight, float textureAlpha)
+            Vector3 scale, int largeObjectArea, Vector3 pos, float waterHeight,
+            float textureAlpha)
         {
             if (objectArea < largeObjectArea)
                 return false;
@@ -1650,7 +1651,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             if (!translucent)
                 return false;
 
-            return (animated || namedWater || (nearWater && (blueOrCyan || neutralOverlay)));
+            return (animated || namedWater ||
+                (nearWater && (blueOrCyan || neutralOverlay)));
         }
 
         private static bool IsLargeFlatNearWaterMapCandidate(Vector3 scale, int objectArea,
