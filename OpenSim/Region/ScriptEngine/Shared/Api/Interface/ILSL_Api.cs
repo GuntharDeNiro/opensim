@@ -343,6 +343,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
            LSL_Key llDeleteKeyValue(string key);
            LSL_Key llKeyCountKeyValue();
            LSL_Key llKeysKeyValue(int first, int count);
+           LSL_Key llDataSizeKeyValue();
           LSL_List llGetExperienceKeyValueStoreStats();
            LSL_Key llRequestSecureURL();
            LSL_Key llRequestSimulatorData(string simulator, int data);

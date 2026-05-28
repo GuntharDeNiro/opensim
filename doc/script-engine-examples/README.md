@@ -29,6 +29,7 @@ The scripts use:
 - `llReadKeyValue`
 - `llUpdateKeyValue`
 - `llDeleteKeyValue`
+- `llDataSizeKeyValue`
 - `llKeyCountKeyValue`
 - `llKeysKeyValue`
 - `llGetExperienceKeyValueStoreStats`

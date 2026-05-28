@@ -1220,7 +1220,7 @@
 
     ;; Enables Experience-Lite key-value storage for trusted scripts.
     ;; Provides llCreateKeyValue, llReadKeyValue, llUpdateKeyValue,
-    ;; llDeleteKeyValue, llKeyCountKeyValue and llKeysKeyValue.
+    ;; llDeleteKeyValue, llDataSizeKeyValue, llKeyCountKeyValue and llKeysKeyValue.
     ;; Storage is persisted on disk and scoped per region/owner.
     ; KeyValueStoreEnabled = true
     ; KeyValueStoreMaxKeys = 1024

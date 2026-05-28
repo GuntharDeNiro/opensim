@@ -5174,6 +5174,23 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             return PostKeyValueResult(true, result.ToString());
         }
 
+        public LSL_Key llDataSizeKeyValue()
+        {
+            if (!CanUseExperienceKeyValueStore(out int error))
+                return PostKeyValueError(error);
+
+            int usedBytes = 0;
+            lock (m_scriptExperienceKvpLock)
+            {
+                string scope = ExperienceStoreScope();
+                EnsureExperienceStoreLoaded(scope);
+                if (m_scriptExperienceKvpStores.TryGetValue(scope, out Dictionary<string, string> store))
+                    usedBytes = ExperienceStoreByteCount(store);
+            }
+
+            return PostKeyValueResult(true, usedBytes.ToString() + "," + m_scriptExperienceKvpMaxStoreBytes.ToString());
+        }
+
         public LSL_List llGetExperienceKeyValueStoreStats()
         {
             LSL_List result = new();

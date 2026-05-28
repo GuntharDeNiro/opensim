@@ -25,7 +25,7 @@ default
     state_entry()
     {
         llListen(CHANNEL, "", NULL_KEY, "");
-        llSetText("Experience Leaderboard\n/44 score number\n/44 board", <1.0, 0.9, 0.3>, 1.0);
+        llSetText("Experience Leaderboard\n/44 score number\n/44 board\n/44 size", <1.0, 0.9, 0.3>, 1.0);
     }
 
     listen(integer channel, string name, key id, string msg)
@@ -50,7 +50,14 @@ default
             return;
         }
 
-        tell(id, "Use /44 score number or /44 board.");
+        if (command == "size")
+        {
+            gStep = "size";
+            gQuery = llDataSizeKeyValue();
+            return;
+        }
+
+        tell(id, "Use /44 score number, /44 board or /44 size.");
     }
 
     dataserver(key query, string data)
@@ -105,6 +112,20 @@ default
             gStep = "read_board";
             gScoreKey = llList2String(gKeys, gIndex);
             gQuery = llReadKeyValue(gScoreKey);
+            return;
+        }
+
+        if (gStep == "size")
+        {
+            if (ok)
+            {
+                list parts = llCSV2List(data);
+                tell(gAgent, "KVP bytes used: " + llList2String(parts, 1) + " / " + llList2String(parts, 2));
+            }
+            else
+            {
+                tell(gAgent, "KVP size failed: " + llGetExperienceErrorMessage((integer)payload));
+            }
             return;
         }
 
