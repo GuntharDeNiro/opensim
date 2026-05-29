@@ -17,15 +17,19 @@
 // 1. Put this script in an estate/parcel control prim.
 // 2. Optional: add a notecard named "EstatePolicy" with lines containing
 //    words such as ALLOW, DENY, RETURN, SALE or TERRAIN.
-// 3. Optional: add a material asset named "EstateConsoleMaterial".
-// 4. Configure TRUSTED_GROUPS, CLEANUP_OWNER and SALE_PRICE for your estate.
+// 3. Optional: set MATERIAL_NAME to a material asset in this object's inventory.
+// 4. Terrain writes require the script owner, not just the toucher, to be the
+//    estate owner/manager.
+//    Leave ENABLE_TERRAIN_CHANGE as FALSE until you intentionally test that path.
+// 5. Configure TRUSTED_GROUPS, CLEANUP_OWNER and SALE_PRICE for your estate.
 
 integer MENU_CHANNEL = -90140014;
 integer REQUIRED_PERMS = PERMISSION_RETURN_OBJECTS | PERMISSION_PRIVILEGED_LAND_ACCESS;
 
 string POLICY_NOTECARD = "EstatePolicy";
-string MATERIAL_NAME = "EstateConsoleMaterial";
+string MATERIAL_NAME = "";
 string TERRAIN_TEXTURE_1 = "";
+integer ENABLE_TERRAIN_CHANGE = FALSE;
 
 integer SALE_PRICE = 2500;
 key SALE_BUYER = NULL_KEY;
@@ -48,6 +52,19 @@ say_to(key agent, string message)
 integer configured_key(key value)
 {
     return value != NULL_KEY;
+}
+
+integer has_notecard(string name)
+{
+    return llGetInventoryType(name) == INVENTORY_NOTECARD;
+}
+
+integer has_material(string name)
+{
+    if (name == "")
+        return FALSE;
+
+    return llGetInventoryType(name) == INVENTORY_MATERIAL;
 }
 
 integer is_authorized(key agent)
@@ -95,7 +112,9 @@ refresh_display(string extra)
         1.0
     );
 
-    llSetLinkRenderMaterial(LINK_SET, MATERIAL_NAME, ALL_SIDES);
+    if (has_material(MATERIAL_NAME))
+        llSetLinkRenderMaterial(LINK_SET, MATERIAL_NAME, ALL_SIDES);
+
     llSetLinkGLTFOverrides(LINK_SET, ALL_SIDES, [
         OVERRIDE_GLTF_BASE_COLOR_FACTOR, color,
         OVERRIDE_GLTF_BASE_ALPHA, 0.92,
@@ -127,6 +146,12 @@ show_menu(key agent)
 
 run_policy(key agent)
 {
+    if (!has_notecard(POLICY_NOTECARD))
+    {
+        say_to(agent, "Policy notecard is not present. Add '" + POLICY_NOTECARD + "' to test llFindNotecardTextSync.");
+        return;
+    }
+
     list hits = llFindNotecardTextSync(
         POLICY_NOTECARD,
         "(ALLOW|DENY|RETURN|SALE|TERRAIN)",
@@ -214,6 +239,18 @@ run_return(key agent)
 
 run_terrain(key agent)
 {
+    if (!ENABLE_TERRAIN_CHANGE)
+    {
+        say_to(agent, "Terrain demo is disabled. Set ENABLE_TERRAIN_CHANGE to TRUE only when the script owner is estate owner/manager.");
+        return;
+    }
+
+    if (TERRAIN_TEXTURE_1 == "")
+    {
+        say_to(agent, "Set TERRAIN_TEXTURE_1 to a texture UUID before changing terrain.");
+        return;
+    }
+
     llSetGroundTexture([
         TERRAIN_DETAIL_1, TERRAIN_TEXTURE_1,
         TERRAIN_HEIGHT_RANGE_SW, 18.0, 58.0,
@@ -227,7 +264,10 @@ run_terrain(key agent)
 run_pbr(key agent)
 {
     refresh_display("PBR refreshed by " + llKey2Name(agent));
-    say_to(agent, "Applied render material and GLTF overrides to LINK_SET.");
+    if (has_material(MATERIAL_NAME))
+        say_to(agent, "Applied render material and GLTF overrides to LINK_SET.");
+    else
+        say_to(agent, "Applied GLTF overrides. Set MATERIAL_NAME to an inventory material to also test llSetLinkRenderMaterial.");
 }
 
 run_scan(key agent)

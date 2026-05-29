@@ -11,7 +11,8 @@
 //
 // Optional notecard:
 // Create "TrustedRezzers" and put trusted rezzer UUIDs or owner UUIDs in it.
-// The script searches the notecard synchronously before every scan.
+// If the notecard is missing, the scanner falls back to trusting only the
+// object owner and configured active groups.
 
 integer MENU_CHANNEL = -90150015;
 integer REQUIRED_PERMS = PERMISSION_RETURN_OBJECTS;
@@ -48,14 +49,30 @@ integer token_is_trusted(key token)
     if (token == NULL_KEY)
         return FALSE;
 
+    if (token == llGetOwner())
+        return TRUE;
+
     if (llListFindList(gTrustedTokens, [(string)token]) >= 0)
         return TRUE;
 
     return FALSE;
 }
 
+integer has_notecard(string name)
+{
+    return llGetInventoryType(name) == INVENTORY_NOTECARD;
+}
+
 load_policy_summary(key agent)
 {
+    gTrustedTokens = [(string)llGetOwner()];
+
+    if (!has_notecard(TRUST_NOTECARD))
+    {
+        say_to(agent, "Trust notecard is not present. Add '" + TRUST_NOTECARD + "' to test llFindNotecardTextSync; using object owner only.");
+        return;
+    }
+
     list hits = llFindNotecardTextSync(
         TRUST_NOTECARD,
         "([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})",
@@ -63,8 +80,6 @@ load_policy_summary(key agent)
         24,
         []
     );
-
-    gTrustedTokens = [];
 
     integer len = llGetListLength(hits);
     integer rows = len / 3;

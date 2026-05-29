@@ -9219,7 +9219,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             if (changes is null || changes.Length == 0)
                 return 0;
 
-            if (!World.Permissions.CanIssueEstateCommand(m_host.OwnerID, true))
+            if (!World.Permissions.CanIssueEstateCommand(m_host.OwnerID, false))
             {
                 Error("llSetGroundTexture", "Script owner must be estate owner or estate manager");
                 return 0;
