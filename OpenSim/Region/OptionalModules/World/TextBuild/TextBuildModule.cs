@@ -67,6 +67,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
         private float m_imageTerrainMaxLandHeight;
         private float m_imageTerrainSeaDepth;
         private bool m_imageTerrainFitLandToRegion;
+        private int m_imageTerrainSmoothPasses;
 
         public string Name { get { return "Text Build Module"; } }
 
@@ -91,9 +92,10 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 m_openAIAPIKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY") ?? string.Empty;
             m_aiTimeoutMs = Math.Max(500, config.GetInt("AITimeoutMs", 6000));
             m_imageTerrainMinLandHeight = Math.Max(0.1f, config.GetFloat("ImageTerrainMinLandHeight", 1.15f));
-            m_imageTerrainMaxLandHeight = Math.Max(m_imageTerrainMinLandHeight, config.GetFloat("ImageTerrainMaxLandHeight", 30.0f));
+            m_imageTerrainMaxLandHeight = Math.Max(m_imageTerrainMinLandHeight, config.GetFloat("ImageTerrainMaxLandHeight", 12.0f));
             m_imageTerrainSeaDepth = Math.Max(0.1f, config.GetFloat("ImageTerrainSeaDepth", 5.0f));
             m_imageTerrainFitLandToRegion = config.GetBoolean("ImageTerrainFitLandToRegion", true);
+            m_imageTerrainSmoothPasses = Math.Max(0, config.GetInt("ImageTerrainSmoothPasses", 5));
         }
 
         public void AddRegion(Scene scene)
@@ -145,6 +147,11 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
 
             ScenePresence sp = m_scene.GetScenePresence(client.AgentId);
             if (sp == null || sp.IsChildAgent)
+                return;
+
+            if (sp.AbsolutePosition.X < 0f || sp.AbsolutePosition.Y < 0f ||
+                sp.AbsolutePosition.X >= m_scene.RegionInfo.RegionSizeX ||
+                sp.AbsolutePosition.Y >= m_scene.RegionInfo.RegionSizeY)
                 return;
 
             TerrainRecipe terrainRecipe = ResolveTerrainRecipe(request);
@@ -974,6 +981,9 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 }
             }
 
+            if (recipe.Style == TerrainStyle.ImageMap)
+                SmoothImageTerrainHeightmap(width, height, m_imageTerrainSmoothPasses);
+
             m_scene.Heightmap.GetTerrainData().TaintAllTerrain();
             if (m_scene.PhysicsScene != null)
                 m_scene.PhysicsScene.SetTerrain(m_scene.Heightmap.GetFloatsSerialised());
@@ -985,6 +995,59 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             m_scene.EventManager.TriggerTerrainUpdate();
 
             SendReply(client, string.Format("TextBuild: shaped terrain as {0}.", recipe.GetDescription()));
+        }
+
+        private void SmoothImageTerrainHeightmap(int width, int height, int passes)
+        {
+            if (passes <= 0 || width <= 1 || height <= 1)
+                return;
+
+            float[] current = new float[width * height];
+            float[] next = new float[current.Length];
+
+            for (int x = 0; x < width; ++x)
+            {
+                for (int y = 0; y < height; ++y)
+                    current[y * width + x] = m_scene.Heightmap[x, y];
+            }
+
+            for (int pass = 0; pass < passes; ++pass)
+            {
+                for (int y = 0; y < height; ++y)
+                {
+                    int y0 = Math.Max(0, y - 1);
+                    int y1 = Math.Min(height - 1, y + 1);
+                    for (int x = 0; x < width; ++x)
+                    {
+                        int x0 = Math.Max(0, x - 1);
+                        int x1 = Math.Min(width - 1, x + 1);
+                        float sum = 0f;
+                        float weight = 0f;
+
+                        for (int sy = y0; sy <= y1; ++sy)
+                        {
+                            for (int sx = x0; sx <= x1; ++sx)
+                            {
+                                float w = sx == x && sy == y ? 6f : 1f;
+                                sum += current[sy * width + sx] * w;
+                                weight += w;
+                            }
+                        }
+
+                        next[y * width + x] = sum / weight;
+                    }
+                }
+
+                float[] swap = current;
+                current = next;
+                next = swap;
+            }
+
+            for (int x = 0; x < width; ++x)
+            {
+                for (int y = 0; y < height; ++y)
+                    m_scene.Heightmap[x, y] = ClampTerrainHeight(current[y * width + x]);
+            }
         }
 
         private void ApplyImageTerrainWaterHeight()
@@ -1020,7 +1083,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                     if (bitmap == null || bitmap.Width <= 0 || bitmap.Height <= 0)
                         return null;
 
-                    return CreateImageTerrainData(textureID, bitmap, m_imageTerrainFitLandToRegion);
+                    return CreateImageTerrainData(textureID, bitmap, m_imageTerrainFitLandToRegion, m_imageTerrainSmoothPasses);
                 }
             }
             catch (Exception e)
@@ -1066,7 +1129,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             }
         }
 
-        private static ImageTerrainData CreateImageTerrainData(UUID textureID, System.Drawing.Bitmap bitmap, bool fitLandToRegion)
+        private static ImageTerrainData CreateImageTerrainData(UUID textureID, System.Drawing.Bitmap bitmap, bool fitLandToRegion, int smoothPasses)
         {
             int width = bitmap.Width;
             int height = bitmap.Height;
@@ -1160,11 +1223,9 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                     EnqueueSea(index + width);
             }
 
-            for (int i = 0; i < pixelCount; ++i)
-            {
-                if (!sea[i] && land[i] < waterThreshold)
-                    land[i] = 0.68f;
-            }
+            FillSmallInteriorWaterGaps(width, height, pixelCount, land, sea, waterThreshold, queue);
+            land = SmoothMapValues(land, width, height, Math.Min(3, smoothPasses));
+            relief = SmoothMapValues(relief, width, height, smoothPasses);
 
             int bestArea = 0;
             for (int i = 0; i < pixelCount; ++i)
@@ -1223,6 +1284,103 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             }
 
             return bestArea >= Math.Max(32, pixelCount / 2500);
+        }
+
+        private static void FillSmallInteriorWaterGaps(
+            int width,
+            int height,
+            int pixelCount,
+            float[] land,
+            bool[] sea,
+            float waterThreshold,
+            int[] queue)
+        {
+            bool[] visited = new bool[pixelCount];
+            int smallWaterLimit = Math.Max(24, pixelCount / 1400);
+
+            for (int i = 0; i < pixelCount; ++i)
+            {
+                if (visited[i] || sea[i] || land[i] >= waterThreshold)
+                    continue;
+
+                int head = 0;
+                int tail = 0;
+                visited[i] = true;
+                queue[tail++] = i;
+
+                while (head < tail)
+                {
+                    int index = queue[head++];
+                    int x = index % width;
+                    int y = index / width;
+
+                    void EnqueueWater(int next)
+                    {
+                        if (next < 0 || next >= pixelCount || visited[next] || sea[next] || land[next] >= waterThreshold)
+                            return;
+
+                        visited[next] = true;
+                        queue[tail++] = next;
+                    }
+
+                    if (x > 0)
+                        EnqueueWater(index - 1);
+                    if (x + 1 < width)
+                        EnqueueWater(index + 1);
+                    if (y > 0)
+                        EnqueueWater(index - width);
+                    if (y + 1 < height)
+                        EnqueueWater(index + width);
+                }
+
+                if (tail <= smallWaterLimit)
+                {
+                    for (int j = 0; j < tail; ++j)
+                        land[queue[j]] = 0.68f;
+                }
+            }
+        }
+
+        private static float[] SmoothMapValues(float[] source, int width, int height, int passes)
+        {
+            if (passes <= 0 || source == null || source.Length == 0 || width <= 1 || height <= 1)
+                return source;
+
+            float[] current = source;
+            float[] next = new float[source.Length];
+            for (int pass = 0; pass < passes; ++pass)
+            {
+                for (int y = 0; y < height; ++y)
+                {
+                    int y0 = Math.Max(0, y - 1);
+                    int y1 = Math.Min(height - 1, y + 1);
+                    for (int x = 0; x < width; ++x)
+                    {
+                        int x0 = Math.Max(0, x - 1);
+                        int x1 = Math.Min(width - 1, x + 1);
+                        float sum = 0f;
+                        float weight = 0f;
+
+                        for (int sy = y0; sy <= y1; ++sy)
+                        {
+                            for (int sx = x0; sx <= x1; ++sx)
+                            {
+                                float w = sx == x && sy == y ? 4f : 1f;
+                                sum += current[sy * width + sx] * w;
+                                weight += w;
+                            }
+                        }
+
+                        next[y * width + x] = sum / weight;
+                    }
+                }
+
+                float[] swap = current;
+                current = next;
+                next = swap;
+            }
+
+            return current;
         }
 
         private static float ClassifyMapLand(System.Drawing.Color color)
@@ -1356,17 +1514,17 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
 
             float coast = SmoothStep(0.36f, 0.72f, land);
             float openWater = 1f - SmoothStep(0.04f, 0.50f, land);
-            float waterNoise = Math.Abs(FractalNoise(x * 0.022f, y * 0.022f, 23003));
-            float seaHeight = water - m_imageTerrainSeaDepth * (0.72f + waterNoise * 0.28f) * openWater;
+            float waterNoise = Math.Abs(FractalNoise(x * 0.012f, y * 0.012f, 23003));
+            float seaHeight = water - m_imageTerrainSeaDepth * (0.82f + waterNoise * 0.08f) * openWater;
 
-            float hillNoise = FractalNoise(x * 0.030f, y * 0.030f, 23029) * 2.0f
-                + FractalNoise(x * 0.075f, y * 0.075f, 23041) * 0.80f;
+            float hillNoise = FractalNoise(x * 0.014f, y * 0.014f, 23029) * 0.52f
+                + FractalNoise(x * 0.035f, y * 0.035f, 23041) * 0.18f;
             float landRise = m_imageTerrainMinLandHeight + (m_imageTerrainMaxLandHeight - m_imageTerrainMinLandHeight) * relief;
             float landHeight = water + landRise + hillNoise * Math.Max(0.15f, coast);
 
             float shoreBand = SmoothStep(0.42f, 0.62f, land) - SmoothStep(0.72f, 0.92f, land);
             if (shoreBand > 0f)
-                landHeight = Lerp(landHeight, water + 0.65f + hillNoise * 0.10f, shoreBand * 0.62f);
+                landHeight = Lerp(landHeight, water + 0.38f + hillNoise * 0.04f, shoreBand * 0.78f);
 
             return ClampTerrainHeight(Lerp(seaHeight, landHeight, coast));
         }

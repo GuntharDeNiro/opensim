@@ -1516,14 +1516,17 @@
     ;# {ImageTerrainMinLandHeight} {Enabled} {Minimum land height above water for terrain generated from cartography textures} {} 1.15
     ; ImageTerrainMinLandHeight = 1.15
 
-    ;# {ImageTerrainMaxLandHeight} {Enabled} {Maximum land relief above water for terrain generated from cartography textures} {} 30.0
-    ; ImageTerrainMaxLandHeight = 30.0
+    ;# {ImageTerrainMaxLandHeight} {Enabled} {Maximum land relief above water for terrain generated from cartography textures} {} 12.0
+    ; ImageTerrainMaxLandHeight = 12.0
 
     ;# {ImageTerrainSeaDepth} {Enabled} {Sea depth below water for terrain generated from cartography textures} {} 5.0
     ; ImageTerrainSeaDepth = 5.0
 
     ;# {ImageTerrainFitLandToRegion} {Enabled} {Crop detected land silhouette to fill the region} {true false} true
     ; ImageTerrainFitLandToRegion = true
+
+    ;# {ImageTerrainSmoothPasses} {Enabled} {Smoothing passes for playable terrain generated from cartography textures} {} 5
+    ; ImageTerrainSmoothPasses = 5
 
 
 [Terrain]
