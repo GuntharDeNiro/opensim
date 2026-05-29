@@ -94,6 +94,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
         private readonly HashSet<string> m_failedRenderMeshCache = new HashSet<string>();
         private int m_textureAssetSamplesThisPass = 0;
         private int m_maxTextureAssetSamplesThisPass = 0;
+        private bool m_useCachedMapAssetsOnlyThisPass = true;
 
         #region IMapImageGenerator Members
 
@@ -368,6 +369,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 m_config, "MapObjectVolumeUseTextureAlpha", MapConfigSections, true);
             bool skipAlphaMaskedFaces = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeSkipAlphaMaskedFaces", MapConfigSections, true);
+            bool skipFlatTextureCards = Util.GetConfigVarFromSections<bool>(
+                m_config, "MapObjectVolumeSkipFlatTextureCards", MapConfigSections, true);
             float alphaMaskedFaceMaxAlpha = Math.Max(0f, Math.Min(1f, Util.GetConfigVarFromSections<float>(
                 m_config, "MapObjectVolumeAlphaMaskedFaceMaxAlpha", MapConfigSections, 0.90f)));
             int alphaMaskedFaceMinArea = Math.Max(1, Util.GetConfigVarFromSections<int>(
@@ -394,6 +397,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 m_config, "MapObjectVolumeRenderMeshGeometry", MapConfigSections, true);
             DetailLevel meshDetailLevel = GetMapMeshDetailLevel(Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeMeshDetailLevel", MapConfigSections, 1));
+            int exactGeometryBudgetMS = Math.Max(0, Util.GetConfigVarFromSections<int>(
+                m_config, "MapObjectVolumeExactGeometryTimeBudgetMS", MapConfigSections, 8000));
             bool drawMissingGeometryFootprints = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeDrawMissingGeometryFootprints", MapConfigSections, false);
             int missingGeometryMaxArea = Math.Max(1, Util.GetConfigVarFromSections<int>(
@@ -405,9 +410,12 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             m_maxTextureAssetSamplesThisPass = Math.Max(0, Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeMaxTextureSamples", MapConfigSections, 0));
             m_textureAssetSamplesThisPass = 0;
+            m_useCachedMapAssetsOnlyThisPass = Util.GetConfigVarFromSections<bool>(
+                m_config, "MapObjectVolumeUseCachedAssetsOnly", MapConfigSections, true);
             int geometryFailures = 0;
             int geometryFootprints = 0;
             int geometrySkipped = 0;
+            int geometryBudgetSkipped = 0;
             bool keepMeshCache = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeKeepMeshCache", MapConfigSections, false);
 
@@ -546,13 +554,23 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                         {
                                             bool drewExactGeometry = false;
                                             bool externalGeometry = UsesExternalGeometry(part);
+
+                                            if (externalGeometry &&
+                                                exactGeometryBudgetMS > 0 &&
+                                                Util.EnvironmentTickCountSubtract(Environment.TickCount, tc) >= exactGeometryBudgetMS)
+                                            {
+                                                geometryBudgetSkipped++;
+                                                continue;
+                                            }
+
                                             try
                                             {
                                                 drewExactGeometry = TryDrawMeshGeometry(g, meshBrushes, meshPens,
                                                     part, mapdotspot, fillOpacity, outlineOpacity,
                                                     drawMeshTriangleOutlines, faceShading, meshDetailLevel,
                                                     useTextureAlpha, minimumOpacity, skipAlphaMaskedFaces,
-                                                    alphaMaskedFaceMaxAlpha, alphaMaskedFaceMinArea);
+                                                    skipFlatTextureCards, alphaMaskedFaceMaxAlpha,
+                                                    alphaMaskedFaceMinArea);
                                             }
                                             catch (OutOfMemoryException e)
                                             {
@@ -810,6 +828,13 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                         }
                     }
 
+                    if (geometryBudgetSkipped > 0)
+                    {
+                        m_log.DebugFormat(
+                            "[MAPTILE]: Skipped {0} sculpt/mesh object parts after exact geometry budget of {1}ms was exhausted",
+                            geometryBudgetSkipped, exactGeometryBudgetMS);
+                    }
+
                     // Sort prim by Z position
                     Array.Sort(sortedZHeights, sortedlocalIds);
 
@@ -1036,7 +1061,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             Dictionary<int, Pen> meshPens, SceneObjectPart part,
             Color fallbackColor, int opacity, int outlineOpacity, bool drawOutlines,
             bool faceShading, DetailLevel lod, bool useTextureAlpha, int minimumOpacity,
-            bool skipAlphaMaskedFaces, float alphaMaskedFaceMaxAlpha, int alphaMaskedFaceMinArea)
+            bool skipAlphaMaskedFaces, bool skipFlatTextureCards,
+            float alphaMaskedFaceMaxAlpha, int alphaMaskedFaceMinArea)
         {
             if (m_primMesher == null)
                 return false;
@@ -1109,9 +1135,13 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 int faceOpacity = useTextureAlpha
                     ? ApplyTextureAlpha(opacity, faceAlpha, minimumOpacity)
                     : opacity;
+                bool textureCardFace = skipFlatTextureCards &&
+                    flatTextureCard &&
+                    !textureFace.TextureID.IsZero();
                 bool alphaMaskedFace = useTextureAlpha &&
                     ((faceSample.assetSampled && faceAlpha < alphaMaskedFaceMaxAlpha) ||
-                     (flatTextureCard && faceSample.hasAlphaChannel));
+                     (flatTextureCard && faceSample.hasAlphaChannel) ||
+                     textureCardFace);
 
                 for (int j = 0; j + 2 < face.Indices.Count; j += 3)
                 {
@@ -1322,6 +1352,24 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             }
         }
 
+        private static Image DecodeTextureMapImage(byte[] data)
+        {
+            if (data == null || data.Length == 0)
+                return null;
+
+            if (!LooksLikeJpeg2000(data))
+                return null;
+
+            try
+            {
+                return J2kImage.FromBytes(data, null, false, 16);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private static bool LooksLikeJpeg2000(byte[] data)
         {
             if (data.Length < 16)
@@ -1380,6 +1428,22 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
         private byte[] GetAssetDataForMap(string assetID)
         {
+            if (m_useCachedMapAssetsOnlyThisPass)
+            {
+                try
+                {
+                    AssetBase cachedAsset = m_scene.AssetService.GetCached(assetID);
+                    if (cachedAsset != null && cachedAsset.Data != null && cachedAsset.Data.Length > 0)
+                        return cachedAsset.Data;
+                }
+                catch (Exception e)
+                {
+                    m_log.DebugFormat("[MAPTILE]: AssetService.GetCached failed for map asset {0}: {1}", assetID, e.Message);
+                }
+
+                return null;
+            }
+
             try
             {
                 AssetBase asset = m_scene.AssetService.Get(assetID);
@@ -1709,7 +1773,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
             try
             {
-                Image image = DecodeMapImage(textureData);
+                Image image = DecodeTextureMapImage(textureData);
                 if (image != null)
                 {
                     using (image)
@@ -1717,7 +1781,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     {
                         sample = ComputeTextureSample(bitmap);
                         sample.assetSampled = sample.valid;
-                        sample.hasAlphaChannel = hasAlphaChannel;
+                        sample.hasAlphaChannel = hasAlphaChannel || sample.alpha < 0.995f;
                     }
                 }
             }

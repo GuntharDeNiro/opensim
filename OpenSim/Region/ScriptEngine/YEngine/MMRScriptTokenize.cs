@@ -1066,6 +1066,8 @@ namespace OpenSim.Region.ScriptEngine.Yengine
             kws.Add("string", GetTokenCtor(typeof(TokenTypeStr)));
             kws.Add("vector", GetTokenCtor(typeof(TokenTypeVec)));
             kws.Add("while", GetTokenCtor(typeof(TokenKwWhile)));
+            kws.Add("break", GetTokenCtor(typeof(TokenKwBreak)));
+            kws.Add("continue", GetTokenCtor(typeof(TokenKwCont)));
 
             return kws;
         }

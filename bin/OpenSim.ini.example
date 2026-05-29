@@ -464,6 +464,9 @@
     ;# {MapObjectVolumeSkipAlphaMaskedFaces} {MapObjectVolumeUseTextureAlpha} {Skip large texture-alpha cutout/card faces instead of drawing their transparent pixels as solid rectangles?} {true false} true
     ; MapObjectVolumeSkipAlphaMaskedFaces = true
 
+    ;# {MapObjectVolumeSkipFlatTextureCards} {MapObjectVolumeSkipAlphaMaskedFaces} {Skip large thin texture-card geometry unless it can be drawn as real sampled pixels instead of a solid slab?} {true false} true
+    ; MapObjectVolumeSkipFlatTextureCards = true
+
     ;# {MapObjectVolumeAlphaMaskedFaceMaxAlpha} {MapObjectVolumeSkipAlphaMaskedFaces} {Average sampled texture alpha below this is treated as alpha-masked/cutout geometry; flat texture cards with a JPEG2000 alpha channel are also protected} {} 0.90
     ; MapObjectVolumeAlphaMaskedFaceMaxAlpha = 0.90
 
@@ -490,6 +493,12 @@
 
     ;# {MapObjectVolumeMeshDetailLevel} {MapObjectVolumeRenderMeshGeometry} {Mesh and sculpt map detail level: 0=Low, 1=Medium, 2=High, 3=Highest} {} 1
     ; MapObjectVolumeMeshDetailLevel = 1
+
+    ;# {MapObjectVolumeExactGeometryTimeBudgetMS} {MapObjectVolumeRenderMeshGeometry} {Maximum time spent drawing exact mesh/sculpt geometry per region map tile before remaining external geometry is skipped} {} 8000
+    ; MapObjectVolumeExactGeometryTimeBudgetMS = 8000
+
+    ;# {MapObjectVolumeUseCachedAssetsOnly} {MapObjectVolumeRenderMeshGeometry} {Only use locally cached mesh/sculpt/texture assets while rendering map objects, avoiding blocking remote asset fetches during map generation?} {true false} true
+    ; MapObjectVolumeUseCachedAssetsOnly = true
 
     ;# {MapObjectVolumeDrawMissingGeometryFootprints} {MapObjectVolumeRenderMeshGeometry} {Draw bounded fallback footprints when exact sculpt/mesh assets are unavailable? This is off by default so missing geometry never becomes fake map shapes.} {true false} false
     ; MapObjectVolumeDrawMissingGeometryFootprints = false
