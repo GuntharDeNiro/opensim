@@ -60,6 +60,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using AssetLandmark = OpenSim.Framework.AssetLandmark;
+using FrameworkRegionSettings = global::OpenSim.Framework.RegionSettings;
 using GridRegion = OpenSim.Services.Interfaces.GridRegion;
 using LSL_Float = OpenSim.Region.ScriptEngine.Shared.LSL_Types.LSLFloat;
 using LSL_Integer = OpenSim.Region.ScriptEngine.Shared.LSL_Types.LSLInteger;
@@ -9196,10 +9197,10 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         {
             return layer switch
             {
-                0 => OpenSim.Framework.RegionSettings.DEFAULT_TERRAIN_TEXTURE_1,
-                1 => OpenSim.Framework.RegionSettings.DEFAULT_TERRAIN_TEXTURE_2,
-                2 => OpenSim.Framework.RegionSettings.DEFAULT_TERRAIN_TEXTURE_3,
-                3 => OpenSim.Framework.RegionSettings.DEFAULT_TERRAIN_TEXTURE_4,
+                0 => FrameworkRegionSettings.DEFAULT_TERRAIN_TEXTURE_1,
+                1 => FrameworkRegionSettings.DEFAULT_TERRAIN_TEXTURE_2,
+                2 => FrameworkRegionSettings.DEFAULT_TERRAIN_TEXTURE_3,
+                3 => FrameworkRegionSettings.DEFAULT_TERRAIN_TEXTURE_4,
                 _ => UUID.Zero
             };
         }
