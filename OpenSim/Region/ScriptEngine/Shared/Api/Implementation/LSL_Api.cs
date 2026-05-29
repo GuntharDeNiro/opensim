@@ -9196,10 +9196,10 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         {
             return layer switch
             {
-                0 => RegionSettings.DEFAULT_TERRAIN_TEXTURE_1,
-                1 => RegionSettings.DEFAULT_TERRAIN_TEXTURE_2,
-                2 => RegionSettings.DEFAULT_TERRAIN_TEXTURE_3,
-                3 => RegionSettings.DEFAULT_TERRAIN_TEXTURE_4,
+                0 => OpenSim.Framework.RegionSettings.DEFAULT_TERRAIN_TEXTURE_1,
+                1 => OpenSim.Framework.RegionSettings.DEFAULT_TERRAIN_TEXTURE_2,
+                2 => OpenSim.Framework.RegionSettings.DEFAULT_TERRAIN_TEXTURE_3,
+                3 => OpenSim.Framework.RegionSettings.DEFAULT_TERRAIN_TEXTURE_4,
                 _ => UUID.Zero
             };
         }
