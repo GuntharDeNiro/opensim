@@ -98,7 +98,7 @@ so additions are deliberate and testable instead of guessed from individual scri
   - Adds `llSetLinkGLTFOverrides` for material factor overrides backed by OpenSim render material override storage.
   - Supports base color/alpha, alpha mode, alpha mask, double-sided, metallic, roughness and emissive factors.
   - Adds `PRIM_RENDER_MATERIAL` support through `llSetPrimitiveParams`, `llSetLinkPrimitiveParams`, `llGetPrimitiveParams` and `llGetLinkPrimitiveParams`.
-  - Adds `PRIM_GLTF_NORMAL`, `PRIM_GLTF_EMISSIVE`, `PRIM_GLTF_METALLIC_ROUGHNESS` and `PRIM_GLTF_BASE_COLOR` readback for stored override values.
+  - Adds `PRIM_GLTF_NORMAL`, `PRIM_GLTF_EMISSIVE`, `PRIM_GLTF_METALLIC_ROUGHNESS` and `PRIM_GLTF_BASE_COLOR` set/readback for stored override values through primitive params.
   - Reads compact texture, transform and factor overrides without claiming access to unset values inside the underlying material asset.
 
 - Physics material primitive params
@@ -110,13 +110,13 @@ so additions are deliberate and testable instead of guessed from individual scri
 - True Second Life navmesh/pathfinding character simulation.
 - Combat2 `on_damage` event state and mutable per-hit damage adjustment.
 - Full per-parameter EEP override persistence for `llSetEnvironment` and `llSetAgentEnvironment`.
-- Full `PRIM_GLTF_*` set support and underlying material asset readback for unset GLTF properties.
+- Underlying material asset readback for unset `PRIM_GLTF_*` properties.
 - True client-visible sculpt-map animation for `llSetSculptAnim`.
 
 ## Next High-Value Buckets
 
 - Pathfinding backend work if OpenSim gains a region navmesh provider.
 - Environment functions: full per-parameter EEP override storage for `llSetEnvironment` and `llSetAgentEnvironment`.
-- Render material functions: full `PRIM_GLTF_*` set support and optional material asset inspection if OpenSim exposes it safely.
+- Render material functions: optional material asset inspection if OpenSim exposes it safely.
 - Damage/combat functions: `on_damage` event metadata and adjustment.
 - Sculpt animation: simulator/viewer protocol support if OpenSim gains a real backend for it.

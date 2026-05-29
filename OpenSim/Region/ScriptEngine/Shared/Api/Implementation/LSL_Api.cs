@@ -12449,6 +12449,38 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             SetRenderMaterial(part, new LSL_String(rules.Data[idx++].ToString()), new LSL_Integer(face), originFunc);
                             break;
 
+                        case ScriptBaseClass.PRIM_GLTF_NORMAL:
+                            if (remain < 5)
+                                return new LSL_List();
+
+                            ApplyGltfPrimitiveParams(part, code, rules.GetSublist(idx, idx + 4), originFunc);
+                            idx += 5;
+                            break;
+
+                        case ScriptBaseClass.PRIM_GLTF_EMISSIVE:
+                            if (remain < 6)
+                                return new LSL_List();
+
+                            ApplyGltfPrimitiveParams(part, code, rules.GetSublist(idx, idx + 5), originFunc);
+                            idx += 6;
+                            break;
+
+                        case ScriptBaseClass.PRIM_GLTF_METALLIC_ROUGHNESS:
+                            if (remain < 7)
+                                return new LSL_List();
+
+                            ApplyGltfPrimitiveParams(part, code, rules.GetSublist(idx, idx + 6), originFunc);
+                            idx += 7;
+                            break;
+
+                        case ScriptBaseClass.PRIM_GLTF_BASE_COLOR:
+                            if (remain < 10)
+                                return new LSL_List();
+
+                            ApplyGltfPrimitiveParams(part, code, rules.GetSublist(idx, idx + 9), originFunc);
+                            idx += 10;
+                            break;
+
                         default:
                             Error(originFunc, string.Format("Error running rule #{0}: arg #{1} - unsupported parameter", rulesParsed, idx - idxStart));
                             return new LSL_List();
@@ -19579,6 +19611,30 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             idx += 2;
                             break;
 
+                        case ScriptBaseClass.PRIM_GLTF_NORMAL:
+                            if (remain < 5)
+                                return new LSL_List();
+                            idx += 5;
+                            break;
+
+                        case ScriptBaseClass.PRIM_GLTF_EMISSIVE:
+                            if (remain < 6)
+                                return new LSL_List();
+                            idx += 6;
+                            break;
+
+                        case ScriptBaseClass.PRIM_GLTF_METALLIC_ROUGHNESS:
+                            if (remain < 7)
+                                return new LSL_List();
+                            idx += 7;
+                            break;
+
+                        case ScriptBaseClass.PRIM_GLTF_BASE_COLOR:
+                            if (remain < 10)
+                                return new LSL_List();
+                            idx += 10;
+                            break;
+
                         case ScriptBaseClass.PRIM_FLEXIBLE:
                             if (remain < 7)
                                 return new LSL_List();
@@ -22158,6 +22214,185 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             return false;
         }
 
+        private bool ApplyGltfPrimitiveParams(SceneObjectPart part, int code, LSL_List values, string originFunc)
+        {
+            if (part is null || values is null || values.Length < 1)
+                return false;
+
+            int face = values.GetIntegerItem(0);
+            if (face == ScriptBaseClass.ALL_SIDES)
+            {
+                bool changed = false;
+                int nsides = GetNumberOfSides(part);
+                for (int side = 0; side < nsides; ++side)
+                    changed |= ApplyGltfPrimitiveParamsToFace(part, code, side, values, originFunc);
+                return changed;
+            }
+
+            return ApplyGltfPrimitiveParamsToFace(part, code, face, values, originFunc);
+        }
+
+        private bool ApplyGltfPrimitiveParamsToFace(SceneObjectPart part, int code, int face, LSL_List values, string originFunc)
+        {
+            if (part is null || face < 0 || face >= GetNumberOfSides(part))
+                return false;
+
+            string oldData = GetMaterialOverrideData(part, face);
+            string data = oldData;
+            int textureIndex = GltfTextureIndex(code);
+
+            if (!ApplyGltfTextureParam(part, ref data, textureIndex, values.Data[1], originFunc))
+                return false;
+
+            data = ApplyGltfTextureTransformParams(data, textureIndex, values);
+
+            switch (code)
+            {
+                case ScriptBaseClass.PRIM_GLTF_BASE_COLOR:
+                    data = ApplyGltfBaseColorParams(data, values);
+                    break;
+
+                case ScriptBaseClass.PRIM_GLTF_METALLIC_ROUGHNESS:
+                    data = ApplyCompactFloatParam(data, "mf", values, 5);
+                    data = ApplyCompactFloatParam(data, "rf", values, 6);
+                    break;
+
+                case ScriptBaseClass.PRIM_GLTF_EMISSIVE:
+                    data = ApplyCompactVectorParam(data, "ec", values, 5, 3);
+                    break;
+            }
+
+            if (!HasRenderMaterial(part, face) && HasCompactOverrideData(data))
+                return false;
+
+            if (data == oldData || !SetMaterialOverrideData(part, face, data))
+                return false;
+
+            part.ParentGroup.HasGroupChanged = true;
+            part.ScheduleUpdate(PrimUpdateFlags.MaterialOvr | PrimUpdateFlags.FullUpdate);
+            part.TriggerScriptChangedEvent(Changed.MATERIAL);
+            return true;
+        }
+
+        private static int GltfTextureIndex(int code)
+        {
+            return code switch
+            {
+                ScriptBaseClass.PRIM_GLTF_NORMAL => 1,
+                ScriptBaseClass.PRIM_GLTF_METALLIC_ROUGHNESS => 2,
+                ScriptBaseClass.PRIM_GLTF_EMISSIVE => 3,
+                _ => 0
+            };
+        }
+
+        private bool ApplyGltfTextureParam(SceneObjectPart part, ref string data, int textureIndex, object rawValue, string originFunc)
+        {
+            string textureName = rawValue?.ToString() ?? string.Empty;
+            if (textureName.Length == 0 || UUID.ZeroString.Equals(textureName, StringComparison.OrdinalIgnoreCase))
+            {
+                data = SetCompactUuidArrayItem(data, "tex", textureIndex, UUID.Zero);
+                return true;
+            }
+
+            UUID textureID = ScriptUtils.GetAssetIdFromItemName(part, textureName, (int)AssetType.Texture);
+            if (textureID.IsZero() && (!UUID.TryParse(textureName, out textureID) || textureID.IsZero()))
+            {
+                Error(originFunc, $"texture \"{textureName}\" not found");
+                return false;
+            }
+
+            data = SetCompactUuidArrayItem(data, "tex", textureIndex, textureID);
+            return true;
+        }
+
+        private static string ApplyGltfTextureTransformParams(string data, int textureIndex, LSL_List values)
+        {
+            OSDMap[] transforms = ReadCompactTransformMaps(data, textureIndex + 1);
+            OSDMap transform = transforms[textureIndex];
+
+            if (IsEmptyString(values.Data[2]))
+                transform.Remove("s");
+            else
+            {
+                LSL_Vector repeats = values.GetVector3Item(2);
+                transform["s"] = CompactVector2(repeats);
+            }
+
+            if (IsEmptyString(values.Data[3]))
+                transform.Remove("o");
+            else
+            {
+                LSL_Vector offsets = values.GetVector3Item(3);
+                transform["o"] = CompactVector2(offsets);
+            }
+
+            if (IsEmptyString(values.Data[4]))
+                transform.Remove("r");
+            else
+                transform["r"] = new OSDReal(Math.Round(values.GetStrictFloatItem(4), 4));
+
+            return SetCompactTransformArray(data, transforms);
+        }
+
+        private static string ApplyGltfBaseColorParams(string data, LSL_List values)
+        {
+            bool clearColor = IsEmptyString(values.Data[5]);
+            bool clearAlpha = IsEmptyString(values.Data[6]);
+            if (clearColor && clearAlpha)
+            {
+                data = RemoveCompactKey(data, "bc");
+            }
+            else
+            {
+                double[] baseColor = [1.0, 1.0, 1.0, 1.0];
+                if (!clearColor)
+                {
+                    LSL_Vector color = values.GetVector3Item(5);
+                    baseColor[0] = color.x;
+                    baseColor[1] = color.y;
+                    baseColor[2] = color.z;
+                }
+
+                if (!clearAlpha)
+                    baseColor[3] = values.GetStrictFloatItem(6);
+
+                data = SetCompactKey(data, "bc", CompactVector(baseColor));
+            }
+
+            data = ApplyCompactIntegerParam(data, "am", values, 7);
+            data = ApplyCompactFloatParam(data, "ac", values, 8);
+            data = ApplyCompactBoolParam(data, "ds", values, 9);
+            return data;
+        }
+
+        private static string ApplyCompactIntegerParam(string data, string key, LSL_List values, int index)
+        {
+            return IsEmptyString(values.Data[index]) ?
+                    RemoveCompactKey(data, key) :
+                    SetCompactKey(data, key, new OSDInteger(values.GetLSLIntegerItem(index)));
+        }
+
+        private static string ApplyCompactFloatParam(string data, string key, LSL_List values, int index)
+        {
+            return IsEmptyString(values.Data[index]) ?
+                    RemoveCompactKey(data, key) :
+                    SetCompactKey(data, key, new OSDReal(Math.Round(values.GetStrictFloatItem(index), 4)));
+        }
+
+        private static string ApplyCompactBoolParam(string data, string key, LSL_List values, int index)
+        {
+            return IsEmptyString(values.Data[index]) ?
+                    RemoveCompactKey(data, key) :
+                    SetCompactKey(data, key, OSD.FromBoolean(values.GetLSLIntegerItem(index) != 0));
+        }
+
+        private static string ApplyCompactVectorParam(string data, string key, LSL_List values, int index, int components)
+        {
+            return IsEmptyString(values.Data[index]) ?
+                    RemoveCompactKey(data, key) :
+                    SetCompactKey(data, key, CompactVector(values.GetVector3Item(index), components));
+        }
+
         private static bool IsEmptyString(object value)
         {
             return value is not null && value.ToString().Length == 0;
@@ -22186,6 +22421,15 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 array.Add(1.0);
 
             return array;
+        }
+
+        private static OSDArray CompactVector2(LSL_Vector value)
+        {
+            return new OSDArray
+            {
+                Math.Round(value.x, 4),
+                Math.Round(value.y, 4)
+            };
         }
 
         private static OSDArray CompactVector(double[] values)
@@ -22477,6 +22721,76 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 return id;
 
             return UUID.Zero;
+        }
+
+        private static string SetCompactUuidArrayItem(string data, string key, int index, UUID value)
+        {
+            int count = Math.Max(index + 1, Math.Max(4, ReadCompactArrayItems(data, key).Length));
+            UUID[] values = new UUID[count];
+            for (int i = 0; i < values.Length; ++i)
+                values[i] = ReadCompactUuidArrayItem(data, key, i);
+
+            values[index] = value;
+
+            int last = values.Length - 1;
+            while (last >= 0 && values[last].IsZero())
+                last--;
+
+            if (last < 0)
+                return RemoveCompactKey(data, key);
+
+            OSDArray array = new(last + 1);
+            for (int i = 0; i <= last; ++i)
+                array.Add(OSD.FromUUID(values[i]));
+
+            return SetCompactKey(data, key, array);
+        }
+
+        private static OSDMap[] ReadCompactTransformMaps(string data, int minimumCount)
+        {
+            string[] items = ReadCompactArrayItems(data, "ti");
+            OSDMap[] transforms = new OSDMap[Math.Max(minimumCount, Math.Max(4, items.Length))];
+
+            for (int i = 0; i < transforms.Length; ++i)
+                transforms[i] = i < items.Length ? ReadCompactTransformMap(items[i]) : new OSDMap();
+
+            return transforms;
+        }
+
+        private static OSDMap ReadCompactTransformMap(string data)
+        {
+            OSDMap map = new();
+            if (string.IsNullOrWhiteSpace(data))
+                return map;
+
+            double[] scale = ReadCompactNumberArray(data, "s", 2);
+            if (scale is not null)
+                map["s"] = new OSDArray { Math.Round(scale[0], 4), Math.Round(scale[1], 4) };
+
+            double[] offset = ReadCompactNumberArray(data, "o", 2);
+            if (offset is not null)
+                map["o"] = new OSDArray { Math.Round(offset[0], 4), Math.Round(offset[1], 4) };
+
+            if (ReadCompactDouble(data, "r", out double rotation))
+                map["r"] = new OSDReal(Math.Round(rotation, 4));
+
+            return map;
+        }
+
+        private static string SetCompactTransformArray(string data, OSDMap[] transforms)
+        {
+            int last = transforms.Length - 1;
+            while (last >= 0 && transforms[last].Count == 0)
+                last--;
+
+            if (last < 0)
+                return RemoveCompactKey(data, "ti");
+
+            OSDArray array = new(last + 1);
+            for (int i = 0; i <= last; ++i)
+                array.Add(transforms[i].Count == 0 ? new OSDMap() : transforms[i]);
+
+            return SetCompactKey(data, "ti", array);
         }
 
         private static bool ReadCompactDouble(string data, string key, out double value)

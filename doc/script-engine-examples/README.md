@@ -52,6 +52,7 @@ The scripts use:
 - `llSetLinkRenderMaterial`
 - `llSetLinkGLTFOverrides`
 - `PRIM_RENDER_MATERIAL`
+- `PRIM_GLTF_*` setters through primitive params
 - `PRIM_GLTF_NORMAL`
 - `PRIM_GLTF_EMISSIVE`
 - `PRIM_GLTF_METALLIC_ROUGHNESS`

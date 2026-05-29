@@ -4,6 +4,7 @@
 //
 // - PRIM_RENDER_MATERIAL in llSetPrimitiveParams/llSetLinkPrimitiveParams
 // - PRIM_RENDER_MATERIAL readback through llGetPrimitiveParams/llGetLinkPrimitiveParams
+// - PRIM_GLTF_* setters through llSetPrimitiveParams/llSetLinkPrimitiveParams
 // - PRIM_GLTF_BASE_COLOR readback after llSetLinkGLTFOverrides
 // - PRIM_GLTF_METALLIC_ROUGHNESS readback after llSetLinkGLTFOverrides
 // - PRIM_GLTF_EMISSIVE readback after llSetLinkGLTFOverrides
@@ -11,9 +12,11 @@
 // - PRIM_PHYSICS_MATERIAL set and readback using Second Life argument order
 //
 // Setup:
-// Put one material asset in this object's inventory. Touch the object and use
-// APPLY PBR or APPLY ALL. Use READ PBR to verify what the simulator now returns.
-// Use PHYSICS and READ PHYS to test PRIM_PHYSICS_MATERIAL.
+// Put one material asset in this object's inventory. Optionally add one texture
+// asset so the direct PRIM_GLTF_* setters can store texture UUID overrides too.
+// Touch the object and use PARAM PBR, APPLY PBR or APPLY ALL. Use READ PBR to
+// verify what the simulator now returns. Use PHYSICS and READ PHYS to test
+// PRIM_PHYSICS_MATERIAL.
 
 integer MENU_CHANNEL = -90150018;
 integer TEST_FACE = 0;
@@ -33,6 +36,14 @@ string first_material()
     return llGetInventoryName(INVENTORY_MATERIAL, 0);
 }
 
+string first_texture()
+{
+    if (llGetInventoryNumber(INVENTORY_TEXTURE) <= 0)
+        return "";
+
+    return llGetInventoryName(INVENTORY_TEXTURE, 0);
+}
+
 string alpha_mode_name(integer mode)
 {
     if (mode == PRIM_GLTF_ALPHA_MODE_OPAQUE) return "OPAQUE";
@@ -46,8 +57,10 @@ show_menu(key agent)
     gOperator = agent;
     llDialog(agent,
         "PBR GLTF + physics primitive-param lab\n" +
-        "Inventory material: " + first_material(),
+        "Inventory material: " + first_material() +
+        "\nInventory texture: " + first_texture(),
         [
+            "PARAM PBR",
             "APPLY PBR",
             "APPLY ALL",
             "READ PBR",
@@ -72,6 +85,65 @@ list pbr_overrides()
         OVERRIDE_GLTF_ROUGHNESS_FACTOR, 0.42,
         OVERRIDE_GLTF_EMISSIVE_FACTOR, <0.05, 0.10, 0.22>
     ];
+}
+
+apply_pbr_params(key agent, integer face)
+{
+    string material = first_material();
+    if (material == "")
+    {
+        say_to(agent, "Add one material asset to object inventory first. The script will use the first INVENTORY_MATERIAL item.");
+        return;
+    }
+
+    string texture = first_texture();
+
+    llSetPrimitiveParams([
+        PRIM_RENDER_MATERIAL, face, material,
+
+        PRIM_GLTF_BASE_COLOR,
+            face,
+            texture,
+            <1.25, 1.25, 0.0>,
+            <0.03, -0.02, 0.0>,
+            0.18,
+            <1.00, 0.62, 0.18>,
+            0.86,
+            PRIM_GLTF_ALPHA_MODE_MASK,
+            0.48,
+            TRUE,
+
+        PRIM_GLTF_METALLIC_ROUGHNESS,
+            face,
+            texture,
+            <0.80, 0.80, 0.0>,
+            <0.0, 0.0, 0.0>,
+            0.0,
+            0.08,
+            0.30,
+
+        PRIM_GLTF_EMISSIVE,
+            face,
+            texture,
+            <1.0, 1.0, 0.0>,
+            <0.0, 0.0, 0.0>,
+            0.0,
+            <0.18, 0.10, 0.02>,
+
+        PRIM_GLTF_NORMAL,
+            face,
+            texture,
+            <1.0, 1.0, 0.0>,
+            <0.0, 0.0, 0.0>,
+            0.0
+    ]);
+
+    if (texture == "")
+        say_to(agent, "Applied PRIM_RENDER_MATERIAL and direct PRIM_GLTF_* factor/transform params to face " + (string)face + ". Add a texture asset to also test GLTF texture UUID storage.");
+    else
+        say_to(agent, "Applied PRIM_RENDER_MATERIAL and direct PRIM_GLTF_* texture/factor/transform params to face " + (string)face + " using texture '" + texture + "'.");
+
+    read_pbr(agent, TEST_FACE);
 }
 
 apply_pbr(key agent, integer face)
@@ -185,8 +257,9 @@ read_physics(key agent)
 help(key agent)
 {
     say_to(agent,
-        "APPLY PBR sets PRIM_RENDER_MATERIAL on face 0 and then writes GLTF factor overrides." +
-        "\nREAD PBR proves PRIM_RENDER_MATERIAL and PRIM_GLTF_* readback." +
+        "PARAM PBR writes PRIM_RENDER_MATERIAL and direct PRIM_GLTF_* setters in one llSetPrimitiveParams call." +
+        "\nAPPLY PBR sets PRIM_RENDER_MATERIAL on face 0 and then writes GLTF factor overrides." +
+        "\nREAD PBR proves PRIM_RENDER_MATERIAL and PRIM_GLTF_* set/readback." +
         "\nPHYSICS sets PRIM_PHYSICS_MATERIAL in SL order: bits, gravity, restitution, friction, density." +
         "\nREAD PHYS proves PRIM_PHYSICS_MATERIAL readback."
     );
@@ -210,7 +283,8 @@ default
         if (channel != MENU_CHANNEL)
             return;
 
-        if (message == "APPLY PBR") apply_pbr(id, TEST_FACE);
+        if (message == "PARAM PBR") apply_pbr_params(id, TEST_FACE);
+        else if (message == "APPLY PBR") apply_pbr(id, TEST_FACE);
         else if (message == "APPLY ALL") apply_pbr(id, ALL_SIDES);
         else if (message == "READ PBR") read_pbr(id, TEST_FACE);
         else if (message == "PHYSICS") apply_physics(id);
