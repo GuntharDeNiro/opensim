@@ -1164,6 +1164,9 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 maxY = Math.Min(height - 1, maxY + padY);
             }
 
+            land = SmoothMapValues(land, width, height, Math.Min(3, smoothPasses));
+            relief = SmoothMapValues(relief, width, height, smoothPasses);
+
             return new ImageTerrainData(textureID, width, height, land, relief, minX, minY, maxX, maxY);
         }
 
@@ -1224,8 +1227,6 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             }
 
             FillSmallInteriorWaterGaps(width, height, pixelCount, land, sea, waterThreshold, queue);
-            land = SmoothMapValues(land, width, height, Math.Min(3, smoothPasses));
-            relief = SmoothMapValues(relief, width, height, smoothPasses);
 
             int bestArea = 0;
             for (int i = 0; i < pixelCount; ++i)
