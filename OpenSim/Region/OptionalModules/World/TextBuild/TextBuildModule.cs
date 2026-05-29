@@ -51,6 +51,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
         private const float ImageTerrainWaterHeight = 21.0f;
+        private const float ImageTerrainCoastThreshold = 0.50f;
 
         private Scene m_scene;
         private bool m_enabled;
@@ -982,7 +983,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             }
 
             if (recipe.Style == TerrainStyle.ImageMap)
-                SmoothImageTerrainHeightmap(width, height, m_imageTerrainSmoothPasses);
+                SmoothImageTerrainHeightmap(width, height, m_imageTerrainSmoothPasses, recipe.ImageData, (float)m_scene.RegionInfo.RegionSettings.WaterHeight);
 
             m_scene.Heightmap.GetTerrainData().TaintAllTerrain();
             if (m_scene.PhysicsScene != null)
@@ -997,18 +998,25 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             SendReply(client, string.Format("TextBuild: shaped terrain as {0}.", recipe.GetDescription()));
         }
 
-        private void SmoothImageTerrainHeightmap(int width, int height, int passes)
+        private void SmoothImageTerrainHeightmap(int width, int height, int passes, ImageTerrainData image, float water)
         {
             if (passes <= 0 || width <= 1 || height <= 1)
                 return;
 
             float[] current = new float[width * height];
             float[] next = new float[current.Length];
+            bool[] landMask = new bool[current.Length];
+            float targetAspect = height <= 0 ? 1f : width / (float)height;
 
             for (int x = 0; x < width; ++x)
             {
                 for (int y = 0; y < height; ++y)
+                {
+                    float u = width <= 1 ? 0.5f : (x + 0.5f) / width;
+                    float v = height <= 1 ? 0.5f : (y + 0.5f) / height;
+                    landMask[y * width + x] = image != null && image.IsLand(u, v, targetAspect);
                     current[y * width + x] = m_scene.Heightmap[x, y];
+                }
             }
 
             for (int pass = 0; pass < passes; ++pass)
@@ -1023,18 +1031,25 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                         int x1 = Math.Min(width - 1, x + 1);
                         float sum = 0f;
                         float weight = 0f;
+                        int center = y * width + x;
+                        bool centerLand = landMask[center];
 
                         for (int sy = y0; sy <= y1; ++sy)
                         {
                             for (int sx = x0; sx <= x1; ++sx)
                             {
+                                int sample = sy * width + sx;
+                                if (landMask[sample] != centerLand)
+                                    continue;
+
                                 float w = sx == x && sy == y ? 6f : 1f;
-                                sum += current[sy * width + sx] * w;
+                                sum += current[sample] * w;
                                 weight += w;
                             }
                         }
 
-                        next[y * width + x] = sum / weight;
+                        float value = weight > 0f ? sum / weight : current[center];
+                        next[center] = centerLand ? Math.Max(value, water + 0.18f) : Math.Min(value, water - 0.05f);
                     }
                 }
 
@@ -1046,7 +1061,11 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             for (int x = 0; x < width; ++x)
             {
                 for (int y = 0; y < height; ++y)
-                    m_scene.Heightmap[x, y] = ClampTerrainHeight(current[y * width + x]);
+                {
+                    int index = y * width + x;
+                    float value = landMask[index] ? Math.Max(current[index], water + 0.18f) : Math.Min(current[index], water - 0.05f);
+                    m_scene.Heightmap[x, y] = ClampTerrainHeight(value);
+                }
             }
         }
 
@@ -1164,10 +1183,12 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 maxY = Math.Min(height - 1, maxY + padY);
             }
 
+            float[] coastLand = (float[])land.Clone();
+
             land = SmoothMapValues(land, width, height, Math.Min(3, smoothPasses));
             relief = SmoothMapValues(relief, width, height, smoothPasses);
 
-            return new ImageTerrainData(textureID, width, height, land, relief, minX, minY, maxX, maxY);
+            return new ImageTerrainData(textureID, width, height, land, relief, coastLand, minX, minY, maxX, maxY);
         }
 
         private static bool TryFindDominantLandBounds(int width, int height, float[] land, out int minX, out int minY, out int maxX, out int maxY)
@@ -1511,24 +1532,27 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             float u = width <= 1 ? 0.5f : (x + 0.5f) / width;
             float v = height <= 1 ? 0.5f : (y + 0.5f) / height;
             float targetAspect = height <= 0 ? 1f : width / (float)height;
+            bool isLand = image.IsLand(u, v, targetAspect);
             float land = image.SampleLand(u, v, targetAspect);
             float relief = image.SampleRelief(u, v, targetAspect);
 
-            float coast = SmoothStep(0.36f, 0.72f, land);
             float openWater = 1f - SmoothStep(0.04f, 0.50f, land);
             float waterNoise = Math.Abs(FractalNoise(x * 0.012f, y * 0.012f, 23003));
             float seaHeight = water - m_imageTerrainSeaDepth * (0.82f + waterNoise * 0.08f) * openWater;
+            if (!isLand)
+                return ClampTerrainHeight(seaHeight);
 
             float hillNoise = FractalNoise(x * 0.014f, y * 0.014f, 23029) * 0.52f
                 + FractalNoise(x * 0.035f, y * 0.035f, 23041) * 0.18f;
+            float inland = SmoothStep(0.48f, 0.92f, land);
             float landRise = m_imageTerrainMinLandHeight + (m_imageTerrainMaxLandHeight - m_imageTerrainMinLandHeight) * relief;
-            float landHeight = water + landRise + hillNoise * Math.Max(0.15f, coast);
+            float landHeight = water + Lerp(0.35f, landRise, inland) + hillNoise * Math.Max(0.05f, inland);
 
-            float shoreBand = SmoothStep(0.42f, 0.62f, land) - SmoothStep(0.72f, 0.92f, land);
+            float shoreBand = 1f - inland;
             if (shoreBand > 0f)
-                landHeight = Lerp(landHeight, water + 0.38f + hillNoise * 0.04f, shoreBand * 0.78f);
+                landHeight = Lerp(landHeight, water + 0.28f + hillNoise * 0.03f, shoreBand * 0.82f);
 
-            return ClampTerrainHeight(Lerp(seaHeight, landHeight, coast));
+            return ClampTerrainHeight(Math.Max(landHeight, water + 0.18f));
         }
 
         private static float ApplyTerrainRecipeModifiers(TerrainRecipe recipe, int x, int y, int width, int height, float water, float heightValue)
@@ -2287,18 +2311,20 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             public readonly int Height;
             public readonly float[] Land;
             public readonly float[] Relief;
+            public readonly float[] CoastLand;
             public readonly int MinX;
             public readonly int MinY;
             public readonly int MaxX;
             public readonly int MaxY;
 
-            public ImageTerrainData(UUID textureID, int width, int height, float[] land, float[] relief, int minX, int minY, int maxX, int maxY)
+            public ImageTerrainData(UUID textureID, int width, int height, float[] land, float[] relief, float[] coastLand, int minX, int minY, int maxX, int maxY)
             {
                 TextureID = textureID;
                 Width = width;
                 Height = height;
                 Land = land;
                 Relief = relief;
+                CoastLand = coastLand;
                 MinX = minX;
                 MinY = minY;
                 MaxX = maxX;
@@ -2315,16 +2341,32 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 return Sample(Relief, u, v, targetAspect);
             }
 
+            public bool IsLand(float u, float v, float targetAspect)
+            {
+                float[] coast = CoastLand ?? Land;
+                if (coast == null || coast.Length == 0 || Width <= 0 || Height <= 0)
+                    return false;
+
+                if (!TryMapToImagePoint(u, v, targetAspect, out float x, out float y))
+                    return false;
+
+                int ix = Math.Max(0, Math.Min(Width - 1, (int)Math.Round(x)));
+                int iy = Math.Max(0, Math.Min(Height - 1, (int)Math.Round(y)));
+                int index = iy * Width + ix;
+                if (index < 0 || index >= coast.Length)
+                    return false;
+
+                return coast[index] >= ImageTerrainCoastThreshold;
+            }
+
             private float Sample(float[] values, float u, float v, float targetAspect)
             {
                 if (values == null || values.Length == 0 || Width <= 0 || Height <= 0)
                     return 0f;
 
-                if (!TryMapPreservedAspect(u, v, targetAspect, out float imageU, out float imageV))
+                if (!TryMapToImagePoint(u, v, targetAspect, out float x, out float y))
                     return 0f;
 
-                float x = MinX + imageU * Math.Max(0, MaxX - MinX);
-                float y = MinY + (1f - imageV) * Math.Max(0, MaxY - MinY);
                 int x0 = Math.Max(0, Math.Min(Width - 1, (int)Math.Floor(x)));
                 int y0 = Math.Max(0, Math.Min(Height - 1, (int)Math.Floor(y)));
                 int x1 = Math.Max(0, Math.Min(Width - 1, x0 + 1));
@@ -2338,6 +2380,19 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 float d = values[y1 * Width + x1];
 
                 return Lerp(Lerp(a, b, tx), Lerp(c, d, tx), ty);
+            }
+
+            private bool TryMapToImagePoint(float u, float v, float targetAspect, out float x, out float y)
+            {
+                x = 0f;
+                y = 0f;
+
+                if (!TryMapPreservedAspect(u, v, targetAspect, out float imageU, out float imageV))
+                    return false;
+
+                x = MinX + imageU * Math.Max(0, MaxX - MinX);
+                y = MinY + (1f - imageV) * Math.Max(0, MaxY - MinY);
+                return true;
             }
 
             private bool TryMapPreservedAspect(float u, float v, float targetAspect, out float imageU, out float imageV)
