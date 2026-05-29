@@ -95,7 +95,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             m_imageTerrainMinLandHeight = Math.Max(0.1f, config.GetFloat("ImageTerrainMinLandHeight", 1.15f));
             m_imageTerrainMaxLandHeight = Math.Max(m_imageTerrainMinLandHeight, config.GetFloat("ImageTerrainMaxLandHeight", 12.0f));
             m_imageTerrainSeaDepth = Math.Max(0.1f, config.GetFloat("ImageTerrainSeaDepth", 5.0f));
-            m_imageTerrainFitLandToRegion = config.GetBoolean("ImageTerrainFitLandToRegion", false);
+            m_imageTerrainFitLandToRegion = config.GetBoolean("ImageTerrainFitLandToRegion", true);
             m_imageTerrainSmoothPasses = Math.Max(0, config.GetInt("ImageTerrainSmoothPasses", 5));
         }
 
@@ -1058,7 +1058,8 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 {
                     float u = width <= 1 ? 0.5f : (x + 0.5f) / width;
                     float v = height <= 1 ? 0.5f : (y + 0.5f) / height;
-                    landMask[y * width + x] = image != null && image.IsLand(u, v, targetAspect);
+                    float coverage = image == null ? 0f : image.SampleLandCoverage(u, v, 1f / width, 1f / height, targetAspect);
+                    landMask[y * width + x] = coverage >= ImageTerrainCoastThreshold;
                     current[y * width + x] = m_scene.Heightmap[x, y];
                 }
             }
@@ -1212,7 +1213,15 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
 
             RefineImageLandMask(width, height, land);
 
-            if (!fitLandToRegion || !TryFindDominantLandBounds(width, height, land, out int minX, out int minY, out int maxX, out int maxY))
+            int minX;
+            int minY;
+            int maxX;
+            int maxY;
+            bool foundBounds = fitLandToRegion &&
+                (TryFindDominantLandBounds(width, height, land, out minX, out minY, out maxX, out maxY) ||
+                 TryFindAnyLandBounds(width, height, land, out minX, out minY, out maxX, out maxY));
+
+            if (!foundBounds)
             {
                 minX = 0;
                 minY = 0;
@@ -1235,6 +1244,38 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             relief = SmoothMapValues(relief, width, height, smoothPasses);
 
             return new ImageTerrainData(textureID, width, height, land, relief, coastLand, minX, minY, maxX, maxY);
+        }
+
+        private static bool TryFindAnyLandBounds(int width, int height, float[] land, out int minX, out int minY, out int maxX, out int maxY)
+        {
+            minX = width;
+            minY = height;
+            maxX = -1;
+            maxY = -1;
+
+            int pixelCount = width * height;
+            if (width <= 0 || height <= 0 || land == null || land.Length < pixelCount)
+                return false;
+
+            const float landThreshold = 0.50f;
+            int count = 0;
+            for (int y = 0; y < height; ++y)
+            {
+                for (int x = 0; x < width; ++x)
+                {
+                    int index = y * width + x;
+                    if (land[index] < landThreshold)
+                        continue;
+
+                    count++;
+                    minX = Math.Min(minX, x);
+                    minY = Math.Min(minY, y);
+                    maxX = Math.Max(maxX, x);
+                    maxY = Math.Max(maxY, y);
+                }
+            }
+
+            return count >= Math.Max(32, pixelCount / 5000);
         }
 
         private static void RefineImageLandMask(int width, int height, float[] land)
@@ -1700,7 +1741,8 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             float u = width <= 1 ? 0.5f : (x + 0.5f) / width;
             float v = height <= 1 ? 0.5f : (y + 0.5f) / height;
             float targetAspect = height <= 0 ? 1f : width / (float)height;
-            bool isLand = image.IsLand(u, v, targetAspect);
+            float landCoverage = image.SampleLandCoverage(u, v, 1f / width, 1f / height, targetAspect);
+            bool isLand = landCoverage >= ImageTerrainCoastThreshold;
             float land = image.SampleLand(u, v, targetAspect);
             float relief = image.SampleRelief(u, v, targetAspect);
 
@@ -2525,6 +2567,43 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                     return false;
 
                 return coast[index] >= ImageTerrainCoastThreshold;
+            }
+
+            public float SampleLandCoverage(float u, float v, float du, float dv, float targetAspect)
+            {
+                float[] coast = CoastLand ?? Land;
+                if (coast == null || coast.Length == 0 || Width <= 0 || Height <= 0)
+                    return 0f;
+
+                const int samples = 5;
+                int landSamples = 0;
+                int validSamples = 0;
+                float step = 1f / samples;
+                float startU = u - du * 0.5f;
+                float startV = v - dv * 0.5f;
+
+                for (int sy = 0; sy < samples; ++sy)
+                {
+                    float sampleV = startV + dv * (sy + 0.5f) * step;
+                    for (int sx = 0; sx < samples; ++sx)
+                    {
+                        float sampleU = startU + du * (sx + 0.5f) * step;
+                        if (!TryMapToImagePoint(sampleU, sampleV, targetAspect, out float x, out float y))
+                            continue;
+
+                        int ix = Math.Max(0, Math.Min(Width - 1, (int)Math.Round(x)));
+                        int iy = Math.Max(0, Math.Min(Height - 1, (int)Math.Round(y)));
+                        int index = iy * Width + ix;
+                        if (index < 0 || index >= coast.Length)
+                            continue;
+
+                        validSamples++;
+                        if (coast[index] >= ImageTerrainCoastThreshold)
+                            landSamples++;
+                    }
+                }
+
+                return validSamples == 0 ? 0f : landSamples / (float)validSamples;
             }
 
             private float Sample(float[] values, float u, float v, float targetAspect)

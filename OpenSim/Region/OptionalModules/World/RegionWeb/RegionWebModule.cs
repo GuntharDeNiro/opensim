@@ -745,7 +745,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Usage.Add("To generate real-world shaped terrain, upload a cartography or satellite texture and say a command such as build terrain from texture <uuid> or costruisci Sardegna da texture <uuid>.");
                     content.Usage.Add("Use it for planning, layout, terrain and fast creative iteration, then review the generated changes like any other build work.");
                     content.Notes.Add("AI-assisted building should stay permission-aware: restrict access to trusted builders or estate staff.");
-                    content.Notes.Add("Cartography terrain treats cyan/celeste map areas as sea, preserves the source map aspect ratio, keeps the coastline mask sharp while smoothing inland terrain, ignores child-region chat events and sets water height to 21m.");
+                    content.Notes.Add("Cartography terrain treats cyan/celeste map areas as sea, fits the detected land/water silhouette while preserving source aspect ratio, keeps the coastline mask sharp while smoothing inland terrain, ignores child-region chat events and sets water height to 21m.");
                     break;
 
                 case "automatic-cloud-avatar-recovery":
