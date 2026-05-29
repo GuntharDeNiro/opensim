@@ -395,6 +395,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 m_config, "MapObjectVolumeFaceShading", MapConfigSections, true);
             bool renderMeshGeometry = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeRenderMeshGeometry", MapConfigSections, true);
+            bool drawPrimFallback = Util.GetConfigVarFromSections<bool>(
+                m_config, "MapObjectVolumeDrawPrimFallback", MapConfigSections, false);
             DetailLevel meshDetailLevel = GetMapMeshDetailLevel(Util.GetConfigVarFromSections<int>(
                 m_config, "MapObjectVolumeMeshDetailLevel", MapConfigSections, 1));
             int exactGeometryBudgetMS = Math.Max(0, Util.GetConfigVarFromSections<int>(
@@ -416,6 +418,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             int geometryFootprints = 0;
             int geometrySkipped = 0;
             int geometryBudgetSkipped = 0;
+            int primFallbackSkipped = 0;
             bool keepMeshCache = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeKeepMeshCache", MapConfigSections, false);
             bool keepMissingGeometryCache = Util.GetConfigVarFromSections<bool>(
@@ -615,6 +618,12 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                                                 missingGeometryFootprint = true;
                                                 geometryFootprints++;
                                                 fillOpacity = Math.Min(fillOpacity, missingGeometryOpacity);
+                                            }
+
+                                            if (!missingGeometryFootprint && !drawPrimFallback)
+                                            {
+                                                primFallbackSkipped++;
+                                                continue;
                                             }
                                         }
 
@@ -846,6 +855,13 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                         m_log.DebugFormat(
                             "[MAPTILE]: Skipped {0} sculpt/mesh object parts after exact geometry budget of {1}ms was exhausted",
                             geometryBudgetSkipped, exactGeometryBudgetMS);
+                    }
+
+                    if (primFallbackSkipped > 0)
+                    {
+                        m_log.DebugFormat(
+                            "[MAPTILE]: Skipped {0} object parts whose exact map geometry was unavailable because prim fallback is disabled",
+                            primFallbackSkipped);
                     }
 
                     // Sort prim by Z position

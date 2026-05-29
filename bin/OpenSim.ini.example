@@ -495,6 +495,10 @@
     ;# {MapObjectVolumeRenderMeshGeometry} {PrettyPrimVolumeOnMapTile} {Use exact mesh/sculpt/prim geometry for object map rendering?} {true false} true
     ; MapObjectVolumeRenderMeshGeometry = true
 
+    ;# {MapObjectVolumeDrawPrimFallback} {MapObjectVolumeRenderMeshGeometry} {Draw the old box/OBB prim fallback when exact map geometry cannot be rendered?} {true false} false
+    ;; Disabled by default so unavailable exact geometry never becomes fake rectangular slabs on the map.
+    ; MapObjectVolumeDrawPrimFallback = false
+
     ;# {MapObjectVolumeMeshDetailLevel} {MapObjectVolumeRenderMeshGeometry} {Mesh and sculpt map detail level: 0=Low, 1=Medium, 2=High, 3=Highest} {} 1
     ; MapObjectVolumeMeshDetailLevel = 1
 
