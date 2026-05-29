@@ -507,7 +507,7 @@ namespace OpenSim.Region.ScriptEngine.Yengine
          * @brief Save current detect params into a list
          * @returns a list containing current detect param values
          */
-        private const int saveDPVer = 1;
+        private const int saveDPVer = 2;
 
         public override LSL_List xmrEventSaveDets()
         {
@@ -518,7 +518,7 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         private static object[] DetPrmsToObjArr(DetectParams[] dps)
         {
             int len = dps.Length;
-            object[] obs = new object[len * 16 + 1];
+            object[] obs = new object[len * 17 + 1];
             int j = 0;
             obs[j++] = (LSL_Integer)saveDPVer;
             for(int i = 0; i < len; i++)
@@ -530,6 +530,7 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                 obs[j++] = (LSL_String)dp.Group.ToString();  // UUID
                 obs[j++] = (LSL_String)dp.Name;              // string
                 obs[j++] = (LSL_String)dp.Owner.ToString();  // UUID
+                obs[j++] = (LSL_String)dp.Rezzer.ToString(); // UUID
                 obs[j++] = dp.Position;                      // vector
                 obs[j++] = dp.Rotation;                      // rotation
                 obs[j++] = (LSL_Integer)dp.Type;             // integer
@@ -556,10 +557,12 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         private static DetectParams[] ObjArrToDetPrms(object[] objs)
         {
             int j = 0;
-            if((objs.Length % 16 != 1) || (ListInt(objs[j++]) != saveDPVer))
+            int version = ListInt(objs[j++]);
+            int stride = version == 1 ? 16 : 17;
+            if((version != 1 && version != saveDPVer) || (objs.Length % stride != 1))
                 throw new Exception("invalid detect param format");
 
-            int len = objs.Length / 16;
+            int len = objs.Length / stride;
             DetectParams[] dps = new DetectParams[len];
 
             for(int i = 0; i < len; i++)
@@ -572,6 +575,8 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                 dp.Group = new UUID(ListStr(objs[j++]));
                 dp.Name = ListStr(objs[j++]);
                 dp.Owner = new UUID(ListStr(objs[j++]));
+                if (version >= 2)
+                    dp.Rezzer = new UUID(ListStr(objs[j++]));
                 dp.Position = (LSL_Vector)objs[j++];
                 dp.Rotation = (LSL_Rotation)objs[j++];
                 dp.Type = ListInt(objs[j++]);

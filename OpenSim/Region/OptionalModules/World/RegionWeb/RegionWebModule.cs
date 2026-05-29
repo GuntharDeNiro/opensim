@@ -53,9 +53,9 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
         private const string ScriptEngineFeatureTitle = "Second Life-style script engine";
         private const string ScriptEngineFeatureBody =
-            "The script engine is moving closer to Second Life behavior with Experience-Lite permissions, scripted sit controls, key-value stores, linkset data, GLTF/render material helpers, secure hashing and parametric rez tools.";
+            "The script engine is moving closer to Second Life behavior with Experience-Lite permissions, scripted sit controls, key-value stores, linkset data, environment, estate-return, terrain, damage, RSA, attachment filter and GLTF material helpers.";
         private const string ScriptEngineFeatureOverview =
-            "The script engine now includes a wider Second Life-style scripting surface for modern estate systems. Trusted estate scripts can use Experience-Lite permissions, persistent experience key-value storage, linkset data with linkset_data events, scripted sit controls, linked sound controls, region environment helpers, GLTF/render material helpers, secure hashing/HMAC helpers, parameterized rez/derez workflows and HUD coordinate helpers without relying on brittle scripted workarounds.";
+            "The script engine now includes a wider Second Life-style scripting surface for modern estate systems. Trusted estate scripts can use Experience-Lite permissions, persistent experience key-value storage, linkset data with linkset_data events, scripted sit controls, linked sound controls, region and parcel environment helpers, estate return and terrain helpers, direct damage helpers, GLTF/render material helpers, secure hashing/HMAC/RSA helpers, parameterized rez/derez workflows, filtered attachment inspection and HUD coordinate helpers without relying on brittle scripted workarounds. Second Life pathfinding character calls are exposed for script compatibility and post no-navmesh path_update failures instead of pretending to move objects.";
 
         private readonly object m_sync = new object();
         private readonly Dictionary<UUID, Scene> m_scenesByID = new Dictionary<UUID, Scene>();
@@ -791,15 +791,28 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Usage.Add("Use llRezObjectWithParams() with REZ_* and REZ_FLAG_* constants for SL-style parameterized rezzing, and llDerezObject() for scripted cleanup.");
                     content.Usage.Add("Use llLinkPlaySound(), llLinkStopSound(), llLinkAdjustSoundVolume(), llLinkSetSoundRadius() and llLinkSetSoundQueueing() with SOUND_* flags for linked sound control.");
                     content.Usage.Add("Use llGetDayLength(), llGetRegionDayLength(), llGetDayOffset(), llGetRegionDayOffset(), llGetSunDirection(), llGetRegionSunDirection(), llGetMoonDirection(), llGetRegionMoonDirection(), llGetSunRotation(), llGetRegionSunRotation(), llGetMoonRotation() and llGetRegionMoonRotation() for environment-aware scripts.");
-                    content.Usage.Add("Use llSetRenderMaterial(), llGetRenderMaterial(), llIsLinkGLTFMaterial(), PRIM_RENDER_MATERIAL and PRIM_GLTF_* constants for PBR/material-aware content.");
-                    content.Usage.Add("Use llHMAC() and llComputeHash() for signature checks, web callbacks and secure scripted handshakes.");
+                    content.Usage.Add("Use llGetEnvironment(), llReplaceEnvironment(), llReplaceAgentEnvironment(), llSetEnvironment() and llSetAgentEnvironment() for supported EEP day-cycle, parcel, region and agent environment workflows.");
+                    content.Usage.Add("Use llReturnObjectsByID(), llReturnObjectsByOwner(), OBJECT_RETURN_* and PERMISSION_RETURN_OBJECTS for scripted estate/parcel cleanup.");
+                    content.Usage.Add("Use llSetParcelForSale(forSale, options), PARCEL_SALE_* and PERMISSION_PRIVILEGED_LAND_ACCESS for scripted parcel sale workflows when the script owner owns the parcel.");
+                    content.Usage.Add("Use llSetGroundTexture() with TERRAIN_DETAIL_* and TERRAIN_HEIGHT_RANGE_* to update estate terrain textures and blending heights.");
+                    content.Usage.Add("Use llSetRenderMaterial(), llSetLinkRenderMaterial(), llSetLinkGLTFOverrides(), llGetRenderMaterial(), llIsLinkGLTFMaterial(), PRIM_RENDER_MATERIAL, PRIM_GLTF_* and OVERRIDE_GLTF_* constants for PBR/material-aware content.");
+                    content.Usage.Add("Use llMatchGroup(agent, group_keys) for same-region active-group checks without scripted llSameGroup relay objects.");
+                    content.Usage.Add("Use llSetDamage(), llDamage(), llGetHealth(), PRIM_DAMAGE, PRIM_HEALTH, OBJECT_HEALTH, OBJECT_DAMAGE, OBJECT_DAMAGE_TYPE and DAMAGE_TYPE_* constants for supported health/damage workflows.");
+                    content.Usage.Add("Pathfinding scripts can compile against llCreateCharacter(), llNavigateTo(), llGetStaticPath() and related CHARACTER_* APIs; OpenSim posts PU_FAILURE_NO_NAVMESH path_update events instead of simulating fake movement.");
+                    content.Usage.Add("Use llHMAC(), llComputeHash(), llSignRSA() and llVerifyRSA() for signature checks, web callbacks and secure scripted handshakes.");
+                    content.Usage.Add("Use llGetAttachedListFiltered(), ATTACH_ANY_HUD, FILTER_INCLUDE and FILTER_FLAG_HUDS for filtered attachment queries.");
+                    content.Usage.Add("Use llDetectedRezzer() from sensor/collision/touch-style detected data when scripts need to identify object provenance.");
+                    content.Usage.Add("Use llFindNotecardTextSync() for cached synchronous notecard text search.");
+                    content.Usage.Add("Use llGiveAgentInventory(), llSetAgentRot(), llOpenFloater() status codes and llTransferOwnership() where estate trust and simulator support allow those workflows.");
                     content.Usage.Add("Use llWorldPosToHUD() for HUDs that need to point at or track in-world positions.");
                     content.Usage.Add("Use llGetStartString() when scripts need SL-style start parameter data after rez.");
+                    content.Usage.Add("llSetSculptAnim() is exposed for script compatibility; OpenSim currently has no sculpt-map animation backend.");
                     content.Notes.Add("The default permission bitmask excludes PERMISSION_DEBIT and ownership changes.");
                     content.Notes.Add("Untrusted scripts keep the normal viewer permission prompt behavior.");
                     content.Notes.Add("The store is scoped per region/owner and persisted under KeyValueStorePath, making it useful for estate tools, games, rides and AI build workflows.");
                     content.Notes.Add("Use KeyValueStoreMaxKeys, KeyValueStoreMaxKeyBytes, KeyValueStoreMaxValueBytes, KeyValueStoreMaxStoreBytes and KeyValueStorePath to tune storage.");
-                    content.Notes.Add("New constants documented by the script runtime include XP_ERROR_*, SIT_*, SIT_FLAG_*, LINKSETDATA_*, SOUND_*, REZ_*, REZ_FLAG_*, PRIM_SCRIPTED_SIT_ONLY, PRIM_ALLOW_UNSIT, PRIM_SIT_TARGET, PRIM_RENDER_MATERIAL, PRIM_GLTF_* and CHANGED_RENDER_MATERIAL.");
+                    content.Notes.Add("New constants documented by the script runtime include XP_ERROR_*, SIT_*, SIT_FLAG_*, LINKSETDATA_*, SOUND_*, REZ_*, REZ_FLAG_*, PARCEL_SALE_*, OBJECT_RETURN_*, ENV_*, SKY_*, WATER_*, TERRAIN_*, TRANSFER_*, FILTER_*, DAMAGE_TYPE_*, CHARACTER_*, PU_*, PRIM_SCRIPTED_SIT_ONLY, PRIM_ALLOW_UNSIT, PRIM_SIT_TARGET, PRIM_RENDER_MATERIAL, PRIM_GLTF_*, OVERRIDE_GLTF_* and CHANGED_RENDER_MATERIAL.");
+                    content.Notes.Add("Pathfinding/character APIs, sculpt-map animation and per-parameter EEP override persistence still require deeper simulator modules and are intentionally not advertised as complete.");
                     content.Notes.Add("Existing RegionWeb feature files are merged with these built-in defaults at render time, so older auto-generated pages pick up the newer LSL surface without deleting local notes.");
                     break;
             }

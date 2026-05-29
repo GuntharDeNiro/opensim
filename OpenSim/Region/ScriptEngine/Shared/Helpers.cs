@@ -117,6 +117,7 @@ namespace OpenSim.Region.ScriptEngine.Shared
             Name = String.Empty;
             Owner = UUID.Zero;
             Position = new LSL_Types.Vector3();
+            Rezzer = UUID.Zero;
             Rotation = new LSL_Types.Quaternion();
             Type = 0;
             Velocity = new LSL_Types.Vector3();
@@ -130,6 +131,7 @@ namespace OpenSim.Region.ScriptEngine.Shared
         public string Name;
         public UUID Owner;
         public LSL_Types.Vector3 Position;
+        public UUID Rezzer;
         public LSL_Types.Quaternion Rotation;
         public int Type;
         public LSL_Types.Vector3 Velocity;
@@ -224,6 +226,7 @@ namespace OpenSim.Region.ScriptEngine.Shared
             Group = part.GroupID;
             Name = part.Name;
             Owner = part.OwnerID;
+            Rezzer = part.ParentGroup.RezzerID;
             if (part.Velocity.IsZero())
                 Type = PASSIVE;
             else
@@ -282,6 +285,7 @@ namespace OpenSim.Region.ScriptEngine.Shared
             Owner = obj.ownerUUID;
             Group = obj.groupUUID;
             Position = new LSL_Types.Vector3(obj.posVector);
+            Rezzer = part.ParentGroup.RezzerID;
             Rotation = new LSL_Types.Quaternion(obj.rotQuat);
             Velocity = new LSL_Types.Vector3(obj.velVector);
             LinkNum = obj.linkNumber;

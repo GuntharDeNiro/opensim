@@ -767,6 +767,7 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                                                 UUID d_group = UUID.Zero;
                                                 string d_name = String.Empty;
                                                 UUID d_owner = UUID.Zero;
+                                                UUID d_rezzer = UUID.Zero;
                                                 LSL_Vector d_position = new LSL_Vector();
                                                 LSL_Rotation d_rotation = new LSL_Rotation();
                                                 int d_type = 0;
@@ -786,6 +787,10 @@ namespace OpenSim.Region.ScriptEngine.Yengine
 
                                                     tmp = det.Attributes.GetNamedItem("owner").Value;
                                                     UUID.TryParse(tmp, out d_owner);
+
+                                                    XmlNode rezzerNode = det.Attributes.GetNamedItem("rezzer");
+                                                    if (rezzerNode != null)
+                                                        UUID.TryParse(rezzerNode.Value, out d_rezzer);
 
                                                     tmp = det.Attributes.GetNamedItem("position").Value;
                                                     d_position = new LSL_Types.Vector3(tmp);
@@ -813,6 +818,7 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                                                 d.Group = d_group;
                                                 d.Name = d_name;
                                                 d.Owner = d_owner;
+                                                d.Rezzer = d_rezzer;
                                                 d.Position = d_position;
                                                 d.Rotation = d_rotation;
                                                 d.Type = d_type;
@@ -1047,6 +1053,9 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                     detprm.Group = new UUID(detxml.Attributes.GetNamedItem("group").Value);
                     detprm.Key = new UUID(detxml.Attributes.GetNamedItem("key").Value);
                     detprm.Owner = new UUID(detxml.Attributes.GetNamedItem("owner").Value);
+                    XmlNode rezzerNode = detxml.Attributes.GetNamedItem("rezzer");
+                    if (rezzerNode != null)
+                        detprm.Rezzer = new UUID(rezzerNode.Value);
 
                     detprm.LinkNum = Int32.Parse(detxml.Attributes.GetNamedItem("linkNum").Value);
                     detprm.Type = Int32.Parse(detxml.Attributes.GetNamedItem("type").Value);

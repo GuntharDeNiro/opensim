@@ -277,6 +277,10 @@ namespace OpenSim.Region.ScriptEngine.Yengine
             d_owner.Value = d.Owner.ToString();
             detectParamsN.Attributes.Append(d_owner);
 
+            XmlAttribute d_rezzer = doc.CreateAttribute("", "rezzer", "");
+            d_rezzer.Value = d.Rezzer.ToString();
+            detectParamsN.Attributes.Append(d_rezzer);
+
             XmlAttribute d_position = doc.CreateAttribute("", "position", "");
             d_position.Value = d.Position.ToString();
             detectParamsN.Attributes.Append(d_position);

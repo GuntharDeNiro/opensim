@@ -1,6 +1,6 @@
 # Second Life LSL Compatibility Audit
 
-Source baseline: official Second Life Wiki `Category:LSL Functions`, captured 2026-05-28.
+Source baseline: official Second Life Wiki `Category:LSL Functions`, captured 2026-05-28 and rechecked 2026-05-29.
 
 This document tracks the script-engine compatibility pass against Second Life LSL.
 The goal is to make missing or divergent behavior explicit before implementing it,
@@ -8,8 +8,9 @@ so additions are deliberate and testable instead of guessed from individual scri
 
 ## Current Pass
 
-- Official Second Life function names collected: 519.
+- Official Second Life function names collected: 514 public function pages after filtering localized subpages.
 - OpenSim LSL stub exported functions collected from `LSL_Stub.cs`.
+- Current stub name gap against that category: 0 missing names.
 - First corrected semantic area: list slicing and strided list search.
 - First exposed missing function already implemented in the API: `llGetStartString`.
 - First newly implemented environment helper: `llGetRegionTimeOfDay`.
@@ -33,51 +34,80 @@ so additions are deliberate and testable instead of guessed from individual scri
   - Returns current region environment time when the environment module is available.
   - Falls back to `llGetTimeOfDay` if the region environment module is absent.
 
-## Missing From OpenSim LSL Stub After Initial Scan
-
-These require implementation review and either proper support, deliberate no-op
-compatibility behavior, or a documented unsupported status.
-
-- `llAdjustDamage`
-- `llCreateCharacter`
-- `llDamage`
-- `llDeleteCharacter`
-- `llDetectedDamage`
 - `llDetectedRezzer`
-- `llEvade`
-- `llExecCharacterCmd`
-- `llFindNotecardTextSync`
-- `llFleeFrom`
+  - Carries the rezzer UUID through detect params.
+  - Persists the value through YEngine capture/restore and serialized detect snapshots.
+
 - `llGetAttachedListFiltered`
-- `llGetClosestNavPoint`
-- `llGetEnvironment`
-- `llGetStaticPath`
+  - Supports include filters and the HUD flag.
+  - Keeps HUD attachment visibility limited to the script owner.
+
+- `llFindNotecardTextSync`
+  - Performs cached synchronous notecard regex search.
+  - Returns `[line, index, length]` strides, capped to 64 matches per call.
+
 - `llGiveAgentInventory`
-- `llNavigateTo`
+  - Delivers a folder of copyable/transferable task inventory to an in-region agent.
+  - Returns SL-style `ERR_*` values for malformed parameters and generic transfer failure.
+
 - `llOpenFloater`
-- `llPatrolPoints`
-- `llPursue`
-- `llReplaceAgentEnvironment`
-- `llReplaceEnvironment`
-- `llReturnObjectsByID`
-- `llReturnObjectsByOwner`
-- `llSetAgentEnvironment`
+  - Exposes the SL signature and returns deterministic attachment/agent/experience status.
+
 - `llSetAgentRot`
-- `llSetEnvironment`
-- `llSetGroundTexture`
-- `llSetLinkGLTFOverrides`
+  - Applies yaw rotation to the granted in-region avatar when animation permissions are held.
+
 - `llSetLinkRenderMaterial`
-- `llSignRSA`
-- `llTransferOwnership`
-- `llUpdateCharacter`
-- `llVerifyRSA`
-- `llWanderWithin`
+  - Applies render material changes across link selectors using the same material storage as `llSetRenderMaterial`.
+
+- `llSignRSA` and `llVerifyRSA`
+  - Support PEM RSA signatures with SHA-1, SHA-224, SHA-256, SHA-384 and SHA-512 names.
+
+- Environment helpers
+  - Adds `llGetEnvironment` for day info, sky tracks and supported sky fields.
+  - Adds region/parcel/agent environment replacement and clearing through the existing EEP environment module.
+  - Per-parameter `llSetEnvironment`/`llSetAgentEnvironment` overrides return `ENV_INVALID_RULE` until OpenSim has matching persistent override storage.
+
+- Estate and parcel management helpers
+  - Adds `llReturnObjectsByID` and `llReturnObjectsByOwner` using the simulator's return permission checks.
+  - Adds `llSetGroundTexture` for terrain detail textures and height ranges through the estate module.
+  - Adds `llSetParcelForSale(forSale, options)` with `PARCEL_SALE_*` result codes and `PERMISSION_PRIVILEGED_LAND_ACCESS` checks.
+  - Adds `llTransferOwnership` for direct in-world transfer; copy/take inventory transfer flags remain unsupported.
+
+- Group and sculpt compatibility helpers
+  - Adds `llMatchGroup(agent, group_keys)` for same-region active-group checks.
+  - Exposes `llSetSculptAnim` for script compatibility; OpenSim still lacks a sculpt-map animation backend.
+
+- Damage and combat helpers
+  - Adds `llDamage` using OpenSim's existing avatar health and death/teleport-home path.
+  - Adds `PRIM_DAMAGE` and `PRIM_HEALTH` support in primitive params.
+  - Adds `OBJECT_HEALTH`, `OBJECT_DAMAGE` and `OBJECT_DAMAGE_TYPE` details.
+  - Exposes `llDetectedDamage` as an empty result outside missing Combat2 event metadata.
+  - Exposes `llAdjustDamage` with an explicit unsupported status because OpenSim does not yet carry `on_damage` adjustment state.
+
+- Pathfinding compatibility surface
+  - Exposes the Second Life pathfinding/character function names and constants so scripts compile.
+  - `llGetStaticPath` returns `PU_FAILURE_NO_NAVMESH`.
+  - Character movement commands post `path_update(PU_FAILURE_NO_NAVMESH, [])` instead of faking movement.
+
+- GLTF override helpers
+  - Adds `llSetLinkGLTFOverrides` for material factor overrides backed by OpenSim render material override storage.
+  - Supports base color/alpha, alpha mode, alpha mask, double-sided, metallic, roughness and emissive factors.
+  - Does not claim support for missing texture/transform override readback beyond preserving compact override data where possible.
+
+## Missing Or Backend-Limited After This Pass
+
+- True Second Life navmesh/pathfinding character simulation.
+- Combat2 `on_damage` event state and mutable per-hit damage adjustment.
+- Full per-parameter EEP override persistence for `llSetEnvironment` and `llSetAgentEnvironment`.
+- GLTF texture/transform override APIs and full underlying material asset readback.
+- Inventory copy/take modes for `llTransferOwnership`.
+- True client-visible sculpt-map animation for `llSetSculptAnim`.
 
 ## Next High-Value Buckets
 
-- Pathfinding/character functions: `llCreateCharacter`, `llNavigateTo`, `llWanderWithin`, and related commands.
-- Environment functions: parcel/agent/region environment replacements and queries.
-- Render material functions: GLTF and render-material setters.
-- Damage/combat functions: damage metadata and detected damage.
-- Administrative return/ownership helpers.
-- Crypto helpers: RSA signing and verification.
+- Pathfinding backend work if OpenSim gains a region navmesh provider.
+- Environment functions: full per-parameter EEP override storage for `llSetEnvironment` and `llSetAgentEnvironment`.
+- Render material functions: texture transform readback and full PRIM_GLTF parameter support.
+- Damage/combat functions: `on_damage` event metadata and adjustment.
+- Administrative ownership helpers: inventory copy/take modes for `llTransferOwnership`.
+- Sculpt animation: simulator/viewer protocol support if OpenSim gains a real backend for it.
