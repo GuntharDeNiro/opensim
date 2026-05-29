@@ -11873,10 +11873,10 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                                 return new LSL_List();
 
                             int material_bits = rules.GetIntegerItem(idx++);
-                            float material_density = rules.GetFloatItem(idx++);
-                            float material_friction = rules.GetFloatItem(idx++);
-                            float material_restitution = rules.GetFloatItem(idx++);
                             float material_gravity_modifier = rules.GetFloatItem(idx++);
+                            float material_restitution = rules.GetFloatItem(idx++);
+                            float material_friction = rules.GetFloatItem(idx++);
+                            float material_density = rules.GetFloatItem(idx++);
 
                             SetPhysicsMaterial(part, material_bits, material_density, material_friction, material_restitution, material_gravity_modifier);
 
@@ -12439,6 +12439,14 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                                 part.ParentGroup.HasGroupChanged = true;
                                 part.ScheduleFullUpdate();
                             }
+                            break;
+
+                        case ScriptBaseClass.PRIM_RENDER_MATERIAL:
+                            if (remain < 2)
+                                return new LSL_List();
+
+                            face = rules.GetIntegerItem(idx++);
+                            SetRenderMaterial(part, new LSL_String(rules.Data[idx++].ToString()), new LSL_Integer(face), originFunc);
                             break;
 
                         default:
@@ -13286,6 +13294,17 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                         res.Add(new LSL_Integer((int)part.PhysicsShapeType));
                         break;
 
+                    case ScriptBaseClass.PRIM_PHYSICS_MATERIAL:
+                        res.Add(new LSL_Integer(ScriptBaseClass.DENSITY |
+                            ScriptBaseClass.FRICTION |
+                            ScriptBaseClass.RESTITUTION |
+                            ScriptBaseClass.GRAVITY_MULTIPLIER));
+                        res.Add(new LSL_Float(part.GravityModifier));
+                        res.Add(new LSL_Float(part.Restitution));
+                        res.Add(new LSL_Float(part.Friction));
+                        res.Add(new LSL_Float(part.Density));
+                        break;
+
                     case ScriptBaseClass.PRIM_TYPE:
                         // implementing box
                         PrimitiveBaseShape Shape = part.Shape;
@@ -13755,6 +13774,41 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                         }
                         break;
 
+                    case ScriptBaseClass.PRIM_GLTF_NORMAL:
+                    case ScriptBaseClass.PRIM_GLTF_EMISSIVE:
+                    case ScriptBaseClass.PRIM_GLTF_METALLIC_ROUGHNESS:
+                    case ScriptBaseClass.PRIM_GLTF_BASE_COLOR:
+                        if (remain < 1)
+                            return new LSL_List();
+
+                        face = rules.GetIntegerItem(idx++);
+                        if (face == ScriptBaseClass.ALL_SIDES)
+                        {
+                            for (face = 0; face < nsides; face++)
+                                AddGltfPrimitiveParams(ref res, code, part, face);
+                        }
+                        else if (face >= 0 && face < nsides)
+                        {
+                            AddGltfPrimitiveParams(ref res, code, part, face);
+                        }
+                        break;
+
+                    case ScriptBaseClass.PRIM_RENDER_MATERIAL:
+                        if (remain < 1)
+                            return new LSL_List();
+
+                        face = rules.GetIntegerItem(idx++);
+                        if (face == ScriptBaseClass.ALL_SIDES)
+                        {
+                            for (face = 0; face < nsides; face++)
+                                res.Add(GetMaterial(part, face));
+                        }
+                        else if (face >= 0 && face < nsides)
+                        {
+                            res.Add(GetMaterial(part, face));
+                        }
+                        break;
+
                     case ScriptBaseClass.PRIM_LINK_TARGET:
 
                         // TODO: Should be issuing a runtime script warning in this case.
@@ -13863,6 +13917,120 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 res.Add(new LSL_Integer(1));
                 res.Add(new LSL_Integer(0));
             }
+        }
+
+        private void AddGltfPrimitiveParams(ref LSL_List res, int code, SceneObjectPart part, int face)
+        {
+            string data = GetMaterialOverrideData(part, face);
+            int textureIndex = code switch
+            {
+                ScriptBaseClass.PRIM_GLTF_NORMAL => 1,
+                ScriptBaseClass.PRIM_GLTF_METALLIC_ROUGHNESS => 2,
+                ScriptBaseClass.PRIM_GLTF_EMISSIVE => 3,
+                _ => 0
+            };
+
+            AddGltfTextureTransformParams(ref res, part, data, textureIndex);
+
+            switch (code)
+            {
+                case ScriptBaseClass.PRIM_GLTF_BASE_COLOR:
+                {
+                    double[] baseColor = ReadCompactNumberArray(data, "bc", 4);
+                    if (baseColor is null)
+                    {
+                        AddUnsetGltfValue(ref res);
+                        AddUnsetGltfValue(ref res);
+                    }
+                    else
+                    {
+                        res.Add(new LSL_Vector(baseColor[0], baseColor[1], baseColor[2]));
+                        res.Add(new LSL_Float(baseColor[3]));
+                    }
+
+                    AddCompactIntegerOrUnset(ref res, data, "am");
+                    AddCompactFloatOrUnset(ref res, data, "ac");
+                    AddCompactBoolOrUnset(ref res, data, "ds");
+                    break;
+                }
+
+                case ScriptBaseClass.PRIM_GLTF_METALLIC_ROUGHNESS:
+                    AddCompactFloatOrUnset(ref res, data, "mf");
+                    AddCompactFloatOrUnset(ref res, data, "rf");
+                    break;
+
+                case ScriptBaseClass.PRIM_GLTF_EMISSIVE:
+                {
+                    double[] emissive = ReadCompactNumberArray(data, "ec", 3);
+                    if (emissive is null)
+                        AddUnsetGltfValue(ref res);
+                    else
+                        res.Add(new LSL_Vector(emissive[0], emissive[1], emissive[2]));
+                    break;
+                }
+            }
+        }
+
+        private void AddGltfTextureTransformParams(ref LSL_List res, SceneObjectPart part, string data, int textureIndex)
+        {
+            UUID texture = ReadCompactUuidArrayItem(data, "tex", textureIndex);
+            if (texture.IsZero())
+                AddUnsetGltfValue(ref res);
+            else
+                res.Add(new LSL_String(GetMaterialTextureUUIDbyRights(texture, part)));
+
+            LSL_Vector repeats = new(1.0, 1.0, 0.0);
+            LSL_Vector offsets = new(0.0, 0.0, 0.0);
+            double rotation = 0.0;
+
+            string[] transforms = ReadCompactArrayItems(data, "ti");
+            if (textureIndex < transforms.Length)
+            {
+                string transform = transforms[textureIndex];
+                double[] scale = ReadCompactNumberArray(transform, "s", 2);
+                if (scale is not null)
+                    repeats = new LSL_Vector(scale[0], scale[1], 0.0);
+
+                double[] offset = ReadCompactNumberArray(transform, "o", 2);
+                if (offset is not null)
+                    offsets = new LSL_Vector(offset[0], offset[1], 0.0);
+
+                if (ReadCompactDouble(transform, "r", out double rot))
+                    rotation = rot;
+            }
+
+            res.Add(repeats);
+            res.Add(offsets);
+            res.Add(new LSL_Float(rotation));
+        }
+
+        private static void AddUnsetGltfValue(ref LSL_List res)
+        {
+            res.Add(new LSL_String(string.Empty));
+        }
+
+        private static void AddCompactIntegerOrUnset(ref LSL_List res, string data, string key)
+        {
+            if (ReadCompactDouble(data, key, out double value))
+                res.Add(new LSL_Integer((int)value));
+            else
+                AddUnsetGltfValue(ref res);
+        }
+
+        private static void AddCompactFloatOrUnset(ref LSL_List res, string data, string key)
+        {
+            if (ReadCompactDouble(data, key, out double value))
+                res.Add(new LSL_Float(value));
+            else
+                AddUnsetGltfValue(ref res);
+        }
+
+        private static void AddCompactBoolOrUnset(ref LSL_List res, string data, string key)
+        {
+            if (ReadCompactBool(data, key, out bool value))
+                res.Add(new LSL_Integer(value ? 1 : 0));
+            else
+                AddUnsetGltfValue(ref res);
         }
 
         public LSL_List llGetPrimMediaParams(int face, LSL_List rules)
@@ -19405,6 +19573,12 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             idx += 5;
                             break;
 
+                        case ScriptBaseClass.PRIM_RENDER_MATERIAL:
+                            if (remain < 2)
+                                return new LSL_List();
+                            idx += 2;
+                            break;
+
                         case ScriptBaseClass.PRIM_FLEXIBLE:
                             if (remain < 7)
                                 return new LSL_List();
@@ -22211,6 +22385,137 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     }
                 }
                 end = i;
+                return true;
+            }
+            return false;
+        }
+
+        private static string[] ReadCompactArrayItems(string data, string key)
+        {
+            if (!FindCompactKeyRange(data, key, out int start, out int end))
+                return Array.Empty<string>();
+
+            int valueStart = data.IndexOf('[', start);
+            if (valueStart < 0 || valueStart > end)
+                return Array.Empty<string>();
+
+            int valueEnd = FindMatchingCompactBracket(data, valueStart, '[', ']');
+            if (valueEnd < 0 || valueEnd > end)
+                return Array.Empty<string>();
+
+            List<string> items = new();
+            int itemStart = valueStart + 1;
+            int depth = 0;
+            bool inString = false;
+
+            for (int i = itemStart; i < valueEnd; ++i)
+            {
+                char c = data[i];
+                if (c == '\'')
+                {
+                    inString = !inString;
+                    continue;
+                }
+
+                if (inString)
+                    continue;
+
+                if (c == '[' || c == '{')
+                    depth++;
+                else if (c == ']' || c == '}')
+                    depth--;
+                else if (c == ',' && depth == 0)
+                {
+                    items.Add(data[itemStart..i].Trim());
+                    itemStart = i + 1;
+                }
+            }
+
+            if (itemStart <= valueEnd)
+                items.Add(data[itemStart..valueEnd].Trim());
+
+            return items.ToArray();
+        }
+
+        private static int FindMatchingCompactBracket(string data, int start, char open, char close)
+        {
+            if (start < 0 || start >= data.Length || data[start] != open)
+                return -1;
+
+            int depth = 0;
+            bool inString = false;
+            for (int i = start; i < data.Length; ++i)
+            {
+                char c = data[i];
+                if (c == '\'')
+                {
+                    inString = !inString;
+                    continue;
+                }
+
+                if (inString)
+                    continue;
+
+                if (c == open)
+                    depth++;
+                else if (c == close && --depth == 0)
+                    return i;
+            }
+
+            return -1;
+        }
+
+        private static UUID ReadCompactUuidArrayItem(string data, string key, int index)
+        {
+            string[] items = ReadCompactArrayItems(data, key);
+            if (index < 0 || index >= items.Length)
+                return UUID.Zero;
+
+            Match match = Regex.Match(items[index],
+                    @"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+            if (match.Success && UUID.TryParse(match.Value, out UUID id))
+                return id;
+
+            return UUID.Zero;
+        }
+
+        private static bool ReadCompactDouble(string data, string key, out double value)
+        {
+            value = 0.0;
+            if (!FindCompactKeyRange(data, key, out int start, out int end))
+                return false;
+
+            int colon = data.IndexOf(':', start);
+            if (colon < 0 || colon >= end)
+                return false;
+
+            Match match = Regex.Match(data[(colon + 1)..end],
+                    @"[-+]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][-+]?\d+)?");
+            return match.Success && double.TryParse(match.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+        }
+
+        private static bool ReadCompactBool(string data, string key, out bool value)
+        {
+            value = false;
+            if (!FindCompactKeyRange(data, key, out int start, out int end))
+                return false;
+
+            int colon = data.IndexOf(':', start);
+            if (colon < 0 || colon >= end)
+                return false;
+
+            string token = data[(colon + 1)..end].Trim();
+            if (token.StartsWith("true", StringComparison.OrdinalIgnoreCase))
+            {
+                value = true;
+                return true;
+            }
+            if (token.StartsWith("false", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (ReadCompactDouble(data, key, out double numeric))
+            {
+                value = Math.Abs(numeric) > double.Epsilon;
                 return true;
             }
             return false;

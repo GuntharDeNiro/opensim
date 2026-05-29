@@ -97,20 +97,26 @@ so additions are deliberate and testable instead of guessed from individual scri
 - GLTF override helpers
   - Adds `llSetLinkGLTFOverrides` for material factor overrides backed by OpenSim render material override storage.
   - Supports base color/alpha, alpha mode, alpha mask, double-sided, metallic, roughness and emissive factors.
-  - Does not claim support for missing texture/transform override readback beyond preserving compact override data where possible.
+  - Adds `PRIM_RENDER_MATERIAL` support through `llSetPrimitiveParams`, `llSetLinkPrimitiveParams`, `llGetPrimitiveParams` and `llGetLinkPrimitiveParams`.
+  - Adds `PRIM_GLTF_NORMAL`, `PRIM_GLTF_EMISSIVE`, `PRIM_GLTF_METALLIC_ROUGHNESS` and `PRIM_GLTF_BASE_COLOR` readback for stored override values.
+  - Reads compact texture, transform and factor overrides without claiming access to unset values inside the underlying material asset.
+
+- Physics material primitive params
+  - Adds `PRIM_PHYSICS_MATERIAL` readback.
+  - Aligns `PRIM_PHYSICS_MATERIAL` set argument order with Second Life: bits, gravity, restitution, friction, density.
 
 ## Missing Or Backend-Limited After This Pass
 
 - True Second Life navmesh/pathfinding character simulation.
 - Combat2 `on_damage` event state and mutable per-hit damage adjustment.
 - Full per-parameter EEP override persistence for `llSetEnvironment` and `llSetAgentEnvironment`.
-- GLTF texture/transform override APIs and full underlying material asset readback.
+- Full `PRIM_GLTF_*` set support and underlying material asset readback for unset GLTF properties.
 - True client-visible sculpt-map animation for `llSetSculptAnim`.
 
 ## Next High-Value Buckets
 
 - Pathfinding backend work if OpenSim gains a region navmesh provider.
 - Environment functions: full per-parameter EEP override storage for `llSetEnvironment` and `llSetAgentEnvironment`.
-- Render material functions: texture transform readback and full PRIM_GLTF parameter support.
+- Render material functions: full `PRIM_GLTF_*` set support and optional material asset inspection if OpenSim exposes it safely.
 - Damage/combat functions: `on_damage` event metadata and adjustment.
 - Sculpt animation: simulator/viewer protocol support if OpenSim gains a real backend for it.
