@@ -1522,8 +1522,8 @@
     ;# {ImageTerrainSeaDepth} {Enabled} {Sea depth below water for terrain generated from cartography textures} {} 5.0
     ; ImageTerrainSeaDepth = 5.0
 
-    ;# {ImageTerrainFitLandToRegion} {Enabled} {Crop detected land silhouette to fill the region} {true false} true
-    ; ImageTerrainFitLandToRegion = true
+    ;# {ImageTerrainFitLandToRegion} {Enabled} {Crop an isolated detected land silhouette to fill the region; keep false for rectangular real-world maps with surrounding countries} {true false} false
+    ; ImageTerrainFitLandToRegion = false
 
     ;# {ImageTerrainSmoothPasses} {Enabled} {Smoothing passes for playable terrain generated from cartography textures} {} 5
     ; ImageTerrainSmoothPasses = 5

@@ -95,7 +95,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             m_imageTerrainMinLandHeight = Math.Max(0.1f, config.GetFloat("ImageTerrainMinLandHeight", 1.15f));
             m_imageTerrainMaxLandHeight = Math.Max(m_imageTerrainMinLandHeight, config.GetFloat("ImageTerrainMaxLandHeight", 12.0f));
             m_imageTerrainSeaDepth = Math.Max(0.1f, config.GetFloat("ImageTerrainSeaDepth", 5.0f));
-            m_imageTerrainFitLandToRegion = config.GetBoolean("ImageTerrainFitLandToRegion", true);
+            m_imageTerrainFitLandToRegion = config.GetBoolean("ImageTerrainFitLandToRegion", false);
             m_imageTerrainSmoothPasses = Math.Max(0, config.GetInt("ImageTerrainSmoothPasses", 5));
         }
 
@@ -140,20 +140,14 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             request = NormalizeBuildRequest(request);
 
             IClientAPI client = chat.Sender;
+            if (!TryGetRootClientPresence(client, chat, out ScenePresence sp))
+                return;
+
             if (m_estateManagerOnly && !m_scene.Permissions.IsEstateManager(client.AgentId))
             {
                 SendReply(client, "TextBuild: only estate managers can use automatic building here.");
                 return;
             }
-
-            ScenePresence sp = m_scene.GetScenePresence(client.AgentId);
-            if (sp == null || sp.IsChildAgent)
-                return;
-
-            if (sp.AbsolutePosition.X < 0f || sp.AbsolutePosition.Y < 0f ||
-                sp.AbsolutePosition.X >= m_scene.RegionInfo.RegionSizeX ||
-                sp.AbsolutePosition.Y >= m_scene.RegionInfo.RegionSizeY)
-                return;
 
             TerrainRecipe terrainRecipe = ResolveTerrainRecipe(request);
             if (terrainRecipe != null)
@@ -200,6 +194,44 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             group.InvalidateDeepEffectivePerms();
             group.ScheduleGroupForUpdate(PrimUpdateFlags.FullUpdatewithAnimMatOvr);
             SendReply(client, string.Format("TextBuild: built {0}.", template.Name));
+        }
+
+        private bool TryGetRootClientPresence(IClientAPI client, OSChatMessage chat, out ScenePresence sp)
+        {
+            sp = null;
+            if (client == null || m_scene == null)
+                return false;
+
+            if (chat.Scene != null && !object.ReferenceEquals(chat.Scene, m_scene))
+                return false;
+
+            if (client.Scene != null && !object.ReferenceEquals(client.Scene, m_scene))
+                return false;
+
+            if (client.SceneAgent == null || client.SceneAgent.IsChildAgent || client.SceneAgent.IsInTransit)
+                return false;
+
+            sp = m_scene.GetScenePresence(client.AgentId);
+            if (sp == null || sp.IsChildAgent || sp.IsInTransit || sp.IsDeleted)
+                return false;
+
+            if (!object.ReferenceEquals(client.SceneAgent, sp))
+                return false;
+
+            if (!IsInsideRegion(sp.AbsolutePosition))
+                return false;
+
+            if (chat.Position != Vector3.Zero && !IsInsideRegion(chat.Position))
+                return false;
+
+            return true;
+        }
+
+        private bool IsInsideRegion(Vector3 position)
+        {
+            return position.X >= 0f && position.Y >= 0f &&
+                position.X < m_scene.RegionInfo.RegionSizeX &&
+                position.Y < m_scene.RegionInfo.RegionSizeY;
         }
 
         private static bool IsBuildCommand(string request)
@@ -307,6 +339,10 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 || lower.Contains("canyon")
                 || lower.Contains("cartografia")
                 || lower.Contains("satellite")
+                || lower.Contains("italia")
+                || lower.Contains("italy")
+                || lower.Contains("italian")
+                || lower.Contains("penisola")
                 || lower.Contains("sardegna")
                 || lower.Contains("sardinia");
 
@@ -363,15 +399,23 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 || lower.Contains("terreno")
                 || lower.Contains("coastline")
                 || lower.Contains("costa")
+                || lower.Contains("italia")
+                || lower.Contains("italy")
+                || lower.Contains("italian")
+                || lower.Contains("penisola")
                 || lower.Contains("sardegna")
                 || lower.Contains("sardinia");
 
             if (!wantsImageTerrain)
                 return false;
 
-            string name = (lower.Contains("sardegna") || lower.Contains("sardinia"))
-                ? "Sardinia image terrain"
-                : "image-mapped terrain";
+            string name;
+            if (lower.Contains("sardegna") || lower.Contains("sardinia"))
+                name = "Sardinia image terrain";
+            else if (lower.Contains("italia") || lower.Contains("italy") || lower.Contains("italian") || lower.Contains("penisola"))
+                name = "Italy image terrain";
+            else
+                name = "image-mapped terrain";
 
             recipe = new TerrainRecipe(name, TerrainStyle.ImageMap)
             {
@@ -1166,6 +1210,8 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 }
             }
 
+            RefineImageLandMask(width, height, land);
+
             if (!fitLandToRegion || !TryFindDominantLandBounds(width, height, land, out int minX, out int minY, out int maxX, out int maxY))
             {
                 minX = 0;
@@ -1189,6 +1235,59 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             relief = SmoothMapValues(relief, width, height, smoothPasses);
 
             return new ImageTerrainData(textureID, width, height, land, relief, coastLand, minX, minY, maxX, maxY);
+        }
+
+        private static void RefineImageLandMask(int width, int height, float[] land)
+        {
+            int pixelCount = width * height;
+            if (width <= 0 || height <= 0 || land == null || land.Length < pixelCount)
+                return;
+
+            const float waterThreshold = 0.46f;
+            bool[] sea = new bool[pixelCount];
+            int[] queue = new int[pixelCount];
+            int head = 0;
+            int tail = 0;
+
+            void EnqueueSea(int index)
+            {
+                if (index < 0 || index >= pixelCount || sea[index] || land[index] >= waterThreshold)
+                    return;
+
+                sea[index] = true;
+                queue[tail++] = index;
+            }
+
+            for (int x = 0; x < width; ++x)
+            {
+                EnqueueSea(x);
+                EnqueueSea((height - 1) * width + x);
+            }
+
+            for (int y = 1; y < height - 1; ++y)
+            {
+                EnqueueSea(y * width);
+                EnqueueSea(y * width + width - 1);
+            }
+
+            while (head < tail)
+            {
+                int index = queue[head++];
+                int x = index % width;
+                int y = index / width;
+
+                if (x > 0)
+                    EnqueueSea(index - 1);
+                if (x + 1 < width)
+                    EnqueueSea(index + 1);
+                if (y > 0)
+                    EnqueueSea(index - width);
+                if (y + 1 < height)
+                    EnqueueSea(index + width);
+            }
+
+            FillSmallInteriorWaterGaps(width, height, pixelCount, land, sea, waterThreshold, queue);
+            RemoveSmallLandSpecks(width, height, pixelCount, land, waterThreshold, queue);
         }
 
         private static bool TryFindDominantLandBounds(int width, int height, float[] land, out int minX, out int minY, out int maxX, out int maxY)
@@ -1250,6 +1349,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             FillSmallInteriorWaterGaps(width, height, pixelCount, land, sea, waterThreshold, queue);
 
             int bestArea = 0;
+            int largestBorderArea = 0;
             for (int i = 0; i < pixelCount; ++i)
             {
                 if (visited[i] || sea[i] || land[i] <= landThreshold)
@@ -1260,6 +1360,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 int componentMaxX = -1;
                 int componentMaxY = -1;
                 int area = 0;
+                bool touchesBorder = false;
                 head = 0;
                 tail = 0;
                 visited[i] = true;
@@ -1275,6 +1376,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                     componentMinY = Math.Min(componentMinY, y);
                     componentMaxX = Math.Max(componentMaxX, x);
                     componentMaxY = Math.Max(componentMaxY, y);
+                    touchesBorder |= x == 0 || y == 0 || x == width - 1 || y == height - 1;
 
                     void EnqueueLand(int next)
                     {
@@ -1295,7 +1397,10 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                         EnqueueLand(index + width);
                 }
 
-                if (area > bestArea)
+                if (touchesBorder)
+                    largestBorderArea = Math.Max(largestBorderArea, area);
+
+                if (!touchesBorder && area > bestArea)
                 {
                     bestArea = area;
                     minX = componentMinX;
@@ -1305,7 +1410,16 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 }
             }
 
-            return bestArea >= Math.Max(32, pixelCount / 2500);
+            if (bestArea < Math.Max(32, pixelCount / 50) || largestBorderArea > bestArea * 2)
+                return false;
+
+            int boundsWidth = maxX - minX + 1;
+            int boundsHeight = maxY - minY + 1;
+            if (boundsWidth > width * 0.86f || boundsHeight > height * 0.86f ||
+                boundsWidth * boundsHeight > pixelCount * 0.70f)
+                return false;
+
+            return true;
         }
 
         private static void FillSmallInteriorWaterGaps(
@@ -1359,6 +1473,60 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 {
                     for (int j = 0; j < tail; ++j)
                         land[queue[j]] = 0.68f;
+                }
+            }
+        }
+
+        private static void RemoveSmallLandSpecks(
+            int width,
+            int height,
+            int pixelCount,
+            float[] land,
+            float landThreshold,
+            int[] queue)
+        {
+            bool[] visited = new bool[pixelCount];
+            int smallLandLimit = Math.Max(12, pixelCount / 5000);
+
+            for (int i = 0; i < pixelCount; ++i)
+            {
+                if (visited[i] || land[i] < landThreshold)
+                    continue;
+
+                int head = 0;
+                int tail = 0;
+                visited[i] = true;
+                queue[tail++] = i;
+
+                while (head < tail)
+                {
+                    int index = queue[head++];
+                    int x = index % width;
+                    int y = index / width;
+
+                    void EnqueueLand(int next)
+                    {
+                        if (next < 0 || next >= pixelCount || visited[next] || land[next] < landThreshold)
+                            return;
+
+                        visited[next] = true;
+                        queue[tail++] = next;
+                    }
+
+                    if (x > 0)
+                        EnqueueLand(index - 1);
+                    if (x + 1 < width)
+                        EnqueueLand(index + 1);
+                    if (y > 0)
+                        EnqueueLand(index - width);
+                    if (y + 1 < height)
+                        EnqueueLand(index + width);
+                }
+
+                if (tail <= smallLandLimit)
+                {
+                    for (int j = 0; j < tail; ++j)
+                        land[queue[j]] = 0f;
                 }
             }
         }
