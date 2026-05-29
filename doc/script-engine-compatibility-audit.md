@@ -48,7 +48,7 @@ so additions are deliberate and testable instead of guessed from individual scri
 
 - `llGiveAgentInventory`
   - Delivers a folder of copyable/transferable task inventory to an in-region agent.
-  - Returns SL-style `ERR_*` values for malformed parameters and generic transfer failure.
+  - Supports `TRANSFER_DEST` root paths, validates `TRANSFER_FLAGS`, and returns SL-style `TRANSFER_*` result codes.
 
 - `llOpenFloater`
   - Exposes the SL signature and returns deterministic attachment/agent/experience status.
@@ -70,12 +70,17 @@ so additions are deliberate and testable instead of guessed from individual scri
 - Estate and parcel management helpers
   - Adds `llReturnObjectsByID` and `llReturnObjectsByOwner` using the simulator's return permission checks.
   - Adds `llSetGroundTexture` for terrain detail textures and height ranges through the estate module.
+  - Corrects `llSetGroundTexture` and `llManageEstateAccess` estate-manager permissions to use owner-or-manager estate command checks where SL-compatible.
+  - Persists `llManageEstateAccess` mutations and triggers estate-info change notifications after successful updates.
   - Adds `llSetParcelForSale(forSale, options)` with `PARCEL_SALE_*` result codes and `PERMISSION_PRIVILEGED_LAND_ACCESS` checks.
-  - Adds `llTransferOwnership` for direct in-world transfer; copy/take inventory transfer flags remain unsupported.
+  - Adds `PARCEL_MEDIA_COMMAND_LOOP_SET` and improves parcel media command/query handling for loop, autoscale, description, MIME type and integer media size values.
+  - Adds `llTransferOwnership` for direct in-world transfer and inventory delivery with `TRANSFER_FLAG_COPY` and `TRANSFER_FLAG_TAKE`.
+  - Applies SL-style transfer cleanup for embedded no-transfer and no-copy task inventory during ownership transfer.
 
 - Group and sculpt compatibility helpers
   - Adds `llMatchGroup(agent, group_keys)` for same-region active-group checks.
   - Exposes `llSetSculptAnim` for script compatibility; OpenSim still lacks a sculpt-map animation backend.
+  - Keeps `llGodLikeRezObject` restricted to actual god-mode script owners instead of logging unsupported while still rezzing.
 
 - Damage and combat helpers
   - Adds `llDamage` using OpenSim's existing avatar health and death/teleport-home path.
@@ -100,7 +105,6 @@ so additions are deliberate and testable instead of guessed from individual scri
 - Combat2 `on_damage` event state and mutable per-hit damage adjustment.
 - Full per-parameter EEP override persistence for `llSetEnvironment` and `llSetAgentEnvironment`.
 - GLTF texture/transform override APIs and full underlying material asset readback.
-- Inventory copy/take modes for `llTransferOwnership`.
 - True client-visible sculpt-map animation for `llSetSculptAnim`.
 
 ## Next High-Value Buckets
@@ -109,5 +113,4 @@ so additions are deliberate and testable instead of guessed from individual scri
 - Environment functions: full per-parameter EEP override storage for `llSetEnvironment` and `llSetAgentEnvironment`.
 - Render material functions: texture transform readback and full PRIM_GLTF parameter support.
 - Damage/combat functions: `on_damage` event metadata and adjustment.
-- Administrative ownership helpers: inventory copy/take modes for `llTransferOwnership`.
 - Sculpt animation: simulator/viewer protocol support if OpenSim gains a real backend for it.

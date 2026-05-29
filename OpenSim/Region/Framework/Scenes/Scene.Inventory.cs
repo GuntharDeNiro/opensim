@@ -1631,6 +1631,73 @@ namespace OpenSim.Region.Framework.Scenes
             }
         }
 
+        private static bool IsDisallowedInventoryTransferFolder(InventoryFolderBase folder)
+        {
+            if (folder is null)
+                return true;
+
+            return folder.Type == (short)FolderType.Root ||
+                    folder.Type == (short)FolderType.Trash ||
+                    folder.Type == (short)FolderType.LostAndFound ||
+                    folder.Type == (short)FolderType.CurrentOutfit ||
+                    folder.Type == (short)FolderType.Inbox ||
+                    folder.Type == (short)FolderType.Outbox ||
+                    folder.Type == (short)FolderType.Suitcase;
+        }
+
+        private InventoryFolderBase FindOrCreateChildFolder(UUID ownerID, InventoryFolderBase parent, string name)
+        {
+            if (parent is null || string.IsNullOrEmpty(name))
+                return null;
+
+            InventoryCollection contents = InventoryService.GetFolderContent(ownerID, parent.ID);
+            if (contents is not null)
+            {
+                foreach (InventoryFolderBase folder in contents.Folders)
+                {
+                    if (folder.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                        return folder;
+                }
+            }
+
+            UUID folderID = UUID.Random();
+            InventoryFolderBase newFolder = new(folderID, name, ownerID, -1, parent.ID, parent.Version);
+            return InventoryService.AddFolder(newFolder) ? newFolder : null;
+        }
+
+        private InventoryFolderBase ResolveTaskInventoryDestinationRoot(UUID destID, InventoryFolderBase rootFolder,
+                string category, out string finalFolderName)
+        {
+            finalFolderName = category;
+            if (rootFolder is null || string.IsNullOrEmpty(category))
+                return null;
+
+            string[] rawSegments = category.Split('|');
+            List<string> segments = new(rawSegments.Length);
+            foreach (string rawSegment in rawSegments)
+            {
+                string segment = rawSegment.Trim();
+                if (string.IsNullOrEmpty(segment))
+                    continue;
+                segments.Add(segment);
+            }
+
+            if (segments.Count == 0)
+                return null;
+
+            finalFolderName = segments[segments.Count - 1];
+            InventoryFolderBase parent = rootFolder;
+            for (int i = 0; i < segments.Count - 1; i++)
+            {
+                InventoryFolderBase child = FindOrCreateChildFolder(destID, parent, segments[i]);
+                if (IsDisallowedInventoryTransferFolder(child))
+                    return null;
+                parent = child;
+            }
+
+            return parent;
+        }
+
         public UUID MoveTaskInventoryItems(UUID destID, string category, SceneObjectPart host, List<UUID> items, bool sendUpdates = true)
         {
             SceneObjectPart destPart = GetSceneObjectPart(destID);
@@ -1655,9 +1722,14 @@ namespace OpenSim.Region.Framework.Scenes
             if(rootFolder is null)
                 return UUID.Zero;
 
+            InventoryFolderBase parentFolder = ResolveTaskInventoryDestinationRoot(destID, rootFolder, category, out string finalFolderName);
+            if (parentFolder is null)
+                return UUID.Zero;
+
             UUID newFolderID = UUID.Random();
-            InventoryFolderBase newFolder = new(newFolderID, category, destID, -1, rootFolder.ID, rootFolder.Version);
-            InventoryService.AddFolder(newFolder);
+            InventoryFolderBase newFolder = new(newFolderID, finalFolderName, destID, -1, parentFolder.ID, parentFolder.Version);
+            if (!InventoryService.AddFolder(newFolder))
+                return UUID.Zero;
 
             foreach (UUID itemID in items)
             {
@@ -1677,6 +1749,8 @@ namespace OpenSim.Region.Framework.Scenes
             if(sendUpdates)
             {
                 SendInventoryUpdate(remoteClient, rootFolder, true, false);
+                if (parentFolder.ID.NotEqual(rootFolder.ID))
+                    SendInventoryUpdate(remoteClient, parentFolder, true, false);
                 SendInventoryUpdate(remoteClient, newFolder, false, true);
             }
 

@@ -604,6 +604,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         public const int PARCEL_MEDIA_COMMAND_TYPE = 10;
         public const int PARCEL_MEDIA_COMMAND_SIZE = 11;
         public const int PARCEL_MEDIA_COMMAND_DESC = 12;
+        public const int PARCEL_MEDIA_COMMAND_LOOP_SET = 13;
 
         public const int PARCEL_FLAG_ALLOW_FLY = 0x1;                           // parcel allows flying
         public const int PARCEL_FLAG_ALLOW_SCRIPTS = 0x2;                       // parcel allows outside scripts
@@ -1285,6 +1286,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         public const int TRANSFER_FLAG_RESERVED = 0x0001;
         public const int TRANSFER_FLAG_TAKE = 0x0002;
         public const int TRANSFER_FLAG_COPY = 0x0004;
+        public const int TRANSFER_DEST = 0;
+        public const int TRANSFER_FLAGS = 1;
 
         public const int TRANSFER_OK = 0;
         public const int TRANSFER_BAD_OPTS = -1;

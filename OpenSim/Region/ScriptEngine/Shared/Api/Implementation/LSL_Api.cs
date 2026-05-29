@@ -9029,14 +9029,64 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public LSL_Integer llGiveAgentInventory(LSL_Key agentID, LSL_String folderName, LSL_List inventory, LSL_List options)
         {
-            if (inventory.Length == 0)
-                return ScriptBaseClass.ERR_MALFORMED_PARAMS;
+            if (inventory is null || inventory.Length == 0)
+                return ScriptBaseClass.TRANSFER_NO_ITEMS;
+
+            bool transferRootSpecified = false;
+            string transferRootPath = string.Empty;
+            if (options is not null && options.Length > 0)
+            {
+                int optIndex = 0;
+                while (optIndex < options.Length)
+                {
+                    try
+                    {
+                        int option = options.GetLSLIntegerItem(optIndex++);
+                        switch (option)
+                        {
+                            case ScriptBaseClass.TRANSFER_DEST:
+                                if (optIndex >= options.Length)
+                                    return ScriptBaseClass.TRANSFER_BAD_OPTS;
+                                transferRootSpecified = true;
+                                transferRootPath = options.GetStrictLSLStringItem(optIndex++).Trim('|');
+                                break;
+
+                            case ScriptBaseClass.TRANSFER_FLAGS:
+                                if (optIndex >= options.Length)
+                                    return ScriptBaseClass.TRANSFER_BAD_OPTS;
+                                if (options.GetLSLIntegerItem(optIndex++) != 0)
+                                    return ScriptBaseClass.TRANSFER_BAD_OPTS;
+                                break;
+
+                            default:
+                                return ScriptBaseClass.TRANSFER_BAD_OPTS;
+                        }
+                    }
+                    catch
+                    {
+                        return ScriptBaseClass.TRANSFER_BAD_OPTS;
+                    }
+                }
+            }
+
+            if (transferRootSpecified)
+            {
+                int rootSegmentCount = 0;
+                foreach (string rawSegment in transferRootPath.Split('|'))
+                {
+                    if (!string.IsNullOrWhiteSpace(rawSegment))
+                        rootSegmentCount++;
+                }
+
+                if (rootSegmentCount == 0 || rootSegmentCount > 4)
+                    return ScriptBaseClass.TRANSFER_BAD_ROOT;
+            }
 
             if (!UUID.TryParse(agentID, out UUID destID) || destID.IsZero())
-                return ScriptBaseClass.ERR_MALFORMED_PARAMS;
+                return ScriptBaseClass.TRANSFER_NO_TARGET;
 
             if (!World.TryGetScenePresence(destID, out ScenePresence sp))
-                return ScriptBaseClass.ERR_MALFORMED_PARAMS;
+                return ScriptBaseClass.TRANSFER_NO_TARGET;
 
             bool isNotOwner = sp.UUID.NotEqual(m_host.OwnerID);
             List<UUID> itemList = new(inventory.Length);
@@ -9059,11 +9109,15 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             }
 
             if (itemList.Count == 0)
-                return ScriptBaseClass.ERR_MALFORMED_PARAMS;
+                return ScriptBaseClass.TRANSFER_NO_ITEMS;
 
-            UUID folderID = m_ScriptEngine.World.MoveTaskInventoryItems(destID, folderName, m_host, itemList, false);
+            string destinationFolder = string.IsNullOrEmpty(transferRootPath) ?
+                    folderName : transferRootPath + "|" + folderName;
+
+            UUID folderID = m_ScriptEngine.World.MoveTaskInventoryItems(destID, destinationFolder, m_host, itemList, false);
             if (folderID.IsZero())
-                return ScriptBaseClass.ERR_GENERIC;
+                return string.IsNullOrEmpty(transferRootPath) ?
+                        ScriptBaseClass.TRANSFER_NO_ITEMS : ScriptBaseClass.TRANSFER_BAD_ROOT;
 
             if (m_TransferModule != null)
             {
@@ -9081,7 +9135,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             }
 
             ScriptSleep(3000);
-            return 0;
+            return ScriptBaseClass.TRANSFER_OK;
         }
 
         private bool TryGetReturnPermissionClient(out IClientAPI client)
@@ -9297,39 +9351,38 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             return 0;
         }
 
-        public LSL_Integer llTransferOwnership(LSL_Key agent_id, LSL_Integer flags, LSL_List options)
+        private static void RemoveTaskInventoryWithoutPermission(SceneObjectGroup group, PermissionMask requiredPermission)
         {
-            if (options is not null && options.Length > 0)
-                return ScriptBaseClass.TRANSFER_BAD_OPTS;
+            if (group is null)
+                return;
 
-            if ((flags.value & ScriptBaseClass.TRANSFER_FLAG_RESERVED) != 0)
-                return ScriptBaseClass.TRANSFER_BAD_OPTS;
+            foreach (SceneObjectPart part in group.Parts)
+            {
+                List<UUID> remove = new();
+                foreach (TaskInventoryItem item in part.Inventory.GetInventoryItems())
+                {
+                    if ((item.CurrentPermissions & (uint)requiredPermission) == 0)
+                        remove.Add(item.ItemID);
+                }
 
-            if ((flags.value & (ScriptBaseClass.TRANSFER_FLAG_COPY | ScriptBaseClass.TRANSFER_FLAG_TAKE)) != 0)
-                return ScriptBaseClass.TRANSFER_BAD_OPTS;
+                foreach (UUID itemID in remove)
+                    part.Inventory.RemoveInventoryItem(itemID);
+            }
+        }
 
-            if (!UUID.TryParse(agent_id, out UUID agentID) || agentID.IsZero())
-                return ScriptBaseClass.TRANSFER_NO_TARGET;
+        private void ApplyTransferredOwner(SceneObjectGroup group, ScenePresence target, bool preserveHostScriptPermissions, UUID previousOwner)
+        {
+            UUID permsGranter = UUID.Zero;
+            int permsMask = 0;
+            if (preserveHostScriptPermissions)
+            {
+                permsGranter = m_item.PermsGranter;
+                permsMask = m_item.PermsMask;
+            }
 
-            if (!World.TryGetScenePresence(agentID, out ScenePresence target) || target.IsChildAgent)
-                return ScriptBaseClass.TRANSFER_NO_TARGET;
+            if (previousOwner.NotEqual(target.UUID))
+                RemoveTaskInventoryWithoutPermission(group, PermissionMask.Transfer);
 
-            SceneObjectGroup group = m_host.ParentGroup;
-            if (group is null || group.IsDeleted)
-                return ScriptBaseClass.TRANSFER_NO_ITEMS;
-
-            if (group.IsAttachment)
-                return ScriptBaseClass.TRANSFER_NO_ATTACHMENT;
-
-            if (target.UUID.Equals(group.OwnerID))
-                return ScriptBaseClass.TRANSFER_OK;
-
-            uint effectivePerms = group.EffectiveOwnerPerms;
-            if ((effectivePerms & (uint)PermissionMask.Transfer) == 0)
-                return ScriptBaseClass.TRANSFER_NO_PERMS;
-
-            UUID permsGranter = m_item.PermsGranter;
-            int permsMask = m_item.PermsMask;
             group.SetOwner(target.UUID, target.ControllingClient.ActiveGroupId);
 
             if (World.Permissions.PropagatePermissions())
@@ -9343,8 +9396,96 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 group.InvalidateEffectivePerms();
             }
 
-            m_item.PermsMask = permsMask;
-            m_item.PermsGranter = permsGranter;
+            if (preserveHostScriptPermissions)
+            {
+                m_item.PermsMask = permsMask;
+                m_item.PermsGranter = permsGranter;
+            }
+        }
+
+        public LSL_Integer llTransferOwnership(LSL_Key agent_id, LSL_Integer flags, LSL_List options)
+        {
+            if (options is not null && options.Length > 0)
+                return ScriptBaseClass.TRANSFER_BAD_OPTS;
+
+            int knownFlags = ScriptBaseClass.TRANSFER_FLAG_RESERVED |
+                    ScriptBaseClass.TRANSFER_FLAG_TAKE |
+                    ScriptBaseClass.TRANSFER_FLAG_COPY;
+
+            if ((flags.value & ~knownFlags) != 0 || (flags.value & ScriptBaseClass.TRANSFER_FLAG_RESERVED) != 0)
+                return ScriptBaseClass.TRANSFER_BAD_OPTS;
+
+            if (!UUID.TryParse(agent_id, out UUID agentID) || agentID.IsZero())
+                return ScriptBaseClass.TRANSFER_NO_TARGET;
+
+            if (!World.TryGetScenePresence(agentID, out ScenePresence target) || target.IsChildAgent || target.ControllingClient is null)
+                return ScriptBaseClass.TRANSFER_NO_TARGET;
+
+            SceneObjectGroup group = m_host.ParentGroup;
+            if (group is null || group.IsDeleted)
+                return ScriptBaseClass.TRANSFER_NO_ITEMS;
+
+            if (group.IsAttachment)
+                return ScriptBaseClass.TRANSFER_NO_ATTACHMENT;
+
+            uint effectivePerms = group.EffectiveOwnerPerms;
+            if ((effectivePerms & (uint)PermissionMask.Transfer) == 0)
+                return ScriptBaseClass.TRANSFER_NO_PERMS;
+
+            bool copyToInventory = (flags.value & ScriptBaseClass.TRANSFER_FLAG_COPY) != 0;
+            bool takeToInventory = (flags.value & ScriptBaseClass.TRANSFER_FLAG_TAKE) != 0;
+            if (copyToInventory && (effectivePerms & (uint)PermissionMask.Copy) == 0)
+                return ScriptBaseClass.TRANSFER_NO_PERMS;
+
+            if (!copyToInventory && !takeToInventory && target.UUID.Equals(group.OwnerID))
+                return ScriptBaseClass.TRANSFER_OK;
+
+            if (copyToInventory || takeToInventory)
+            {
+                IInventoryAccessModule invAccess = World.RequestModuleInterface<IInventoryAccessModule>();
+                if (invAccess is null)
+                    return ScriptBaseClass.TRANSFER_NO_ITEMS;
+
+                if (copyToInventory)
+                {
+                    SceneObjectGroup copy = group.Copy(true);
+                    UUID originalOwner = group.OwnerID;
+                    ApplyTransferredOwner(copy, target, false, originalOwner);
+
+                    List<InventoryItemBase> copiedItems = invAccess.CopyToInventory(
+                            DeRezAction.TakeCopy,
+                            UUID.Zero,
+                            new List<SceneObjectGroup> { copy },
+                            target.ControllingClient,
+                            false);
+
+                    if (copiedItems is null || copiedItems.Count == 0 || copiedItems[0] is null)
+                        return ScriptBaseClass.TRANSFER_NO_ITEMS;
+
+                    if (target.UUID.NotEqual(originalOwner))
+                        RemoveTaskInventoryWithoutPermission(group, PermissionMask.Copy);
+
+                    if (!takeToInventory)
+                        return ScriptBaseClass.TRANSFER_OK;
+                }
+
+                SceneObjectGroup takeCopy = group.Copy(true);
+                ApplyTransferredOwner(takeCopy, target, false, group.OwnerID);
+                List<InventoryItemBase> takenItems = invAccess.CopyToInventory(
+                        DeRezAction.Take,
+                        UUID.Zero,
+                        new List<SceneObjectGroup> { takeCopy },
+                        target.ControllingClient,
+                        false);
+
+                if (takenItems is null || takenItems.Count == 0 || takenItems[0] is null)
+                    return ScriptBaseClass.TRANSFER_NO_ITEMS;
+
+                World.DeleteSceneObject(group, false);
+                return ScriptBaseClass.TRANSFER_OK;
+            }
+
+            ApplyTransferredOwner(group, target, true, group.OwnerID);
             return ScriptBaseClass.TRANSFER_OK;
         }
 
@@ -14955,16 +15096,15 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             if (!World.Permissions.CanEditParcelProperties(m_host.OwnerID, landObject, GroupPowers.ChangeMedia, false)) return;
 
             bool update = false; // send a ParcelMediaUpdate (and possibly change the land's media URL)?
-            byte loop = 0;
-
             LandData landData = landObject.LandData;
             string url = landData.MediaURL;
             string texture = landData.MediaID.ToString();
             bool autoAlign = landData.MediaAutoScale != 0;
-            string mediaType = ""; // TODO these have to be added as soon as LandData supports it
-            string description = "";
-            int width = 0;
-            int height = 0;
+            string mediaType = landData.MediaType;
+            string description = landData.MediaDescription;
+            int width = landData.MediaWidth;
+            int height = landData.MediaHeight;
+            byte loop = landData.MediaLoop ? (byte)1 : (byte)0;
 
             ParcelMediaCommandEnum? commandToSend = null;
             float time = 0.0f; // default is from start
@@ -15139,6 +15279,22 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                         }
                         break;
 
+                    case ParcelMediaCommandEnum.LoopSet:
+                        if ((i + 1) < commandList.Length)
+                        {
+                            try
+                            {
+                                loop = commandList.GetLSLFloatItem(i + 1) > 0.0 ? (byte)1 : (byte)0;
+                                update = true;
+                            }
+                            catch
+                            {
+                                Error("llParcelMediaCommandList", "The argument of PARCEL_MEDIA_COMMAND_LOOP_SET must be a float");
+                            }
+                            ++i;
+                        }
+                        break;
+
                     default:
                         NotImplemented("llParcelMediaCommandList", "Parameter not supported yet: " + Enum.Parse(typeof(ParcelMediaCommandEnum), commandList.Data[i].ToString()).ToString());
                         break;
@@ -15159,6 +15315,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     landData.MediaWidth = width;
                     landData.MediaHeight = height;
                     landData.MediaType = mediaType;
+                    landData.MediaDescription = description;
+                    landData.MediaLoop = loop != 0;
 
                     // do that one last, it will cause a ParcelPropertiesUpdate
                     landObject.SetMediaUrl(url);
@@ -15252,8 +15410,15 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             list.Add(new LSL_String(land.MediaType));
                             break;
                         case ParcelMediaCommandEnum.Size:
-                            list.Add(new LSL_String(land.MediaWidth));
-                            list.Add(new LSL_String(land.MediaHeight));
+                            list.Add(new LSL_Integer(land.MediaWidth));
+                            list.Add(new LSL_Integer(land.MediaHeight));
+                            break;
+                        case ParcelMediaCommandEnum.AutoAlign:
+                            list.Add(new LSL_Integer(land.MediaAutoScale != 0 ? 1 : 0));
+                            break;
+                        case ParcelMediaCommandEnum.Loop:
+                        case ParcelMediaCommandEnum.LoopSet:
+                            list.Add(new LSL_Float(land.MediaLoop ? 1.0 : 0.0));
                             break;
                         default:
                             ParcelMediaCommandEnum mediaCommandEnum = ParcelMediaCommandEnum.Url;
@@ -18811,7 +18976,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 return 0;
 
             EstateSettings estate = World.RegionInfo.EstateSettings;
-            if (!estate.IsEstateOwner(m_host.OwnerID) || !estate.IsEstateManagerOrOwner(m_host.OwnerID))
+            if (!World.Permissions.CanIssueEstateCommand(m_host.OwnerID, false))
                 return 0;
 
             UserAccount account = m_userAccountService.GetUserAccount(RegionScopeID, id);
@@ -18870,6 +19035,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     break;
                 default: return 0;
             }
+
+            World.EstateDataServiceSafe?.StoreEstateSettings(estate);
+            World.RequestModuleInterface<IEstateModule>()?.TriggerEstateInfoChange();
             return 1;
         }
 
@@ -18930,7 +19098,10 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         public void llGodLikeRezObject(string inventory, LSL_Vector pos)
         {
             if (!World.Permissions.IsGod(m_host.OwnerID))
-                NotImplemented("llGodLikeRezObject");
+            {
+                Error("llGodLikeRezObject", "Script owner must have god permissions");
+                return;
+            }
 
             AssetBase rezAsset = World.AssetService.Get(inventory);
             if (rezAsset == null)
