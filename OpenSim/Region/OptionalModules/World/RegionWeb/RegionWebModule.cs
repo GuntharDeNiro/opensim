@@ -51,6 +51,11 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
     public class RegionWebModule : ISharedRegionModule
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
+        private const string ScriptEngineFeatureTitle = "Second Life-style script engine";
+        private const string ScriptEngineFeatureBody =
+            "The script engine is moving closer to Second Life behavior with Experience-Lite permissions, scripted sit controls, key-value stores, linkset data, GLTF/render material helpers, secure hashing and parametric rez tools.";
+        private const string ScriptEngineFeatureOverview =
+            "The script engine now includes a wider Second Life-style scripting surface for modern estate systems. Trusted estate scripts can use Experience-Lite permissions, persistent experience key-value storage, linkset data with linkset_data events, scripted sit controls, linked sound controls, region environment helpers, GLTF/render material helpers, secure hashing/HMAC helpers, parameterized rez/derez workflows and HUD coordinate helpers without relying on brittle scripted workarounds.";
 
         private readonly object m_sync = new object();
         private readonly Dictionary<UUID, Scene> m_scenesByID = new Dictionary<UUID, Scene>();
@@ -586,8 +591,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 "Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects.");
             EnsureFeature(content.Features, "Viewer polish",
                 "Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.");
-            EnsureFeature(content.Features, "Second Life-style script engine",
-                "The script engine is moving closer to Second Life behavior with Experience-style permissions, scripted sitting, persistent key-value storage and familiar dataserver replies for modern in-world systems.");
+            EnsureFeature(content.Features, ScriptEngineFeatureTitle, ScriptEngineFeatureBody);
 
             return content;
         }
@@ -613,6 +617,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             if (config == null)
                 return content;
 
+            FeaturePageContent defaults = GetDefaultFeaturePage(feature);
+
             content.Title = config.GetString("Title", content.Title).Trim();
             content.Summary = config.GetString("Summary", content.Summary).Trim();
             content.Overview = config.GetString("Overview", content.Overview).Trim();
@@ -625,7 +631,41 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             if (notes.Count > 0)
                 content.Notes = notes;
 
+            MergeFeaturePageDefaults(content, defaults, IsScriptEngineFeature(feature.Title));
+
             return content;
+        }
+
+        private static void MergeFeaturePageDefaults(FeaturePageContent content, FeaturePageContent defaults, bool preferDefaultText)
+        {
+            if (preferDefaultText)
+            {
+                content.Title = defaults.Title;
+                content.Summary = defaults.Summary;
+                content.Overview = defaults.Overview;
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(content.Summary))
+                    content.Summary = defaults.Summary;
+                if (string.IsNullOrWhiteSpace(content.Overview))
+                    content.Overview = defaults.Overview;
+            }
+
+            if (preferDefaultText)
+            {
+                AppendMissingFeatureItems(content.Usage, defaults.Usage);
+                AppendMissingFeatureItems(content.Notes, defaults.Notes);
+            }
+        }
+
+        private static void AppendMissingFeatureItems(List<string> target, List<string> defaults)
+        {
+            foreach (string item in defaults)
+            {
+                if (!target.Any(existing => existing.Equals(item, StringComparison.OrdinalIgnoreCase)))
+                    target.Add(item);
+            }
         }
 
         private static FeaturePageContent GetDefaultFeaturePage(FeatureItem feature)
@@ -732,9 +772,9 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 case "second-life-style-script-engine":
                 case "experience-lite-script-permissions":
                 case "experience-lite-key-value-store":
-                    content.Title = "Second Life-style script engine";
-                    content.Summary = "The script engine is moving closer to Second Life behavior with Experience-style permissions, scripted-only sitting, key-value storage and familiar dataserver replies for modern in-world systems.";
-                    content.Overview = "The script engine now includes Experience-Lite features aimed at closing practical gaps with Second Life scripting. Trusted estate scripts can request selected permissions without repeated viewer popups, seat avatars on scripted link sit targets, mark seats as scripted-only, and use a persistent key-value store with SL-style dataserver replies for shared in-world state.";
+                    content.Title = ScriptEngineFeatureTitle;
+                    content.Summary = ScriptEngineFeatureBody;
+                    content.Overview = ScriptEngineFeatureOverview;
                     content.Usage.Add("Enable [ScriptExperiences] only in trusted estate environments.");
                     content.Usage.Add("Add trusted script owner UUIDs to TrustedOwners, or specific root object/prim UUIDs to TrustedObjects.");
                     content.Usage.Add("Keep AutoGrantPermissions limited to the permissions your estate systems actually need.");
@@ -747,10 +787,20 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Usage.Add("Use llGetExperienceKeyValueStoreStats() to inspect enabled/trusted state, key counts, byte usage and configured KVP limits.");
                     content.Usage.Add("Handle dataserver(queryid, data). Replies use 1,value for success and 0,errorCode for failure.");
                     content.Usage.Add("Use llGetExperienceErrorMessage(errorCode) to turn failure codes into readable script diagnostics.");
+                    content.Usage.Add("Use llLinksetDataWrite(), llLinksetDataRead(), llLinksetDataDelete(), protected variants, pattern search/list helpers and linkset_data(action, name, value) for object-local persistent state.");
+                    content.Usage.Add("Use llRezObjectWithParams() with REZ_* and REZ_FLAG_* constants for SL-style parameterized rezzing, and llDerezObject() for scripted cleanup.");
+                    content.Usage.Add("Use llLinkPlaySound(), llLinkStopSound(), llLinkAdjustSoundVolume(), llLinkSetSoundRadius() and llLinkSetSoundQueueing() with SOUND_* flags for linked sound control.");
+                    content.Usage.Add("Use llGetDayLength(), llGetRegionDayLength(), llGetDayOffset(), llGetRegionDayOffset(), llGetSunDirection(), llGetRegionSunDirection(), llGetMoonDirection(), llGetRegionMoonDirection(), llGetSunRotation(), llGetRegionSunRotation(), llGetMoonRotation() and llGetRegionMoonRotation() for environment-aware scripts.");
+                    content.Usage.Add("Use llSetRenderMaterial(), llGetRenderMaterial(), llIsLinkGLTFMaterial(), PRIM_RENDER_MATERIAL and PRIM_GLTF_* constants for PBR/material-aware content.");
+                    content.Usage.Add("Use llHMAC() and llComputeHash() for signature checks, web callbacks and secure scripted handshakes.");
+                    content.Usage.Add("Use llWorldPosToHUD() for HUDs that need to point at or track in-world positions.");
+                    content.Usage.Add("Use llGetStartString() when scripts need SL-style start parameter data after rez.");
                     content.Notes.Add("The default permission bitmask excludes PERMISSION_DEBIT and ownership changes.");
                     content.Notes.Add("Untrusted scripts keep the normal viewer permission prompt behavior.");
                     content.Notes.Add("The store is scoped per region/owner and persisted under KeyValueStorePath, making it useful for estate tools, games, rides and AI build workflows.");
                     content.Notes.Add("Use KeyValueStoreMaxKeys, KeyValueStoreMaxKeyBytes, KeyValueStoreMaxValueBytes, KeyValueStoreMaxStoreBytes and KeyValueStorePath to tune storage.");
+                    content.Notes.Add("New constants documented by the script runtime include XP_ERROR_*, SIT_*, SIT_FLAG_*, LINKSETDATA_*, SOUND_*, REZ_*, REZ_FLAG_*, PRIM_SCRIPTED_SIT_ONLY, PRIM_ALLOW_UNSIT, PRIM_SIT_TARGET, PRIM_RENDER_MATERIAL, PRIM_GLTF_* and CHANGED_RENDER_MATERIAL.");
+                    content.Notes.Add("Existing RegionWeb feature files are merged with these built-in defaults at render time, so older auto-generated pages pick up the newer LSL surface without deleting local notes.");
                     break;
             }
 
@@ -976,7 +1026,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 + "Feature8 = \"Automatic cloud avatar recovery|If an avatar becomes a cloud, the server automatically handles the recovery and restores the normal appearance within a few seconds.\"\n"
                 + "Feature9 = \"Group auto invite|Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects.\"\n"
                 + "Feature10 = \"Viewer polish|Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.\"\n"
-                + "Feature11 = \"Second Life-style script engine|The script engine is moving closer to Second Life behavior with Experience-style permissions, scripted-only sitting, persistent key-value storage and familiar dataserver replies for modern in-world systems.\"\n",
+                + "Feature11 = \"" + ScriptEngineFeatureTitle + "|" + ScriptEngineFeatureBody + "\"\n",
                 new UTF8Encoding(false));
         }
 
@@ -1224,8 +1274,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     {
                         normalized.Add(new FeatureItem
                         {
-                            Title = "Second Life-style script engine",
-                            Body = "The script engine is moving closer to Second Life behavior with Experience-style permissions, scripted-only sitting, persistent key-value storage and familiar dataserver replies for modern in-world systems."
+                            Title = ScriptEngineFeatureTitle,
+                            Body = ScriptEngineFeatureBody
                         });
                         scriptEngineFeatureAdded = true;
                     }
@@ -1271,11 +1321,21 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             string normalized = title.Trim().ToLowerInvariant();
             return normalized == "second life-style script engine"
+                || normalized == "second life-style scripting"
                 || normalized == "second-life-style script engine"
                 || normalized == "second life compatible script engine"
                 || normalized == "experience-lite script permissions"
                 || normalized == "experience-lite key-value store"
-                || normalized == "experience-lite script engine";
+                || normalized == "experience-lite script engine"
+                || normalized == "script engine"
+                || normalized == "lsl script engine"
+                || normalized == "linkset data"
+                || normalized == "linkset data store"
+                || normalized == "gltf render materials"
+                || normalized == "render material scripting"
+                || normalized == "parameterized rez"
+                || normalized == "lsl secure hashing"
+                || normalized == "scripted sit controls";
         }
 
         private static void AddDefaultFeatures(List<FeatureItem> features)
@@ -1332,8 +1392,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             });
             features.Add(new FeatureItem
             {
-                Title = "Second Life-style script engine",
-                Body = "The script engine is moving closer to Second Life behavior with Experience-style permissions, scripted sitting, persistent key-value storage and familiar dataserver replies for modern in-world systems."
+                Title = ScriptEngineFeatureTitle,
+                Body = ScriptEngineFeatureBody
             });
         }
 
@@ -1342,7 +1402,11 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             foreach (FeatureItem feature in features)
             {
                 if (feature.Title.Equals(title, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (IsScriptEngineFeature(title))
+                        feature.Body = body;
                     return;
+                }
             }
 
             features.Add(new FeatureItem
