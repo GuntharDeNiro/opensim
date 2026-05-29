@@ -1388,11 +1388,14 @@ namespace OpenSim.Region.ClientStack.LindenUDP
             if (packet.Header.Reliable && !udpClient.PacketArchive.TryEnqueue(packet.Header.Sequence))
             {
                 if (packet.Header.Resent)
-                    m_log.Debug(
-                        $"[LLUDPSERVER]: Received a resend of already processed packet #{packet.Header.Sequence}, type {packet.Type} from {client.Name}");
-                 else
+                {
+                    SendAcks(udpClient);
+                }
+                else
+                {
                     m_log.Warn(
                         $"[LLUDPSERVER]: Received a duplicate (not marked as resend) of packet #{packet.Header.Sequence}, type {packet.Type} from {client.Name}");
+                }
 
                 // Avoid firing a callback twice for the same packet
                 return;

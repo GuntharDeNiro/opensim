@@ -72,6 +72,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
     {
         public bool valid;
         public bool assetSampled;
+        public bool hasAlphaChannel;
         public Color color;
         public float alpha;
     }
@@ -1094,6 +1095,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 }
 
                 MapTextureSample faceSample = GetTextureFaceSample(textureFace);
+                bool flatTextureCard = IsLikelyFlatTextureCard(part);
                 Color faceColor = faceSample.valid ? faceSample.color : fallbackColor;
                 float faceAlpha = faceSample.valid
                     ? faceSample.alpha
@@ -1108,8 +1110,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     ? ApplyTextureAlpha(opacity, faceAlpha, minimumOpacity)
                     : opacity;
                 bool alphaMaskedFace = useTextureAlpha &&
-                    faceSample.assetSampled &&
-                    faceAlpha < alphaMaskedFaceMaxAlpha;
+                    ((faceSample.assetSampled && faceAlpha < alphaMaskedFaceMaxAlpha) ||
+                     (flatTextureCard && faceSample.hasAlphaChannel));
 
                 for (int j = 0; j + 2 < face.Indices.Count; j += 3)
                 {
@@ -1216,6 +1218,19 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 (points[0].X * (points[1].Y - points[2].Y)) +
                 (points[1].X * (points[2].Y - points[0].Y)) +
                 (points[2].X * (points[0].Y - points[1].Y)));
+        }
+
+        private static bool IsLikelyFlatTextureCard(SceneObjectPart part)
+        {
+            Vector3 scale = part.Scale;
+            float min = Math.Min(scale.X, Math.Min(scale.Y, scale.Z));
+            float max = Math.Max(scale.X, Math.Max(scale.Y, scale.Z));
+
+            if (max < 1f)
+                return false;
+
+            float middle = scale.X + scale.Y + scale.Z - min - max;
+            return min <= Math.Max(0.08f, middle * 0.08f);
         }
 
         private static Color QuantizeMapColor(Color color)
@@ -1348,6 +1363,19 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             }
 
             return false;
+        }
+
+        private static int GetJpeg2000ComponentCount(byte[] data)
+        {
+            for (int i = 0; i + 39 < data.Length; i++)
+            {
+                if (data[i] != 0xff || data[i + 1] != 0x51)
+                    continue;
+
+                return (data[i + 38] << 8) | data[i + 39];
+            }
+
+            return 0;
         }
 
         private byte[] GetAssetDataForMap(string assetID)
@@ -1564,6 +1592,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             MapTextureSample fallback = new MapTextureSample
             {
                 valid = false,
+                assetSampled = false,
+                hasAlphaChannel = false,
                 color = Color.Gray,
                 alpha = 1f
             };
@@ -1619,6 +1649,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             if (face.TextureID.IsZero())
             {
                 fallback.valid = true;
+                fallback.assetSampled = false;
+                fallback.hasAlphaChannel = false;
                 fallback.color = faceColor;
                 fallback.alpha = faceAlpha;
                 return fallback;
@@ -1628,6 +1660,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             if (!textureSample.valid)
             {
                 fallback.valid = true;
+                fallback.assetSampled = false;
+                fallback.hasAlphaChannel = textureSample.hasAlphaChannel;
                 fallback.color = faceColor;
                 fallback.alpha = faceAlpha;
                 return fallback;
@@ -1653,7 +1687,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             {
                 valid = false,
                 color = Color.Gray,
-                alpha = 1f
+                alpha = 1f,
+                hasAlphaChannel = false
             };
 
             if (!prioritySample &&
@@ -1669,6 +1704,9 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 return sample;
             }
 
+            bool hasAlphaChannel = GetJpeg2000ComponentCount(textureData) >= 4;
+            sample.hasAlphaChannel = hasAlphaChannel;
+
             try
             {
                 Image image = DecodeMapImage(textureData);
@@ -1679,6 +1717,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                     {
                         sample = ComputeTextureSample(bitmap);
                         sample.assetSampled = sample.valid;
+                        sample.hasAlphaChannel = hasAlphaChannel;
                     }
                 }
             }
