@@ -28,6 +28,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Reflection;
@@ -72,6 +73,7 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
         // caches per rendering 
         private Dictionary<UUID, warp_Texture> m_warpTextures;
         private Dictionary<UUID, int> m_colors;
+        private Dictionary<UUID, MapSpriteTexture> m_spriteTextures;
 
         private bool m_drawPrimVolume = true;   // true if should render the prims on the tile
         private bool m_textureTerrain = true;   // true if to create terrain splatting texture
@@ -83,10 +85,17 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
         private bool m_skipMissingExternalGeometry = true;
         private bool m_skipFlatTextureCardsWithoutTexture = true;
         private bool m_forceGC = false;
-        private int m_renderTimeBudgetMS = 12000;
+        private int m_renderTimeBudgetMS = 30000;
         private int m_maxMeshAssetDecodes = 2048;
         private int m_maxTextureAssetDecodes = 192;
         private int m_textureDownsample = 8;
+        private bool m_drawFlatTextureCardSprites = true;
+        private int m_spriteRenderTimeBudgetMS = 12000;
+        private int m_maxSpriteTextureDecodes = 512;
+        private int m_spriteTextureMaxSize = 256;
+        private float m_spriteMinAlphaCoverage = 0.02f;
+        private float m_spriteMaxOpaqueCoverage = 0.98f;
+        private float m_spriteMaxSizeMeters = 32f;
 
         private const float m_cameraHeight = 4096f;
         private float m_renderMinHeight = -100f;
@@ -103,6 +112,23 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
         private int m_flatTextureCardSkipped;
         private int m_meshAssetDecodesThisPass;
         private int m_textureAssetDecodesThisPass;
+        private int m_spriteStartMS;
+        private int m_spriteCardsDrawn;
+        private int m_spriteCardsSkipped;
+        private int m_spriteTextureDecodesThisPass;
+
+        private sealed class MapSpriteTexture : IDisposable
+        {
+            public Bitmap Bitmap;
+            public float AlphaCoverage;
+            public float OpaqueCoverage;
+
+            public void Dispose()
+            {
+                Bitmap?.Dispose();
+                Bitmap = null;
+            }
+        }
 
         #region Region Module interface
 
@@ -146,6 +172,20 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
                 Util.GetConfigVarFromSections<int>(source, "Map3DMaxTextureAssetDecodes", configSections, m_maxTextureAssetDecodes));
             m_textureDownsample = Math.Max(1, Math.Min(10,
                 Util.GetConfigVarFromSections<int>(source, "Map3DTextureDownsample", configSections, m_textureDownsample)));
+            m_drawFlatTextureCardSprites =
+                Util.GetConfigVarFromSections<bool>(source, "Map3DDrawFlatTextureCardSprites", configSections, m_drawFlatTextureCardSprites);
+            m_spriteRenderTimeBudgetMS = Math.Max(0,
+                Util.GetConfigVarFromSections<int>(source, "Map3DTextureCardSpriteBudgetMS", configSections, m_spriteRenderTimeBudgetMS));
+            m_maxSpriteTextureDecodes = Math.Max(0,
+                Util.GetConfigVarFromSections<int>(source, "Map3DMaxSpriteTextureDecodes", configSections, m_maxSpriteTextureDecodes));
+            m_spriteTextureMaxSize = Math.Max(32, Math.Min(1024,
+                Util.GetConfigVarFromSections<int>(source, "Map3DSpriteTextureMaxSize", configSections, m_spriteTextureMaxSize)));
+            m_spriteMinAlphaCoverage = Math.Max(0f, Math.Min(1f,
+                Util.GetConfigVarFromSections<float>(source, "Map3DSpriteMinAlphaCoverage", configSections, m_spriteMinAlphaCoverage)));
+            m_spriteMaxOpaqueCoverage = Math.Max(0f, Math.Min(1f,
+                Util.GetConfigVarFromSections<float>(source, "Map3DSpriteMaxOpaqueCoverage", configSections, m_spriteMaxOpaqueCoverage)));
+            m_spriteMaxSizeMeters = Math.Max(1f,
+                Util.GetConfigVarFromSections<float>(source, "Map3DSpriteMaxSizeMeters", configSections, m_spriteMaxSizeMeters));
 
             m_renderMaxHeight = Util.GetConfigVarFromSections<float>(source, "RenderMaxHeight", configSections, m_renderMaxHeight);
             m_renderMinHeight = Util.GetConfigVarFromSections<float>(source, "RenderMinHeight", configSections, m_renderMinHeight);
@@ -283,6 +323,7 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
         {
             m_colors= new Dictionary<UUID, int>();
             m_warpTextures= new Dictionary<UUID, warp_Texture>();
+            m_spriteTextures = new Dictionary<UUID, MapSpriteTexture>();
             m_failedGeometryAssets.Clear();
             m_failedTextureAssets.Clear();
             m_renderStartMS = Environment.TickCount;
@@ -293,6 +334,9 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
             m_flatTextureCardSkipped = 0;
             m_meshAssetDecodesThisPass = 0;
             m_textureAssetDecodesThisPass = 0;
+            m_spriteCardsDrawn = 0;
+            m_spriteCardsSkipped = 0;
+            m_spriteTextureDecodesThisPass = 0;
 
             WarpRenderer renderer = new WarpRenderer();
 
@@ -324,13 +368,17 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
             renderer.Render();
 
             Bitmap bitmap = renderer.Scene.getImage();
+            if (m_drawFlatTextureCardSprites)
+                DrawFlatTextureCardSprites(bitmap);
 
             renderer.Scene.destroy();
             renderer.Reset();
             renderer = null;
 
+            DisposeSpriteTextures();
             m_colors = null;
             m_warpTextures = null;
+            m_spriteTextures = null;
 
             if (m_forceGC)
             {
@@ -342,9 +390,10 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
             }
 
             m_log.DebugFormat(
-                "[WARP 3D IMAGE MODULE]: Rendered {0} parts/{1} faces, skipped {2} missing exact geometry, {3} flat texture-card faces and {4} budget-limited parts in {5}ms",
-                m_renderedParts, m_renderedFaces, m_missingGeometrySkipped, m_flatTextureCardSkipped,
-                m_budgetSkipped, Util.EnvironmentTickCountSubtract(Environment.TickCount, m_renderStartMS));
+                "[WARP 3D IMAGE MODULE]: Rendered {0} parts/{1} faces, drew {2} texture-card sprites, skipped {3} missing exact geometry, {4} flat texture-card faces, {5} texture-card sprites and {6} budget-limited items in {7}ms",
+                m_renderedParts, m_renderedFaces, m_spriteCardsDrawn, m_missingGeometrySkipped,
+                m_flatTextureCardSkipped, m_spriteCardsSkipped, m_budgetSkipped,
+                Util.EnvironmentTickCountSubtract(Environment.TickCount, m_renderStartMS));
             return bitmap;
         }
 
@@ -516,6 +565,213 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
                     }
                 }
             );
+        }
+
+        private void DrawFlatTextureCardSprites(Bitmap bitmap)
+        {
+            if (bitmap == null)
+                return;
+
+            m_spriteStartMS = Environment.TickCount;
+
+            using (Graphics graphics = Graphics.FromImage(bitmap))
+            {
+                graphics.CompositingMode = CompositingMode.SourceOver;
+                graphics.CompositingQuality = CompositingQuality.HighSpeed;
+                graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                graphics.PixelOffsetMode = PixelOffsetMode.Half;
+                graphics.SmoothingMode = SmoothingMode.None;
+
+                bool budgetExhausted = false;
+                m_scene.ForEachSOG(
+                    delegate (SceneObjectGroup group)
+                    {
+                        if (budgetExhausted)
+                            return;
+
+                        foreach (SceneObjectPart child in group.Parts)
+                        {
+                            if (TextureCardSpriteBudgetExpired())
+                            {
+                                m_budgetSkipped++;
+                                budgetExhausted = true;
+                                break;
+                            }
+
+                            if (!IsLikelyFlatTextureCard(child))
+                                continue;
+
+                            try
+                            {
+                                if (!TryGetTextureCardSpriteFace(child, out Primitive.TextureEntryFace face))
+                                {
+                                    m_spriteCardsSkipped++;
+                                    continue;
+                                }
+
+                                MapSpriteTexture sprite = GetSpriteTexture(face.TextureID, child);
+                                if (sprite == null ||
+                                    sprite.AlphaCoverage < m_spriteMinAlphaCoverage ||
+                                    sprite.OpaqueCoverage > m_spriteMaxOpaqueCoverage)
+                                {
+                                    m_spriteCardsSkipped++;
+                                    continue;
+                                }
+
+                                if (!TryDrawTextureCardSprite(graphics, bitmap, child, face, sprite.Bitmap))
+                                {
+                                    m_spriteCardsSkipped++;
+                                    continue;
+                                }
+
+                                m_spriteCardsDrawn++;
+                            }
+                            catch (Exception e)
+                            {
+                                m_spriteCardsSkipped++;
+                                m_log.Debug($"[Warp3D] failed to draw texture-card sprite {child.Name} at {child.GetWorldPosition()}: {e.Message}");
+                            }
+                        }
+                    }
+                );
+            }
+        }
+
+        private bool TryDrawTextureCardSprite(Graphics graphics, Bitmap bitmap, SceneObjectPart part,
+            Primitive.TextureEntryFace face, Bitmap texture)
+        {
+            if (!TryGetTextureCardSpritePlacement(part, bitmap, out float centerX, out float centerY,
+                out float width, out float height, out float angleDegrees))
+                return false;
+
+            Color4 tint = face.RGBA;
+            using (ImageAttributes attributes = new ImageAttributes())
+            {
+                ColorMatrix matrix = new ColorMatrix(new float[][]
+                {
+                    new float[] { tint.R, 0, 0, 0, 0 },
+                    new float[] { 0, tint.G, 0, 0, 0 },
+                    new float[] { 0, 0, tint.B, 0, 0 },
+                    new float[] { 0, 0, 0, tint.A, 0 },
+                    new float[] { 0, 0, 0, 0, 1 }
+                });
+                attributes.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
+
+                System.Drawing.Drawing2D.Matrix oldTransform = graphics.Transform;
+                try
+                {
+                    graphics.TranslateTransform(centerX, centerY);
+                    graphics.RotateTransform(angleDegrees);
+
+                    Rectangle destination = new Rectangle(
+                        (int)MathF.Round(width * -0.5f),
+                        (int)MathF.Round(height * -0.5f),
+                        Math.Max(1, (int)MathF.Round(width)),
+                        Math.Max(1, (int)MathF.Round(height)));
+
+                    graphics.DrawImage(texture, destination, 0, 0, texture.Width, texture.Height,
+                        GraphicsUnit.Pixel, attributes);
+                }
+                finally
+                {
+                    graphics.Transform = oldTransform;
+                    oldTransform.Dispose();
+                }
+            }
+
+            return true;
+        }
+
+        private bool TryGetTextureCardSpritePlacement(SceneObjectPart part, Bitmap bitmap,
+            out float centerX, out float centerY, out float width, out float height, out float angleDegrees)
+        {
+            centerX = 0;
+            centerY = 0;
+            width = 0;
+            height = 0;
+            angleDegrees = 0;
+
+            Vector3 position = part.GetWorldPosition();
+            if (position.Z < m_renderMinHeight || position.Z > m_renderMaxHeight)
+                return false;
+
+            float regionWidth = m_scene.RegionInfo.RegionSizeX;
+            float regionHeight = m_scene.RegionInfo.RegionSizeY;
+            if (regionWidth <= 0 || regionHeight <= 0)
+                return false;
+
+            centerX = position.X * bitmap.Width / regionWidth;
+            centerY = bitmap.Height - (position.Y * bitmap.Height / regionHeight);
+
+            Vector3 scale = part.Scale;
+            float widthMeters;
+            float heightMeters;
+            float angleOffset = 0f;
+
+            if (scale.Z <= scale.X && scale.Z <= scale.Y)
+            {
+                widthMeters = scale.X;
+                heightMeters = scale.Y;
+            }
+            else if (scale.X <= scale.Y && scale.X <= scale.Z)
+            {
+                widthMeters = scale.Y;
+                heightMeters = scale.Z;
+                angleOffset = 90f;
+            }
+            else
+            {
+                widthMeters = scale.X;
+                heightMeters = scale.Z;
+            }
+
+            if (widthMeters <= 0.05f || heightMeters <= 0.05f ||
+                widthMeters > m_spriteMaxSizeMeters || heightMeters > m_spriteMaxSizeMeters)
+                return false;
+
+            width = Math.Max(1f, widthMeters * bitmap.Width / regionWidth);
+            height = Math.Max(1f, heightMeters * bitmap.Height / regionHeight);
+
+            Quaternion rotation = part.GetWorldRotation();
+            rotation.GetEulerAngles(out _, out _, out float yaw);
+            angleDegrees = (float)(-(yaw * 180.0 / Math.PI) - angleOffset);
+
+            return true;
+        }
+
+        private bool TryGetTextureCardSpriteFace(SceneObjectPart part, out Primitive.TextureEntryFace selectedFace)
+        {
+            selectedFace = null;
+
+            Primitive.TextureEntry textures = part.Shape?.Textures;
+            if (textures == null)
+                return false;
+
+            for (uint i = 0; i < 32; i++)
+            {
+                Primitive.TextureEntryFace face = textures.GetFace(i);
+                if (IsUsableSpriteFace(face))
+                {
+                    selectedFace = face;
+                    return true;
+                }
+            }
+
+            if (IsUsableSpriteFace(textures.DefaultTexture))
+            {
+                selectedFace = textures.DefaultTexture;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool IsUsableSpriteFace(Primitive.TextureEntryFace face)
+        {
+            return face != null &&
+                face.RGBA.A > 0f &&
+                face.TextureID.IsNotZero() &&
+                !InvPrimMagicTexture.Equals(face.TextureID);
         }
 
         private void UVPlanarMap(ref Vertex v, ref Vector3 scale, out float tu, out float tv)
@@ -989,6 +1245,149 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
 
             m_warpTextures[id] = ret;
             return ret;
+        }
+
+        private MapSpriteTexture GetSpriteTexture(UUID id, SceneObjectPart sop)
+        {
+            if (id.IsZero())
+                return null;
+
+            if (m_spriteTextures.TryGetValue(id, out MapSpriteTexture cached))
+                return cached;
+
+            if (m_failedTextureAssets.Contains(id))
+            {
+                m_spriteTextures[id] = null;
+                return null;
+            }
+
+            if (m_maxSpriteTextureDecodes > 0 && m_spriteTextureDecodesThisPass >= m_maxSpriteTextureDecodes)
+            {
+                m_spriteTextures[id] = null;
+                return null;
+            }
+
+            MapSpriteTexture sprite = null;
+            byte[] data = GetMapAssetData(id);
+            if (data is not null && data.Length > 0)
+            {
+                m_spriteTextureDecodesThisPass++;
+                try
+                {
+                    using (Image image = DecodeTextureMapImage(data))
+                    {
+                        if (image is not null)
+                            sprite = CreateSpriteTexture(image);
+                    }
+                }
+                catch (Exception e)
+                {
+                    m_log.DebugFormat("[Warp3D]: Failed to decode texture-card sprite {0} for prim {1} at {2}, exception {3}",
+                        id.ToString(), sop.Name, sop.GetWorldPosition().ToString(), e.Message);
+                }
+            }
+
+            if (sprite is null)
+                m_failedTextureAssets.Add(id);
+
+            m_spriteTextures[id] = sprite;
+            return sprite;
+        }
+
+        private MapSpriteTexture CreateSpriteTexture(Image image)
+        {
+            int width = image.Width;
+            int height = image.Height;
+            int largest = Math.Max(width, height);
+
+            if (largest > m_spriteTextureMaxSize)
+            {
+                float scale = m_spriteTextureMaxSize / (float)largest;
+                width = Math.Max(1, (int)MathF.Round(width * scale));
+                height = Math.Max(1, (int)MathF.Round(height * scale));
+            }
+
+            Bitmap bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+            using (Graphics graphics = Graphics.FromImage(bitmap))
+            {
+                graphics.CompositingMode = CompositingMode.SourceCopy;
+                graphics.CompositingQuality = CompositingQuality.HighSpeed;
+                graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                graphics.PixelOffsetMode = PixelOffsetMode.Half;
+                graphics.SmoothingMode = SmoothingMode.None;
+                graphics.DrawImage(image, 0, 0, width, height);
+            }
+
+            GetSpriteAlphaCoverage(bitmap, out float alphaCoverage, out float opaqueCoverage);
+            return new MapSpriteTexture
+            {
+                Bitmap = bitmap,
+                AlphaCoverage = alphaCoverage,
+                OpaqueCoverage = opaqueCoverage
+            };
+        }
+
+        private static void GetSpriteAlphaCoverage(Bitmap bitmap, out float alphaCoverage, out float opaqueCoverage)
+        {
+            int visible = 0;
+            int opaque = 0;
+            int total = bitmap.Width * bitmap.Height;
+
+            BitmapData bitmapData = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height),
+                ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+
+            try
+            {
+                unsafe
+                {
+                    byte* row = (byte*)bitmapData.Scan0;
+                    for (int y = 0; y < bitmap.Height; y++)
+                    {
+                        byte* pixel = row;
+                        for (int x = 0; x < bitmap.Width; x++)
+                        {
+                            byte alpha = pixel[3];
+                            if (alpha > 16)
+                                visible++;
+                            if (alpha > 240)
+                                opaque++;
+                            pixel += 4;
+                        }
+                        row += bitmapData.Stride;
+                    }
+                }
+            }
+            finally
+            {
+                bitmap.UnlockBits(bitmapData);
+            }
+
+            if (total <= 0)
+            {
+                alphaCoverage = 0f;
+                opaqueCoverage = 0f;
+                return;
+            }
+
+            alphaCoverage = visible / (float)total;
+            opaqueCoverage = opaque / (float)total;
+        }
+
+        private bool TextureCardSpriteBudgetExpired()
+        {
+            return m_spriteRenderTimeBudgetMS > 0 &&
+                Util.EnvironmentTickCountSubtract(Environment.TickCount, m_spriteStartMS) >= m_spriteRenderTimeBudgetMS;
+        }
+
+        private void DisposeSpriteTextures()
+        {
+            if (m_spriteTextures == null)
+                return;
+
+            foreach (MapSpriteTexture sprite in m_spriteTextures.Values)
+                sprite?.Dispose();
+
+            m_spriteTextures.Clear();
         }
 
         #endregion Rendering Methods

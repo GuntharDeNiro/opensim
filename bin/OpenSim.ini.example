@@ -629,8 +629,8 @@
     ;# {Map3DSkipFlatTextureCardsWithoutTexture} {TexturePrims} {Skip flat texture-card faces when their texture is unavailable so trees/cards do not become solid rectangles?} {true false} true
     ; Map3DSkipFlatTextureCardsWithoutTexture = true
 
-    ;# {Map3DRenderTimeBudgetMS} {RenderMeshes} {Maximum time budget for the 3D object rendering pass per region maptile} {} 12000
-    ; Map3DRenderTimeBudgetMS = 12000
+    ;# {Map3DRenderTimeBudgetMS} {RenderMeshes} {Maximum time budget for the 3D object rendering pass per region maptile} {} 30000
+    ; Map3DRenderTimeBudgetMS = 30000
 
     ;# {Map3DMaxMeshAssetDecodes} {RenderMeshes} {Maximum mesh/sculpt assets decoded per 3D maptile pass; 0 means unlimited} {} 2048
     ; Map3DMaxMeshAssetDecodes = 2048
@@ -643,6 +643,27 @@
 
     ;# {Map3DForceGC} {} {Force full GC after 3D maptile generation?} {true false} false
     ; Map3DForceGC = false
+
+    ;# {Map3DDrawFlatTextureCardSprites} {TexturePrims} {Draw alpha-textured flat cards as real texture sprites after the 3D pass so vertical billboard trees/decorations remain visible from the map view?} {true false} true
+    ; Map3DDrawFlatTextureCardSprites = true
+
+    ;# {Map3DTextureCardSpriteBudgetMS} {Map3DDrawFlatTextureCardSprites} {Maximum time budget for the texture-card sprite overlay pass per region maptile} {} 12000
+    ; Map3DTextureCardSpriteBudgetMS = 12000
+
+    ;# {Map3DMaxSpriteTextureDecodes} {Map3DDrawFlatTextureCardSprites} {Maximum texture assets decoded by the texture-card sprite overlay pass; 0 means unlimited} {} 512
+    ; Map3DMaxSpriteTextureDecodes = 512
+
+    ;# {Map3DSpriteTextureMaxSize} {Map3DDrawFlatTextureCardSprites} {Maximum decoded sprite texture side in pixels before drawing onto the maptile} {} 256
+    ; Map3DSpriteTextureMaxSize = 256
+
+    ;# {Map3DSpriteMinAlphaCoverage} {Map3DDrawFlatTextureCardSprites} {Minimum visible alpha coverage required before a texture-card sprite is drawn} {} 0.02
+    ; Map3DSpriteMinAlphaCoverage = 0.02
+
+    ;# {Map3DSpriteMaxOpaqueCoverage} {Map3DDrawFlatTextureCardSprites} {Maximum fully opaque coverage allowed before a texture-card sprite is skipped to avoid solid rectangles} {} 0.98
+    ; Map3DSpriteMaxOpaqueCoverage = 0.98
+
+    ;# {Map3DSpriteMaxSizeMeters} {Map3DDrawFlatTextureCardSprites} {Maximum object card width/height in meters that can be drawn by the sprite overlay pass} {} 32
+    ; Map3DSpriteMaxSizeMeters = 32
 
     ;# {MapColorWater} {} {Water color for textured and shaded maps} {"#1D475F"}
     ; MapColorWater = "#3399FF"
