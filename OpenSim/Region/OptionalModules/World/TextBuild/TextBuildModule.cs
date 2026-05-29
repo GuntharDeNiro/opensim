@@ -1213,10 +1213,10 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
 
             RefineImageLandMask(width, height, land);
 
-            int minX;
-            int minY;
-            int maxX;
-            int maxY;
+            int minX = 0;
+            int minY = 0;
+            int maxX = width - 1;
+            int maxY = height - 1;
             bool foundBounds = fitLandToRegion &&
                 (TryFindDominantLandBounds(width, height, land, out minX, out minY, out maxX, out maxY) ||
                  TryFindAnyLandBounds(width, height, land, out minX, out minY, out maxX, out maxY));

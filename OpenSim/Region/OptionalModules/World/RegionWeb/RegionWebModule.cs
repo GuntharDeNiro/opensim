@@ -253,6 +253,12 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     return;
                 }
 
+                if (parts[0].Equals("scripts", StringComparison.OrdinalIgnoreCase))
+                {
+                    SendScriptReference(parts.Length >= 2 ? parts[1] : string.Empty, response);
+                    return;
+                }
+
                 if (parts.Length >= 2 && parts[0].Equals("feature", StringComparison.OrdinalIgnoreCase))
                 {
                     SendFeaturePage(parts[1], response);
@@ -327,7 +333,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             html.Append("><div class=\"wrap\"><p>").Append(Html(content.Tagline)).Append("</p><h1>")
                 .Append(Html(content.Title)).Append("</h1>")
                 .Append(Paragraphs(content.Description))
-                .Append("<div class=\"estate-actions\"><a href=\"#regions\">Explore regions</a><a href=\"#features\">New features</a></div>")
+                .Append("<div class=\"estate-actions\"><a href=\"#regions\">Explore regions</a><a href=\"#features\">New features</a><a href=\"")
+                .Append(Html(m_basePath)).Append("/scripts\">LSL scripts</a></div>")
                 .Append("</div></header>");
 
             html.Append("<main><section class=\"wrap estate-stats\"><div>")
@@ -402,6 +409,104 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             html.Append("</main>").Append(EndPage());
             SendHtml(response, html.ToString());
+        }
+
+        private void SendScriptReference(string slug, IOSHttpResponse response)
+        {
+            EstatePageContent estate = LoadEstateContent();
+            ScriptFunctionDoc focus = null;
+
+            if (!string.IsNullOrEmpty(slug))
+            {
+                foreach (ScriptFunctionDoc doc in ScriptFunctionDocs)
+                {
+                    if (MakeSlug(doc.Name).Equals(slug, StringComparison.OrdinalIgnoreCase))
+                    {
+                        focus = doc;
+                        break;
+                    }
+                }
+
+                if (focus == null)
+                {
+                    SendNotFound(response, "LSL function reference not found.");
+                    return;
+                }
+            }
+
+            StringBuilder html = BeginPage("LSL Script Function Reference - " + estate.Title);
+            html.Append("<main class=\"wrap script-reference\"><a class=\"back\" href=\"")
+                .Append(Html(m_basePath)).Append("/#features\">Back to estate</a>")
+                .Append("<p class=\"feature-kicker\">Script reference</p><h1>LSL Function Reference</h1>")
+                .Append("<p class=\"lead\">Expanded Second Life-style LSL functions implemented or corrected in this OpenSim build, with signatures, return values, permissions and exact in-world usage notes.</p>")
+                .Append("<p class=\"script-source\">Modeled after the public Second Life LSL function index, but scoped to the functions exposed by this simulator branch.</p>");
+
+            if (focus != null)
+            {
+                html.Append("<section class=\"script-focus\">");
+                AppendScriptFunctionCard(html, focus, m_basePath, true);
+                html.Append("</section></main>").Append(EndPage());
+                SendHtml(response, html.ToString());
+                return;
+            }
+
+            html.Append("<section class=\"script-toc\"><h2>Functions</h2><div>");
+            foreach (IGrouping<string, ScriptFunctionDoc> group in ScriptFunctionDocs.GroupBy(doc => doc.Category))
+            {
+                html.Append("<a href=\"#").Append(Html(MakeSlug(group.Key))).Append("\">")
+                    .Append(Html(group.Key)).Append(" <span>")
+                    .Append(group.Count().ToString(CultureInfo.InvariantCulture)).Append("</span></a>");
+            }
+            html.Append("</div></section>");
+
+            foreach (IGrouping<string, ScriptFunctionDoc> group in ScriptFunctionDocs.GroupBy(doc => doc.Category))
+            {
+                html.Append("<section class=\"script-group\" id=\"").Append(Html(MakeSlug(group.Key))).Append("\"><h2>")
+                    .Append(Html(group.Key)).Append("</h2>");
+
+                foreach (ScriptFunctionDoc doc in group.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
+                    AppendScriptFunctionCard(html, doc, m_basePath, false);
+
+                html.Append("</section>");
+            }
+
+            html.Append("</main>").Append(EndPage());
+            SendHtml(response, html.ToString());
+        }
+
+        private static void AppendScriptFunctionCard(StringBuilder html, ScriptFunctionDoc doc, string basePath, bool focused)
+        {
+            string slug = MakeSlug(doc.Name);
+            html.Append("<article class=\"script-card\" id=\"").Append(Html(slug)).Append("\"><div class=\"script-card-head\"><h3>");
+            if (focused)
+                html.Append(Html(doc.Name));
+            else
+                html.Append("<a href=\"").Append(Html(basePath)).Append("/scripts/").Append(Html(slug)).Append("\">").Append(Html(doc.Name)).Append("</a>");
+
+            html.Append("</h3><span>").Append(Html(doc.Category)).Append("</span></div>")
+                .Append("<p class=\"signature\"><code>").Append(Html(doc.Signature)).Append("</code></p>");
+
+            AppendScriptDetail(html, "Returns", doc.ReturnValue);
+            AppendScriptDetail(html, "Use", doc.Usage);
+            AppendScriptDetail(html, "Permissions", doc.Permissions);
+            AppendScriptDetail(html, "Notes", doc.Notes);
+
+            if (!string.IsNullOrWhiteSpace(doc.Example))
+            {
+                html.Append("<details><summary>Example</summary><pre><code>")
+                    .Append(Html(doc.Example)).Append("</code></pre></details>");
+            }
+
+            html.Append("</article>");
+        }
+
+        private static void AppendScriptDetail(StringBuilder html, string label, string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return;
+
+            html.Append("<p class=\"script-detail\"><strong>").Append(Html(label)).Append(":</strong> ")
+                .Append(Html(value)).Append("</p>");
         }
 
         private void SendRegionPage(Scene scene, IOSHttpResponse response)
@@ -812,6 +917,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Usage.Add("Use llWorldPosToHUD() for HUDs that need to point at or track in-world positions.");
                     content.Usage.Add("Use llGetStartString() when scripts need SL-style start parameter data after rez.");
                     content.Usage.Add("llSetSculptAnim() is exposed for script compatibility; OpenSim currently has no sculpt-map animation backend.");
+                    content.Usage.Add("Open the RegionWeb scripts page at /regionweb/scripts for the per-function reference with signatures, return values, permissions and usage notes.");
                     content.Notes.Add("The default permission bitmask excludes PERMISSION_DEBIT and ownership changes.");
                     content.Notes.Add("Untrusted scripts keep the normal viewer permission prompt behavior.");
                     content.Notes.Add("The store is scoped per region/owner and persisted under KeyValueStorePath, making it useful for estate tools, games, rides and AI build workflows.");
@@ -1476,7 +1582,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 .Append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
                 .Append("<title>").Append(Html(title)).Append("</title>")
                 .Append("<style>")
-                .Append("body{margin:0;background:#101417;color:#e9efec;font:16px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}a{color:#9bd3e6;text-decoration:none}img{max-width:100%;display:block}.wrap{max-width:1180px;margin:0 auto;padding:0 24px}.estate-hero{min-height:520px;background-size:cover;background-position:center;display:flex;align-items:flex-end}.estate-hero-plain{background:linear-gradient(135deg,#11252b,#1e2927 52%,#3a3526)}.estate-hero .wrap{padding-top:110px;padding-bottom:72px}.estate-hero p{max-width:760px;color:#d9e5e1;font-size:19px}.estate-hero>div>p:first-child,.hero p,.feature-kicker{margin:0 0 10px;color:#b9d8d3;text-transform:uppercase;font-size:13px;letter-spacing:.08em}.estate-hero h1{max-width:900px;margin:0;font-size:clamp(44px,8vw,96px);line-height:.92}.estate-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}.estate-actions a{background:#d7e4df;color:#101417;padding:10px 15px;font-weight:700}.estate-actions a+a{background:#223239;color:#dbe7e4}.estate-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;margin-top:28px;background:#2a363a}.estate-stats div{background:#171e22;padding:18px}.estate-stats strong{display:block;font-size:30px}.estate-stats span{color:#aebbb9}.feature-section{padding-top:48px}.feature-section h2,.list h2{font-size:34px;margin:0 0 20px}.feature-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}.feature-card{display:block;background:#171e22;border:1px solid #263136;color:#e9efec;padding:18px;min-height:190px}.feature-card:hover{border-color:#6da8b7;background:#1a2428}.feature-card h3{margin:0 0 8px;font-size:21px}.feature-card p{margin:0;color:#c7d2cf}.feature-card span{display:inline-block;margin-top:18px;color:#9bd3e6;font-weight:700}.feature-page{padding-top:42px;padding-bottom:70px;max-width:900px}.feature-page h1{font-size:clamp(38px,7vw,68px);line-height:1;margin:0 0 18px}.feature-page .lead{font-size:21px;color:#d4dfdc;margin:0 0 34px}.feature-page section{border-top:1px solid #2a363a;padding-top:24px;margin-top:26px}.feature-page h2{font-size:28px;margin:0 0 12px}.feature-page li{margin:0 0 10px;color:#d2dcda}.hero{min-height:360px;background-size:cover;background-position:center;display:flex;align-items:flex-end}.hero .wrap{padding-top:90px;padding-bottom:46px}.hero h1{margin:0;font-size:clamp(38px,7vw,82px);line-height:.94}.meta{margin-top:16px;color:#cfd8d5}.layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:36px;padding-top:36px;padding-bottom:56px}.story{min-width:0}.story>p{font-size:19px;color:#d5dfdc}.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin:30px 0}.gallery figure{margin:0;background:#182025}.gallery img{aspect-ratio:4/3;object-fit:cover}.gallery figcaption{padding:10px;color:#c7d0ce;font-size:14px}.panel{align-self:start}.map{width:100%;aspect-ratio:1;object-fit:cover;border:1px solid #2a363a}.stats,.parcels{margin-top:18px;background:#171e22;border:1px solid #263136;padding:18px}.stats h2,.parcels h2,.story h2{margin:0 0 14px}.stats dl{display:grid;grid-template-columns:1fr auto;gap:7px 16px;margin:0}.stats dt{color:#9facad}.stats dd{margin:0;font-weight:700}.parcels div{display:flex;justify-content:space-between;gap:12px;border-top:1px solid #263136;padding:9px 0}.parcels div:first-of-type{border-top:0}.parcels span{color:#aab6b8}.post{border-top:1px solid #2a363a;padding:22px 0}.post img{width:100%;max-height:360px;object-fit:cover;margin-bottom:14px}.post time{color:#9facad;font-size:13px}.post h3{margin:4px 0 8px;font-size:24px}.post p{color:#cbd5d2}.post-page{padding-top:36px;padding-bottom:60px;max-width:850px}.post.full h1{font-size:46px;line-height:1.05;margin:6px 0 22px}.post.full p{font-size:18px}.back{display:inline-block;margin-bottom:18px}.region-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}.list{padding-top:42px;padding-bottom:60px}.region-card{background:#171e22;border:1px solid #263136;color:#e9efec}.region-card img{aspect-ratio:16/9;object-fit:cover}.region-card strong,.region-card span{display:block;padding:0 14px}.region-card strong{padding-top:13px;font-size:20px}.region-card span{padding-bottom:14px;color:#abb8b8}.empty code{word-break:break-all}@media(max-width:820px){.layout,.estate-stats{grid-template-columns:1fr}.hero{min-height:300px}.estate-hero{min-height:430px}.wrap{padding-left:16px;padding-right:16px}}")
+                .Append("body{margin:0;background:#101417;color:#e9efec;font:16px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}a{color:#9bd3e6;text-decoration:none}img{max-width:100%;display:block}.wrap{max-width:1180px;margin:0 auto;padding:0 24px}.estate-hero{min-height:520px;background-size:cover;background-position:center;display:flex;align-items:flex-end}.estate-hero-plain{background:linear-gradient(135deg,#11252b,#1e2927 52%,#3a3526)}.estate-hero .wrap{padding-top:110px;padding-bottom:72px}.estate-hero p{max-width:760px;color:#d9e5e1;font-size:19px}.estate-hero>div>p:first-child,.hero p,.feature-kicker{margin:0 0 10px;color:#b9d8d3;text-transform:uppercase;font-size:13px;letter-spacing:.08em}.estate-hero h1{max-width:900px;margin:0;font-size:clamp(44px,8vw,96px);line-height:.92}.estate-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}.estate-actions a{background:#d7e4df;color:#101417;padding:10px 15px;font-weight:700}.estate-actions a+a{background:#223239;color:#dbe7e4}.estate-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;margin-top:28px;background:#2a363a}.estate-stats div{background:#171e22;padding:18px}.estate-stats strong{display:block;font-size:30px}.estate-stats span{color:#aebbb9}.feature-section{padding-top:48px}.feature-section h2,.list h2{font-size:34px;margin:0 0 20px}.feature-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}.feature-card{display:block;background:#171e22;border:1px solid #263136;color:#e9efec;padding:18px;min-height:190px}.feature-card:hover{border-color:#6da8b7;background:#1a2428}.feature-card h3{margin:0 0 8px;font-size:21px}.feature-card p{margin:0;color:#c7d2cf}.feature-card span{display:inline-block;margin-top:18px;color:#9bd3e6;font-weight:700}.feature-page{padding-top:42px;padding-bottom:70px;max-width:900px}.feature-page h1{font-size:clamp(38px,7vw,68px);line-height:1;margin:0 0 18px}.feature-page .lead,.script-reference .lead{font-size:21px;color:#d4dfdc;margin:0 0 20px}.feature-page section{border-top:1px solid #2a363a;padding-top:24px;margin-top:26px}.feature-page h2{font-size:28px;margin:0 0 12px}.feature-page li{margin:0 0 10px;color:#d2dcda}.hero{min-height:360px;background-size:cover;background-position:center;display:flex;align-items:flex-end}.hero .wrap{padding-top:90px;padding-bottom:46px}.hero h1{margin:0;font-size:clamp(38px,7vw,82px);line-height:.94}.meta{margin-top:16px;color:#cfd8d5}.layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:36px;padding-top:36px;padding-bottom:56px}.story{min-width:0}.story>p{font-size:19px;color:#d5dfdc}.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin:30px 0}.gallery figure{margin:0;background:#182025}.gallery img{aspect-ratio:4/3;object-fit:cover}.gallery figcaption{padding:10px;color:#c7d0ce;font-size:14px}.panel{align-self:start}.map{width:100%;aspect-ratio:1;object-fit:cover;border:1px solid #2a363a}.stats,.parcels{margin-top:18px;background:#171e22;border:1px solid #263136;padding:18px}.stats h2,.parcels h2,.story h2{margin:0 0 14px}.stats dl{display:grid;grid-template-columns:1fr auto;gap:7px 16px;margin:0}.stats dt{color:#9facad}.stats dd{margin:0;font-weight:700}.parcels div{display:flex;justify-content:space-between;gap:12px;border-top:1px solid #263136;padding:9px 0}.parcels div:first-of-type{border-top:0}.parcels span{color:#aab6b8}.post{border-top:1px solid #2a363a;padding:22px 0}.post img{width:100%;max-height:360px;object-fit:cover;margin-bottom:14px}.post time{color:#9facad;font-size:13px}.post h3{margin:4px 0 8px;font-size:24px}.post p{color:#cbd5d2}.post-page{padding-top:36px;padding-bottom:60px;max-width:850px}.post.full h1{font-size:46px;line-height:1.05;margin:6px 0 22px}.post.full p{font-size:18px}.back{display:inline-block;margin-bottom:18px}.region-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}.list{padding-top:42px;padding-bottom:60px}.region-card{background:#171e22;border:1px solid #263136;color:#e9efec}.region-card img{aspect-ratio:16/9;object-fit:cover}.region-card strong,.region-card span{display:block;padding:0 14px}.region-card strong{padding-top:13px;font-size:20px}.region-card span{padding-bottom:14px;color:#abb8b8}.empty code{word-break:break-all}.script-reference{padding-top:42px;padding-bottom:70px}.script-reference h1{font-size:clamp(38px,7vw,68px);line-height:1;margin:0 0 18px}.script-source{max-width:880px;color:#b8c6c3}.script-toc{border-top:1px solid #2a363a;margin-top:30px;padding-top:22px}.script-toc h2,.script-group h2{font-size:28px;margin:0 0 14px}.script-toc div{display:flex;flex-wrap:wrap;gap:10px}.script-toc a{background:#172229;border:1px solid #2c3a41;padding:9px 12px;color:#dce7e4}.script-toc span{color:#98b5bd}.script-group{border-top:1px solid #2a363a;margin-top:30px;padding-top:24px}.script-card{background:#161e22;border:1px solid #263238;padding:18px;margin:0 0 14px}.script-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.script-card h3{font-size:22px;margin:0}.script-card-head span{color:#9cb7bd;font-size:13px;text-align:right}.signature{margin:12px 0;color:#dbe7e4}.signature code,.script-card pre{background:#0c1114;border:1px solid #263238}.signature code{display:block;overflow:auto;padding:10px}.script-detail{margin:8px 0;color:#cbd6d3}.script-detail strong{color:#eef7f3}.script-card details{margin-top:12px}.script-card summary{cursor:pointer;color:#9bd3e6;font-weight:700}.script-card pre{overflow:auto;padding:12px;color:#dfeae7}.script-focus{border-top:1px solid #2a363a;margin-top:28px;padding-top:24px}@media(max-width:820px){.layout,.estate-stats{grid-template-columns:1fr}.hero{min-height:300px}.estate-hero{min-height:430px}.wrap{padding-left:16px;padding-right:16px}.script-card-head{display:block}.script-card-head span{text-align:left;display:block;margin-top:5px}}")
                 .Append("</style></head><body>");
             return html;
         }
@@ -1588,6 +1694,150 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             }
         }
 
+        private static readonly ScriptFunctionDoc[] ScriptFunctionDocs = new[]
+        {
+            Doc("List and data fixes", "llList2ListSlice", "list llList2ListSlice(list src, integer start, integer end, integer stride, integer stride_index)", "A sliced list.", "Use it to take one entry from each stride across an inclusive range. Negative indexes and exclusion ranges now follow SL behavior.", "None.", "Corrected stride and negative-index semantics."),
+            Doc("List and data fixes", "llListFindStrided", "integer llListFindStrided(list src, list test, integer start, integer end, integer stride)", "The matching list index, or -1.", "Use it to search only stride-aligned positions between start and end. Empty lists and negative ranges now match SL behavior.", "None.", "Prevents matches from leaking outside the requested search span."),
+            Doc("Experience-Lite", "llRequestExperiencePermissions", "void llRequestExperiencePermissions(key agent, string experience)", "No return value; raises experience_permissions or experience_permissions_denied.", "Call before privileged Experience-Lite actions. Trusted estate owners can auto-grant configured permissions.", "Requires [ScriptExperiences] trust for automatic grants; untrusted scripts receive denied callbacks.", "The experience string may be blank for the configured local experience."),
+            Doc("Experience-Lite", "llIsExperienceTrusted", "integer llIsExperienceTrusted()", "TRUE when the running object or owner is trusted.", "Use at startup to decide whether to enable estate automation features.", "None.", "Reads the simulator Experience-Lite trust configuration."),
+            Doc("Experience-Lite", "llExperienceCanAutoGrant", "integer llExperienceCanAutoGrant(integer permissions)", "TRUE when every requested permission bit can be auto-granted.", "Pass the same permission mask you would request with llRequestPermissions.", "None.", "Use before asking an avatar for permissions if you want a no-prompt trusted path."),
+            Doc("Experience-Lite", "llGetExperiencePermissions", "integer llGetExperiencePermissions()", "The configured auto-grant permission mask.", "Use it to inspect what the current trusted experience can request without a viewer prompt.", "None.", "PERMISSION_DEBIT and ownership-changing flows are intentionally not auto-granted by default."),
+            Doc("Experience-Lite", "llAgentInExperience", "integer llAgentInExperience(key agent)", "TRUE when the agent is known to the local trusted experience.", "Use this before experience-only UI, sits or teleports.", "None.", "Returns false for unknown, offline or out-of-region agents."),
+            Doc("Experience-Lite", "llGetExperienceDetails", "list llGetExperienceDetails(key experience_id)", "A list of experience metadata.", "Call with NULL_KEY for the local configured experience details.", "None.", "Includes readable status/error information for scripts."),
+            Doc("Experience-Lite", "llGetExperienceErrorMessage", "string llGetExperienceErrorMessage(integer error)", "A readable error string.", "Use it in dataserver and experience denied handlers to turn XP_ERROR_* codes into owner-readable diagnostics.", "None.", "Useful for in-world setup panels."),
+            Doc("Experience-Lite", "llOpenFloater", "integer llOpenFloater(string floater_name, string url, list parameters)", "A deterministic status code.", "Use it from attachment/experience workflows that compile against SL floater APIs.", "Experience trust may be required depending on the requested floater flow.", "The simulator exposes the signature and returns explicit status rather than silently doing nothing."),
+            Doc("Experience-Lite", "llSitOnLink", "integer llSitOnLink(key agent, integer link)", "A SIT_* result code.", "After experience_permissions, use it to seat an avatar on a specific linked sit target.", "Requires trusted experience permissions for the target agent.", "Pairs with PRIM_SCRIPTED_SIT_ONLY and llSetLinkSitFlags."),
+            Doc("Experience key-value", "llCreateKeyValue", "key llCreateKeyValue(string key, string value)", "A dataserver query id.", "Create a persistent experience key when it does not already exist.", "Requires trusted Experience-Lite storage.", "dataserver replies are \"1,value\" or \"0,errorCode\"."),
+            Doc("Experience key-value", "llReadKeyValue", "key llReadKeyValue(string key)", "A dataserver query id.", "Read a persistent experience key.", "Requires trusted Experience-Lite storage.", "Use llGetExperienceErrorMessage for failed replies."),
+            Doc("Experience key-value", "llUpdateKeyValue", "key llUpdateKeyValue(string key, string value, integer checked, string originalValue)", "A dataserver query id.", "Update a key. Set checked to TRUE to require the stored value to equal originalValue.", "Requires trusted Experience-Lite storage.", "Use checked updates for locks, counters and multi-script state."),
+            Doc("Experience key-value", "llDeleteKeyValue", "key llDeleteKeyValue(string key)", "A dataserver query id.", "Delete a key from the local experience store.", "Requires trusted Experience-Lite storage.", "Deleting a missing key returns an error reply."),
+            Doc("Experience key-value", "llKeyCountKeyValue", "key llKeyCountKeyValue()", "A dataserver query id.", "Request the number of keys in the local experience store.", "Requires trusted Experience-Lite storage.", "Useful for capacity monitors."),
+            Doc("Experience key-value", "llKeysKeyValue", "key llKeysKeyValue(integer first, integer count)", "A dataserver query id.", "Page through stored keys.", "Requires trusted Experience-Lite storage.", "Respect KeyValueStoreMaxKeys and configured byte limits."),
+            Doc("Experience key-value", "llDataSizeKeyValue", "key llDataSizeKeyValue()", "A dataserver query id.", "Request current byte usage for the experience key-value store.", "Requires trusted Experience-Lite storage.", "Use with llGetExperienceKeyValueStoreStats for admin panels."),
+            Doc("Experience key-value", "llGetExperienceKeyValueStoreStats", "list llGetExperienceKeyValueStoreStats()", "A stats list.", "Read enabled/trusted state, key count, byte usage and configured storage limits synchronously.", "Requires trusted Experience-Lite storage for meaningful values.", "Server-local diagnostic helper."),
+            Doc("Linkset data", "llLinksetDataAvailable", "integer llLinksetDataAvailable()", "Available bytes.", "Check remaining object-local linkset storage capacity.", "None.", "Scoped to the object linkset."),
+            Doc("Linkset data", "llLinksetDataCountKeys", "integer llLinksetDataCountKeys()", "Number of stored keys.", "Count all linkset data keys.", "None.", "Use before paginating with llLinksetDataListKeys."),
+            Doc("Linkset data", "llLinksetDataCountFound", "integer llLinksetDataCountFound(string pattern)", "Number of matching keys.", "Count keys matching a pattern.", "None.", "Pattern search mirrors the linkset data find/delete helpers."),
+            Doc("Linkset data", "llLinksetDataListKeys", "list llLinksetDataListKeys(integer start, integer count)", "A list of key names.", "Page through object-local linkset data keys.", "None.", "Use count to limit chatty admin displays."),
+            Doc("Linkset data", "llLinksetDataFindKeys", "list llLinksetDataFindKeys(string pattern, integer start, integer count)", "A list of matching key names.", "Search key names by pattern.", "None.", "Good for namespace-style keys such as seat:* or vendor:*." ),
+            Doc("Linkset data", "llLinksetDataRead", "string llLinksetDataRead(string name)", "The stored value, or an empty string.", "Read an unprotected linkset data key.", "None.", "Protected values must be read with llLinksetDataReadProtected."),
+            Doc("Linkset data", "llLinksetDataReadProtected", "string llLinksetDataReadProtected(string name, string pass)", "The stored value, or an empty string.", "Read a protected key using the pass phrase.", "None.", "Use for shared object state that should not be casually read by every script."),
+            Doc("Linkset data", "llLinksetDataWrite", "integer llLinksetDataWrite(string name, string value)", "A LINKSETDATA_* result code.", "Write or replace an unprotected object-local key.", "None.", "Triggers linkset_data in scripts in the same object."),
+            Doc("Linkset data", "llLinksetDataWriteProtected", "integer llLinksetDataWriteProtected(string name, string value, string pass)", "A LINKSETDATA_* result code.", "Write or replace a protected key.", "None.", "The same pass phrase is required for protected read/delete."),
+            Doc("Linkset data", "llLinksetDataDelete", "integer llLinksetDataDelete(string name)", "A LINKSETDATA_* result code.", "Delete an unprotected key.", "None.", "Triggers linkset_data when a value is removed."),
+            Doc("Linkset data", "llLinksetDataDeleteProtected", "integer llLinksetDataDeleteProtected(string name, string pass)", "A LINKSETDATA_* result code.", "Delete a protected key.", "None.", "Requires the matching pass phrase."),
+            Doc("Linkset data", "llLinksetDataDeleteFound", "list llLinksetDataDeleteFound(string pattern, string pass)", "A list of deleted keys.", "Delete all matching keys, optionally using a pass phrase for protected keys.", "None.", "Use carefully in admin reset scripts."),
+            Doc("Linkset data", "llLinksetDataReset", "void llLinksetDataReset()", "No return value.", "Clear all linkset data for the object.", "None.", "Best reserved for owner/admin reset tools."),
+            Doc("Scripted sit", "llSetLinkSitFlags", "void llSetLinkSitFlags(integer link, integer flags)", "No return value.", "Set SIT_FLAG_* behavior on a link, including scripted-only sit and allow-unsit control.", "Object owner/control script.", "Use PRIM_SCRIPTED_SIT_ONLY and PRIM_ALLOW_UNSIT for viewer-compatible seats."),
+            Doc("Scripted sit", "llGetLinkSitFlags", "integer llGetLinkSitFlags(integer link)", "The SIT_FLAG_* bitmask.", "Read the scripted sit flags for a link.", "None.", "Use in setup validators."),
+            Doc("Rez and cleanup", "llRezObjectWithParams", "key llRezObjectWithParams(string inventory, list params)", "The rezzed object key, or NULL_KEY on failure.", "Rez an inventory object using REZ_* parameters for position, rotation, velocity, start data and flags.", "Requires normal rez rights and inventory permissions.", "Use llGetStartString inside the rezzed object for string start data."),
+            Doc("Rez and cleanup", "llDerezObject", "integer llDerezObject(key object_id, integer flag)", "A derez status code.", "Remove a scripted object by id using the supported DEREZ/return behavior.", "Requires object ownership or sufficient estate return rights.", "Useful for temporary build and vehicle cleanup."),
+            Doc("Rez and cleanup", "llGetStartString", "string llGetStartString()", "The string start parameter.", "Read string start data supplied by llRezObjectWithParams.", "None.", "This was already in the API and is now exposed through the stub."),
+            Doc("Linked sound", "llLinkPlaySound", "void llLinkPlaySound(integer link, string sound, float volume[, integer flags])", "No return value.", "Play a sound from a specific linked prim, optionally using SOUND_* flags.", "The sound must be an object inventory item or asset id the simulator can resolve.", "Use link selectors for multi-prim vehicles and machines."),
+            Doc("Linked sound", "llLinkStopSound", "void llLinkStopSound(integer link)", "No return value.", "Stop sound on the selected link.", "None.", "Pairs with llLinkPlaySound."),
+            Doc("Linked sound", "llLinkAdjustSoundVolume", "void llLinkAdjustSoundVolume(integer link, float volume)", "No return value.", "Adjust volume on a playing linked sound.", "None.", "Volume follows the normal 0.0 to 1.0 range."),
+            Doc("Linked sound", "llLinkSetSoundQueueing", "void llLinkSetSoundQueueing(integer link, integer queue)", "No return value.", "Enable or disable queued sound behavior on a link.", "None.", "Use before a sequence of linked sound calls."),
+            Doc("Linked sound", "llLinkSetSoundRadius", "void llLinkSetSoundRadius(integer link, float radius)", "No return value.", "Set audible radius for a linked sound emitter.", "None.", "Good for local machine sounds that should not fill the whole region."),
+            Doc("Environment and time", "llGetRegionTimeOfDay", "float llGetRegionTimeOfDay()", "Seconds into the current region day.", "Read EEP region time when the environment module is available.", "None.", "Falls back to llGetTimeOfDay when no region environment module exists."),
+            Doc("Environment and time", "llGetDayLength", "integer llGetDayLength()", "Current parcel/day length in seconds.", "Use for scripts that sync lighting, games or machines to the local day cycle.", "None.", "Alias-style helper for the active environment."),
+            Doc("Environment and time", "llGetRegionDayLength", "integer llGetRegionDayLength()", "Region day length in seconds.", "Use when you need the region cycle rather than parcel/agent local values.", "None.", "Reads the region environment settings."),
+            Doc("Environment and time", "llGetDayOffset", "integer llGetDayOffset()", "Day offset in seconds.", "Read the current environment offset.", "None.", "Use with day length to align scripted effects."),
+            Doc("Environment and time", "llGetRegionDayOffset", "integer llGetRegionDayOffset()", "Region day offset in seconds.", "Read the region-level day offset.", "None.", "Region-scoped counterpart to llGetDayOffset."),
+            Doc("Environment and time", "llGetSunDirection", "vector llGetSunDirection()", "A direction vector.", "Aim lights, panels or sundials at the current sun direction.", "None.", "Uses the active environment."),
+            Doc("Environment and time", "llGetRegionSunDirection", "vector llGetRegionSunDirection()", "A direction vector.", "Aim scripts at the region sun direction.", "None.", "Region-scoped counterpart to llGetSunDirection."),
+            Doc("Environment and time", "llGetMoonDirection", "vector llGetMoonDirection()", "A direction vector.", "Aim scripts at the current moon direction.", "None.", "Uses the active environment."),
+            Doc("Environment and time", "llGetRegionMoonDirection", "vector llGetRegionMoonDirection()", "A direction vector.", "Aim scripts at the region moon direction.", "None.", "Region-scoped counterpart to llGetMoonDirection."),
+            Doc("Environment and time", "llGetSunRotation", "rotation llGetSunRotation()", "A rotation.", "Use when a script needs the current sun orientation as a rotation.", "None.", "Uses the active environment."),
+            Doc("Environment and time", "llGetRegionSunRotation", "rotation llGetRegionSunRotation()", "A rotation.", "Use when a script needs the region sun orientation.", "None.", "Region-scoped counterpart to llGetSunRotation."),
+            Doc("Environment and time", "llGetMoonRotation", "rotation llGetMoonRotation()", "A rotation.", "Use when a script needs the current moon orientation as a rotation.", "None.", "Uses the active environment."),
+            Doc("Environment and time", "llGetRegionMoonRotation", "rotation llGetRegionMoonRotation()", "A rotation.", "Use when a script needs the region moon orientation.", "None.", "Region-scoped counterpart to llGetMoonRotation."),
+            Doc("Environment and time", "llGetEnvironment", "list llGetEnvironment(vector position, list rules)", "Rule/value pairs.", "Query supported EEP day, sky, water and environment rules at a position.", "None.", "Unsupported rules return SL-style invalid rule status where applicable."),
+            Doc("Environment and time", "llReplaceEnvironment", "integer llReplaceEnvironment(vector position, string environment, integer track_no, integer day_length, integer day_offset)", "An ENV_* result code.", "Replace or clear parcel/region environment data using an inventory/environment asset id.", "Requires parcel or estate environment rights.", "Pass NULL_KEY or an empty string to clear where supported."),
+            Doc("Environment and time", "llSetEnvironment", "integer llSetEnvironment(vector position, list parameters)", "An ENV_* result code.", "Attempt per-parameter environment overrides at a position.", "Requires parcel or estate environment rights.", "Returns ENV_INVALID_RULE for rules OpenSim cannot persist yet."),
+            Doc("Environment and time", "llReplaceAgentEnvironment", "integer llReplaceAgentEnvironment(key agent, float transition, string environment)", "An ENV_* result code.", "Replace or clear a local agent environment.", "Requires a valid in-region agent and supported environment permissions.", "Useful for trusted estate experiences and ride effects."),
+            Doc("Environment and time", "llSetAgentEnvironment", "integer llSetAgentEnvironment(key agent, float transition, list parameters)", "An ENV_* result code.", "Attempt per-agent environment parameter overrides.", "Requires a valid in-region agent and supported environment permissions.", "Returns ENV_INVALID_RULE for unsupported persistent overrides."),
+            Doc("Estate and parcel", "llReturnObjectsByID", "integer llReturnObjectsByID(list object_ids)", "Number of objects returned.", "Return selected objects by UUID.", "Requires PERMISSION_RETURN_OBJECTS or simulator return rights.", "Uses normal simulator permission checks."),
+            Doc("Estate and parcel", "llReturnObjectsByOwner", "integer llReturnObjectsByOwner(key owner, integer scope)", "Number of objects returned.", "Return objects owned by an avatar within the selected OBJECT_RETURN_* scope.", "Requires PERMISSION_RETURN_OBJECTS or simulator return rights.", "Use for estate cleanup panels."),
+            Doc("Estate and parcel", "llSetGroundTexture", "integer llSetGroundTexture(list changes)", "TRUE on success.", "Set TERRAIN_DETAIL_* textures and TERRAIN_HEIGHT_RANGE_* blending heights.", "Script owner must be estate owner or estate manager.", "Estate manager checks now use the same owner-or-manager path as estate commands."),
+            Doc("Estate and parcel", "llSetParcelForSale", "integer llSetParcelForSale(integer forSale, list options)", "A PARCEL_SALE_* result code.", "Mark the current parcel for sale or clear sale state using sale options.", "Requires parcel ownership or PERMISSION_PRIVILEGED_LAND_ACCESS where supported.", "Use for scripted land consoles."),
+            Doc("Estate and parcel", "llParcelMediaCommandList", "void llParcelMediaCommandList(list commands)", "No return value.", "Set parcel media URL, texture, loop, auto-align, MIME type, description and size commands.", "Requires parcel media edit rights.", "PARCEL_MEDIA_COMMAND_LOOP_SET is supported."),
+            Doc("Estate and parcel", "llParcelMediaQuery", "list llParcelMediaQuery(list commands)", "Requested media values.", "Read parcel media state for supported query fields.", "Requires parcel media visibility/edit context.", "Returns values in the requested command order."),
+            Doc("Estate and parcel", "llManageEstateAccess", "integer llManageEstateAccess(integer action, string avatar)", "TRUE on successful mutation.", "Change estate access lists from trusted estate scripts.", "Script owner must be estate owner or estate manager.", "Mutations persist and notify estate info updates."),
+            Doc("Inventory and ownership", "llGiveAgentInventory", "integer llGiveAgentInventory(key agent, string folderName, list inventory, list options)", "A TRANSFER_* result code.", "Deliver a folder of task inventory to an in-region agent.", "Items must satisfy copy/transfer checks.", "Use TRANSFER_DEST and TRANSFER_FLAGS options."),
+            Doc("Inventory and ownership", "llTransferOwnership", "integer llTransferOwnership(key agent, integer flags, list options)", "A TRANSFER_* result code.", "Transfer the object or copy/take inventory delivery to another agent.", "Requires compatible object and inventory permissions.", "TRANSFER_FLAG_COPY and TRANSFER_FLAG_TAKE are supported."),
+            Doc("Inventory and ownership", "llTransferLindenDollars", "key llTransferLindenDollars(key destination, integer amount)", "A transaction/query id.", "Start a scripted money transfer where the economy backend supports it.", "Requires debit permission and economy support.", "Use with normal money transaction handling."),
+            Doc("Inventory and ownership", "llGetInventoryAcquireTime", "string llGetInventoryAcquireTime(string item)", "Acquire timestamp text.", "Read when an inventory item was acquired by the object.", "None.", "Returns an error if the item does not exist."),
+            Doc("Inventory and ownership", "llGetInventoryDesc", "string llGetInventoryDesc(string item)", "Inventory item description.", "Read the description field for an object inventory item.", "None.", "Useful for data-driven object inventory."),
+            Doc("Avatar and detection", "llDetectedRezzer", "key llDetectedRezzer(integer number)", "The rezzer object/avatar key, or NULL_KEY.", "Read provenance from detected data after sensor/collision/touch-style callbacks.", "None.", "The rezzer id now survives YEngine capture and restore."),
+            Doc("Avatar and detection", "llGetAttachedListFiltered", "list llGetAttachedListFiltered(key agent, list options)", "Attachment object ids.", "Query attachments with FILTER_* options such as ATTACH_ANY_HUD and FILTER_FLAG_HUDS.", "HUD attachment visibility is limited to the script owner.", "Use for HUD-aware controllers without manual relay scripts."),
+            Doc("Avatar and detection", "llSetAgentRot", "void llSetAgentRot(rotation rot, integer flags)", "No return value.", "Apply yaw rotation to the permissions-granted in-region avatar.", "Requires animation/control permissions for the avatar.", "Only yaw rotation is applied."),
+            Doc("Avatar and detection", "llWorldPosToHUD", "vector llWorldPosToHUD(vector world_position)", "A HUD-space coordinate.", "Convert a world position to a HUD coordinate for indicators and pointing UI.", "Works from an attached HUD context.", "Useful for minimaps, markers and targeting displays."),
+            Doc("Avatar and detection", "llMatchGroup", "integer llMatchGroup(key agent, list group_keys)", "TRUE when the agent active group matches.", "Check whether an in-region avatar has one of the supplied active groups.", "None.", "Avoids needing scripted llSameGroup relay prims."),
+            Doc("Avatar and detection", "llIsFriend", "integer llIsFriend(key agent)", "TRUE when the simulator can treat the agent as a friend/same group.", "Use for compatibility with scripts that check friend-like access.", "None.", "Falls back to same-group behavior when friend service state is unavailable."),
+            Doc("Materials and rendering", "llSetRenderMaterial", "void llSetRenderMaterial(string material, integer face)", "No return value.", "Apply a render material inventory item or material id to one face on the current prim.", "The material must resolve from object inventory or a valid asset id.", "Use an empty string to clear where supported."),
+            Doc("Materials and rendering", "llSetLinkRenderMaterial", "void llSetLinkRenderMaterial(integer link, string material, integer face)", "No return value.", "Apply a render material to selected linked prims/faces.", "The material must resolve from object inventory or a valid asset id.", "For inventory names, the material item must be inside the object."),
+            Doc("Materials and rendering", "llGetRenderMaterial", "string llGetRenderMaterial(integer face)", "The stored material id/name, or an empty string.", "Read the render material assigned to a face.", "None.", "Reads stored override state, not every unset property inside the material asset."),
+            Doc("Materials and rendering", "llSetLinkGLTFOverrides", "void llSetLinkGLTFOverrides(integer link, integer face, list overrides)", "No return value.", "Set supported OVERRIDE_GLTF_* factors on selected linked prims/faces.", "Object edit rights.", "Supports base color/alpha, alpha mode, mask cutoff, double-sided, metallic, roughness and emissive factors."),
+            Doc("Materials and rendering", "llIsLinkGLTFMaterial", "integer llIsLinkGLTFMaterial(integer link, integer face)", "TRUE when a face has GLTF material data.", "Check before applying or reading GLTF-specific overrides.", "None.", "Useful for mixed legacy/PBR builds."),
+            Doc("Damage and combat", "llSetDamage", "void llSetDamage(float damage)", "No return value.", "Set object collision damage value.", "Object script control.", "Also available through PRIM_DAMAGE primitive params."),
+            Doc("Damage and combat", "llDamage", "void llDamage(key target, float damage, integer damage_type)", "No return value.", "Apply supported avatar health damage and damage type.", "Requires simulator damage/combat support for meaningful effect.", "Uses OpenSim avatar health/death/teleport-home path."),
+            Doc("Damage and combat", "llGetHealth", "float llGetHealth(string key)", "The target health value when known.", "Read avatar/object health compatibility state.", "None.", "Use OBJECT_HEALTH through llGetObjectDetails for object details workflows."),
+            Doc("Damage and combat", "llDetectedDamage", "list llDetectedDamage(integer number)", "Detected damage metadata list.", "Compile Combat2-style scripts that inspect detected damage.", "Only meaningful when event metadata exists.", "Currently empty outside missing Combat2 event metadata."),
+            Doc("Damage and combat", "llAdjustDamage", "void llAdjustDamage(float damage)", "No return value.", "Compile Combat2 on_damage scripts that try to adjust incoming damage.", "Only useful in an on_damage backend.", "Backend-limited: OpenSim does not yet provide Combat2 adjustment state."),
+            Doc("Security", "llComputeHash", "string llComputeHash(string message, string algorithm)", "Hex digest text.", "Hash data using supported algorithm names for web callbacks or signatures.", "None.", "Use the exact algorithm names supported by the runtime."),
+            Doc("Security", "llHMAC", "string llHMAC(string private_key, string message, string algorithm)", "Hex HMAC text.", "Authenticate messages with a shared secret.", "None.", "Good for script-to-web handshakes."),
+            Doc("Security", "llSignRSA", "string llSignRSA(string private_key, string message, string algorithm)", "Base64 RSA signature.", "Sign a message using a PEM RSA private key.", "The key must be available to the script as text.", "Supports SHA-1, SHA-224, SHA-256, SHA-384 and SHA-512 names."),
+            Doc("Security", "llVerifyRSA", "integer llVerifyRSA(string public_key, string message, string signature, string algorithm)", "TRUE when the signature verifies.", "Verify an RSA signature using a PEM public key.", "None.", "Use to validate signed notecards, webhooks or configuration blobs."),
+            Doc("Text, JSON and color", "llFindNotecardTextSync", "list llFindNotecardTextSync(string name, string pattern, integer start, integer count, list options)", "A list of [line, index, length] strides.", "Search a cached notecard synchronously with a regex pattern.", "The notecard must be in object inventory.", "Returns up to 64 matches per call."),
+            Doc("Text, JSON and color", "llGetNotecardLineSync", "string llGetNotecardLineSync(string name, integer line)", "The notecard line text.", "Read a cached notecard line synchronously.", "The notecard must be in object inventory.", "Use async llGetNotecardLine for large or uncached data flows."),
+            Doc("Text, JSON and color", "llJson2List", "list llJson2List(string json)", "A list representation.", "Convert JSON arrays/objects into LSL list form.", "None.", "Pairs with llList2Json."),
+            Doc("Text, JSON and color", "llList2Json", "string llList2Json(string type, list values)", "JSON text.", "Build a JSON array or object from LSL values.", "None.", "Use JSON_ARRAY or JSON_OBJECT style type constants."),
+            Doc("Text, JSON and color", "llJsonGetValue", "string llJsonGetValue(string json, list specifiers)", "The selected JSON value.", "Read a JSON path using LSL specifiers.", "None.", "Returns JSON_INVALID when the path cannot be resolved."),
+            Doc("Text, JSON and color", "llJsonSetValue", "string llJsonSetValue(string json, list specifiers, string value)", "Updated JSON text.", "Set or replace a JSON value at the given path.", "None.", "Good for compact config blobs in linkset data."),
+            Doc("Text, JSON and color", "llJsonValueType", "string llJsonValueType(string json, list specifiers)", "A JSON type string.", "Inspect the type at a JSON path.", "None.", "Use before reading optional keys."),
+            Doc("Text, JSON and color", "llChar", "string llChar(integer unicode)", "A one-character string.", "Build a character from a Unicode code point.", "None.", "Compatibility helper for scripts ported from SL."),
+            Doc("Text, JSON and color", "llOrd", "integer llOrd(string text, integer index)", "Unicode code point.", "Read the code point at an index.", "None.", "Negative indexes are not used; validate before calling."),
+            Doc("Text, JSON and color", "llHash", "integer llHash(string text)", "A deterministic integer hash.", "Hash a string into an integer for buckets or lightweight ids.", "None.", "Not a cryptographic hash; use llComputeHash for security."),
+            Doc("Text, JSON and color", "llReplaceSubString", "string llReplaceSubString(string src, string pattern, string replacement, integer count)", "Updated string.", "Replace regex pattern matches in a string.", "None.", "The regex is time-limited to protect the script thread."),
+            Doc("Text, JSON and color", "llLinear2sRGB", "vector llLinear2sRGB(vector color)", "sRGB color vector.", "Convert linear color values to sRGB.", "None.", "Useful for PBR color workflows."),
+            Doc("Text, JSON and color", "llsRGB2Linear", "vector llsRGB2Linear(vector color)", "Linear color vector.", "Convert sRGB color values to linear space.", "None.", "Useful before GLTF factor math."),
+            Doc("Pathfinding compatibility", "llCreateCharacter", "void llCreateCharacter(list options)", "No return value; posts path_update failure.", "Compile SL pathfinding character scripts.", "No navmesh backend is present.", "Posts PU_FAILURE_NO_NAVMESH instead of faking movement."),
+            Doc("Pathfinding compatibility", "llUpdateCharacter", "void llUpdateCharacter(list options)", "No return value; posts path_update failure.", "Compile scripts that update character options.", "No navmesh backend is present.", "Backend-limited compatibility surface."),
+            Doc("Pathfinding compatibility", "llDeleteCharacter", "void llDeleteCharacter()", "No return value; posts path_update failure.", "Compile scripts that delete pathfinding characters.", "No navmesh backend is present.", "Backend-limited compatibility surface."),
+            Doc("Pathfinding compatibility", "llExecCharacterCmd", "void llExecCharacterCmd(integer command, list options)", "No return value; posts path_update failure.", "Compile scripts that issue character commands.", "No navmesh backend is present.", "Backend-limited compatibility surface."),
+            Doc("Pathfinding compatibility", "llNavigateTo", "void llNavigateTo(vector goal, list options)", "No return value; posts path_update failure.", "Compile scripts that request navigation.", "No navmesh backend is present.", "Posts PU_FAILURE_NO_NAVMESH."),
+            Doc("Pathfinding compatibility", "llWanderWithin", "void llWanderWithin(vector origin, vector distance, list options)", "No return value; posts path_update failure.", "Compile scripts that request wandering behavior.", "No navmesh backend is present.", "Posts PU_FAILURE_NO_NAVMESH."),
+            Doc("Pathfinding compatibility", "llPursue", "void llPursue(key target, list options)", "No return value; posts path_update failure.", "Compile scripts that request pursuit behavior.", "No navmesh backend is present.", "Posts PU_FAILURE_NO_NAVMESH."),
+            Doc("Pathfinding compatibility", "llEvade", "void llEvade(key target, list options)", "No return value; posts path_update failure.", "Compile scripts that request evade behavior.", "No navmesh backend is present.", "Posts PU_FAILURE_NO_NAVMESH."),
+            Doc("Pathfinding compatibility", "llFleeFrom", "void llFleeFrom(vector source, float distance, list options)", "No return value; posts path_update failure.", "Compile scripts that request flee behavior.", "No navmesh backend is present.", "Posts PU_FAILURE_NO_NAVMESH."),
+            Doc("Pathfinding compatibility", "llGetStaticPath", "list llGetStaticPath(vector start, vector end, float radius, list parameters)", "A PU_FAILURE_NO_NAVMESH result list.", "Compile scripts that query static paths.", "No navmesh backend is present.", "Returns explicit failure rather than a fake path."),
+            Doc("Pathfinding compatibility", "llGetClosestNavPoint", "vector llGetClosestNavPoint(vector point, list options)", "A vector, usually ZERO_VECTOR without navmesh.", "Compile scripts that query nav points.", "No navmesh backend is present.", "Backend-limited compatibility surface."),
+            Doc("Misc compatibility", "llGenerateKey", "key llGenerateKey()", "A generated UUID.", "Generate a random UUID from script.", "None.", "Useful for local correlation ids."),
+            Doc("Misc compatibility", "llGetAgentList", "list llGetAgentList(integer scope, list options)", "Agent keys.", "List agents matching scope/options.", "None.", "Use for region HUDs and access panels."),
+            Doc("Misc compatibility", "llGetObjectLinkKey", "key llGetObjectLinkKey(key object_id, integer link)", "The child prim key.", "Resolve a link key on another object where visible to the simulator.", "None.", "Useful for object inspectors."),
+            Doc("Misc compatibility", "llGetCameraAspect", "float llGetCameraAspect()", "Viewer camera aspect ratio.", "Read camera aspect after camera tracking permission.", "Requires PERMISSION_TRACK_CAMERA.", "Returns an error without permission."),
+            Doc("Misc compatibility", "llGetCameraFOV", "float llGetCameraFOV()", "Viewer camera field of view.", "Read camera FOV after camera tracking permission.", "Requires PERMISSION_TRACK_CAMERA.", "Returns an error without permission."),
+            Doc("Misc compatibility", "llSetAnimationOverride", "void llSetAnimationOverride(string anim_state, string animation)", "No return value.", "Set animation override state for the permissions-granted avatar.", "Requires animation override permission.", "Inventory animation names must resolve."),
+            Doc("Misc compatibility", "llResetAnimationOverride", "void llResetAnimationOverride(string anim_state)", "No return value.", "Reset one animation override state.", "Requires animation override permission.", "Use an empty state to clear supported sets where accepted."),
+            Doc("Misc compatibility", "llGetAnimationOverride", "string llGetAnimationOverride(string anim_state)", "Animation name or empty string.", "Read the active override for a state.", "Requires animation override permission.", "Useful in AO setup scripts."),
+            Doc("Misc compatibility", "llSetSculptAnim", "void llSetSculptAnim(integer mode, integer sizex, integer sizey, integer start_frame, integer end_frame, float rate, integer texture_sync)", "No return value.", "Compile scripts that use SL sculpt-map animation calls.", "None.", "Backend-limited: OpenSim has no client-visible sculpt animation backend yet.")
+        };
+
+        private static ScriptFunctionDoc Doc(string category, string name, string signature, string returnValue, string usage, string permissions, string notes)
+        {
+            return new ScriptFunctionDoc
+            {
+                Category = category,
+                Name = name,
+                Signature = signature,
+                ReturnValue = returnValue,
+                Usage = usage,
+                Permissions = permissions,
+                Notes = notes,
+                Example = string.Empty
+            };
+        }
+
         private class RegionPageContent
         {
             public string Title;
@@ -1619,6 +1869,18 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             public string Overview;
             public List<string> Usage = new List<string>();
             public List<string> Notes = new List<string>();
+        }
+
+        private class ScriptFunctionDoc
+        {
+            public string Category;
+            public string Name;
+            public string Signature;
+            public string ReturnValue;
+            public string Usage;
+            public string Permissions;
+            public string Notes;
+            public string Example;
         }
 
         private class GalleryItem
