@@ -402,11 +402,10 @@
     ;; both to set this to false and comment out the [Modules] MapImageServiceModule setting in config-include/
     ; GenerateMaptiles = true
 
-    ;# {MapImageModule} {} {The map image module to use} {MapImageModule Warp3DImageModule} MapImageModule
+    ;# {MapImageModule} {} {The map image module to use} {MapImageModule Warp3DImageModule} Warp3DImageModule
     ;; The module to use in order to generate map images.
-    ;; MapImageModule is the default.  Warp3DImageModule is an alternative experimental module that can
-    ;; generate better images.
-    ;MapImageModule = "MapImageModule"
+    ;; Warp3DImageModule renders a real top-down 3D aerial view with z-buffered objects.
+    ;MapImageModule = "Warp3DImageModule"
 
     ;# {MaptileRefresh} {GenerateMaptiles} {Maptile refresh period?} {} 0
     ;; If desired, a running region can update the map tiles periodically
@@ -616,9 +615,34 @@
     ;; Only texture prims that have a diagonal size greater than this number
     ; TexturePrimSize = 48
 
-    ;# {RenderMeshes} {} {Render meshes and sculpties on map tiles?} {true false} false
+    ;# {RenderMeshes} {} {Render meshes and sculpties on map tiles?} {true false} true
     ;; Attempt to render meshes and sculpties on the map.
-    ; RenderMeshes = false
+    ; RenderMeshes = true
+
+    ;# {Map3DUseCachedAssetsOnly} {RenderMeshes} {Use only cached mesh/sculpt/texture assets while rendering 3D maptiles?} {true false} true
+    ;; Keeps maptile generation from blocking simulator threads on remote asset fetches.
+    ; Map3DUseCachedAssetsOnly = true
+
+    ;# {Map3DSkipMissingExternalGeometry} {RenderMeshes} {Skip mesh/sculpt objects whose exact geometry is unavailable instead of drawing box fallbacks?} {true false} true
+    ; Map3DSkipMissingExternalGeometry = true
+
+    ;# {Map3DSkipFlatTextureCardsWithoutTexture} {TexturePrims} {Skip flat texture-card faces when their texture is unavailable so trees/cards do not become solid rectangles?} {true false} true
+    ; Map3DSkipFlatTextureCardsWithoutTexture = true
+
+    ;# {Map3DRenderTimeBudgetMS} {RenderMeshes} {Maximum time budget for the 3D object rendering pass per region maptile} {} 12000
+    ; Map3DRenderTimeBudgetMS = 12000
+
+    ;# {Map3DMaxMeshAssetDecodes} {RenderMeshes} {Maximum mesh/sculpt assets decoded per 3D maptile pass; 0 means unlimited} {} 2048
+    ; Map3DMaxMeshAssetDecodes = 2048
+
+    ;# {Map3DMaxTextureAssetDecodes} {TexturePrims} {Maximum texture assets decoded per 3D maptile pass; 0 means unlimited} {} 192
+    ; Map3DMaxTextureAssetDecodes = 192
+
+    ;# {Map3DTextureDownsample} {TexturePrims} {Warp3D texture downsample level; higher values use less memory} {} 8
+    ; Map3DTextureDownsample = 8
+
+    ;# {Map3DForceGC} {} {Force full GC after 3D maptile generation?} {true false} false
+    ; Map3DForceGC = false
 
     ;# {MapColorWater} {} {Water color for textured and shaded maps} {"#1D475F"}
     ; MapColorWater = "#3399FF"
