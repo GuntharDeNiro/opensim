@@ -1509,8 +1509,9 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
 
             float u = width <= 1 ? 0.5f : (x + 0.5f) / width;
             float v = height <= 1 ? 0.5f : (y + 0.5f) / height;
-            float land = image.SampleLand(u, v);
-            float relief = image.SampleRelief(u, v);
+            float targetAspect = height <= 0 ? 1f : width / (float)height;
+            float land = image.SampleLand(u, v, targetAspect);
+            float relief = image.SampleRelief(u, v, targetAspect);
 
             float coast = SmoothStep(0.36f, 0.72f, land);
             float openWater = 1f - SmoothStep(0.04f, 0.50f, land);
@@ -2303,26 +2304,26 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 MaxY = maxY;
             }
 
-            public float SampleLand(float u, float v)
+            public float SampleLand(float u, float v, float targetAspect)
             {
-                return Sample(Land, u, v);
+                return Sample(Land, u, v, targetAspect);
             }
 
-            public float SampleRelief(float u, float v)
+            public float SampleRelief(float u, float v, float targetAspect)
             {
-                return Sample(Relief, u, v);
+                return Sample(Relief, u, v, targetAspect);
             }
 
-            private float Sample(float[] values, float u, float v)
+            private float Sample(float[] values, float u, float v, float targetAspect)
             {
                 if (values == null || values.Length == 0 || Width <= 0 || Height <= 0)
                     return 0f;
 
-                u = Clamp(u, 0f, 1f);
-                v = Clamp(v, 0f, 1f);
+                if (!TryMapPreservedAspect(u, v, targetAspect, out float imageU, out float imageV))
+                    return 0f;
 
-                float x = MinX + u * Math.Max(0, MaxX - MinX);
-                float y = MinY + (1f - v) * Math.Max(0, MaxY - MinY);
+                float x = MinX + imageU * Math.Max(0, MaxX - MinX);
+                float y = MinY + (1f - imageV) * Math.Max(0, MaxY - MinY);
                 int x0 = Math.Max(0, Math.Min(Width - 1, (int)Math.Floor(x)));
                 int y0 = Math.Max(0, Math.Min(Height - 1, (int)Math.Floor(y)));
                 int x1 = Math.Max(0, Math.Min(Width - 1, x0 + 1));
@@ -2336,6 +2337,48 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 float d = values[y1 * Width + x1];
 
                 return Lerp(Lerp(a, b, tx), Lerp(c, d, tx), ty);
+            }
+
+            private bool TryMapPreservedAspect(float u, float v, float targetAspect, out float imageU, out float imageV)
+            {
+                imageU = 0f;
+                imageV = 0f;
+
+                if (Width <= 0 || Height <= 0)
+                    return false;
+
+                u = Clamp(u, 0f, 1f);
+                v = Clamp(v, 0f, 1f);
+
+                float cropWidth = Math.Max(1f, MaxX - MinX + 1f);
+                float cropHeight = Math.Max(1f, MaxY - MinY + 1f);
+                float cropAspect = cropWidth / cropHeight;
+                targetAspect = Math.Max(0.001f, targetAspect);
+
+                if (cropAspect > targetAspect)
+                {
+                    float fittedHeight = targetAspect / cropAspect;
+                    float pad = (1f - fittedHeight) * 0.5f;
+                    if (v < pad || v > pad + fittedHeight)
+                        return false;
+
+                    imageU = u;
+                    imageV = fittedHeight <= 0f ? 0.5f : (v - pad) / fittedHeight;
+                }
+                else
+                {
+                    float fittedWidth = cropAspect / targetAspect;
+                    float pad = (1f - fittedWidth) * 0.5f;
+                    if (u < pad || u > pad + fittedWidth)
+                        return false;
+
+                    imageU = fittedWidth <= 0f ? 0.5f : (u - pad) / fittedWidth;
+                    imageV = v;
+                }
+
+                imageU = Clamp(imageU, 0f, 1f);
+                imageV = Clamp(imageV, 0f, 1f);
+                return true;
             }
         }
 
