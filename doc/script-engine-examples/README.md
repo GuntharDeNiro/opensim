@@ -51,6 +51,13 @@ The scripts use:
 - `llSetGroundTexture`
 - `llSetLinkRenderMaterial`
 - `llSetLinkGLTFOverrides`
+- `llGiveAgentInventory`
+- `llTransferOwnership`
+- `PARCEL_MEDIA_COMMAND_LOOP_SET`
+- `TRANSFER_DEST`
+- `TRANSFER_FLAGS`
+- `TRANSFER_FLAG_COPY`
+- `TRANSFER_FLAG_TAKE`
 
 ## Files
 
@@ -69,6 +76,8 @@ The scripts use:
 - `13_scripted_only_sit_flags.lsl`: blocks manual sit and seats avatars only through `llSitOnLink`.
 - `14_modern_estate_operations_console.lsl`: complex estate console using group matching, attachment filtering, policy notecard search, parcel sale, object return, terrain and PBR helpers.
 - `15_rezzer_provenance_quarantine.lsl`: complex provenance scanner using rezzer detection, notecard trust policy, HUD filtering and scripted return-by-ID quarantine.
+- `16_inventory_transfer_and_ownership_lab.lsl`: complex inventory transfer lab using `llGiveAgentInventory`, destination roots, transfer result codes and ownership copy/take modes.
+- `17_parcel_media_loop_console.lsl`: parcel media console using loop-set command/query, media type, description, integer size and auto-align persistence.
 
 Stock OpenSim may fail to compile or run these scripts because Experience events,
 KVP functions, scripted-only sit flags and newer Second Life LSL compatibility
