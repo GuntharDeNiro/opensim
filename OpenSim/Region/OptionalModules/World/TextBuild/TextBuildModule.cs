@@ -50,6 +50,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
     public class TextBuildModule : INonSharedRegionModule
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
+        private const float ImageTerrainWaterHeight = 21.0f;
 
         private Scene m_scene;
         private bool m_enabled;
@@ -959,6 +960,8 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                     SendReply(client, string.Format("TextBuild: could not decode cartography texture {0} as terrain source.", recipe.SourceTexture));
                     return;
                 }
+
+                ApplyImageTerrainWaterHeight();
             }
 
             ApplyTerrainTextureHeights(recipe);
@@ -982,6 +985,20 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             m_scene.EventManager.TriggerTerrainUpdate();
 
             SendReply(client, string.Format("TextBuild: shaped terrain as {0}.", recipe.GetDescription()));
+        }
+
+        private void ApplyImageTerrainWaterHeight()
+        {
+            if (Math.Abs(m_scene.RegionInfo.RegionSettings.WaterHeight - ImageTerrainWaterHeight) <= 0.001)
+                return;
+
+            m_scene.EventManager.TriggerRequestChangeWaterHeight(ImageTerrainWaterHeight);
+            if (Math.Abs(m_scene.RegionInfo.RegionSettings.WaterHeight - ImageTerrainWaterHeight) > 0.001)
+            {
+                m_scene.RegionInfo.RegionSettings.WaterHeight = ImageTerrainWaterHeight;
+                if (m_scene.PhysicsScene != null)
+                    m_scene.PhysicsScene.SetWaterLevel(ImageTerrainWaterHeight);
+            }
         }
 
         private ImageTerrainData LoadImageTerrainData(UUID textureID)
@@ -1056,12 +1073,6 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             float[] land = new float[width * height];
             float[] relief = new float[width * height];
 
-            int minX = width;
-            int minY = height;
-            int maxX = -1;
-            int maxY = -1;
-            int landPixels = 0;
-
             for (int y = 0; y < height; ++y)
             {
                 for (int x = 0; x < width; ++x)
@@ -1070,19 +1081,10 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                     int index = y * width + x;
                     land[index] = ClassifyMapLand(color);
                     relief[index] = ClassifyMapRelief(color);
-
-                    if (land[index] > 0.56f)
-                    {
-                        minX = Math.Min(minX, x);
-                        minY = Math.Min(minY, y);
-                        maxX = Math.Max(maxX, x);
-                        maxY = Math.Max(maxY, y);
-                        landPixels++;
-                    }
                 }
             }
 
-            if (!fitLandToRegion || landPixels < Math.Max(32, width * height / 2500))
+            if (!fitLandToRegion || !TryFindDominantLandBounds(width, height, land, out int minX, out int minY, out int maxX, out int maxY))
             {
                 minX = 0;
                 minY = 0;
@@ -1102,6 +1104,127 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             return new ImageTerrainData(textureID, width, height, land, relief, minX, minY, maxX, maxY);
         }
 
+        private static bool TryFindDominantLandBounds(int width, int height, float[] land, out int minX, out int minY, out int maxX, out int maxY)
+        {
+            minX = width;
+            minY = height;
+            maxX = -1;
+            maxY = -1;
+
+            int pixelCount = width * height;
+            if (width <= 0 || height <= 0 || land == null || land.Length < pixelCount)
+                return false;
+
+            const float waterThreshold = 0.46f;
+            const float landThreshold = 0.56f;
+            bool[] sea = new bool[pixelCount];
+            bool[] visited = new bool[pixelCount];
+            int[] queue = new int[pixelCount];
+            int head = 0;
+            int tail = 0;
+
+            void EnqueueSea(int index)
+            {
+                if (index < 0 || index >= pixelCount || sea[index] || land[index] >= waterThreshold)
+                    return;
+
+                sea[index] = true;
+                queue[tail++] = index;
+            }
+
+            for (int x = 0; x < width; ++x)
+            {
+                EnqueueSea(x);
+                EnqueueSea((height - 1) * width + x);
+            }
+
+            for (int y = 1; y < height - 1; ++y)
+            {
+                EnqueueSea(y * width);
+                EnqueueSea(y * width + width - 1);
+            }
+
+            while (head < tail)
+            {
+                int index = queue[head++];
+                int x = index % width;
+                int y = index / width;
+
+                if (x > 0)
+                    EnqueueSea(index - 1);
+                if (x + 1 < width)
+                    EnqueueSea(index + 1);
+                if (y > 0)
+                    EnqueueSea(index - width);
+                if (y + 1 < height)
+                    EnqueueSea(index + width);
+            }
+
+            for (int i = 0; i < pixelCount; ++i)
+            {
+                if (!sea[i] && land[i] < waterThreshold)
+                    land[i] = 0.68f;
+            }
+
+            int bestArea = 0;
+            for (int i = 0; i < pixelCount; ++i)
+            {
+                if (visited[i] || sea[i] || land[i] <= landThreshold)
+                    continue;
+
+                int componentMinX = width;
+                int componentMinY = height;
+                int componentMaxX = -1;
+                int componentMaxY = -1;
+                int area = 0;
+                head = 0;
+                tail = 0;
+                visited[i] = true;
+                queue[tail++] = i;
+
+                while (head < tail)
+                {
+                    int index = queue[head++];
+                    int x = index % width;
+                    int y = index / width;
+                    area++;
+                    componentMinX = Math.Min(componentMinX, x);
+                    componentMinY = Math.Min(componentMinY, y);
+                    componentMaxX = Math.Max(componentMaxX, x);
+                    componentMaxY = Math.Max(componentMaxY, y);
+
+                    void EnqueueLand(int next)
+                    {
+                        if (next < 0 || next >= pixelCount || visited[next] || sea[next] || land[next] <= landThreshold)
+                            return;
+
+                        visited[next] = true;
+                        queue[tail++] = next;
+                    }
+
+                    if (x > 0)
+                        EnqueueLand(index - 1);
+                    if (x + 1 < width)
+                        EnqueueLand(index + 1);
+                    if (y > 0)
+                        EnqueueLand(index - width);
+                    if (y + 1 < height)
+                        EnqueueLand(index + width);
+                }
+
+                if (area > bestArea)
+                {
+                    bestArea = area;
+                    minX = componentMinX;
+                    minY = componentMinY;
+                    maxX = componentMaxX;
+                    maxY = componentMaxY;
+                }
+            }
+
+            return bestArea >= Math.Max(32, pixelCount / 2500);
+        }
+
         private static float ClassifyMapLand(System.Drawing.Color color)
         {
             float alpha = color.A / 255f;
@@ -1116,14 +1239,27 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             float min = Math.Min(r, Math.Min(g, b));
             float saturation = max <= 0.001f ? 0f : (max - min) / max;
 
+            if (luma > 0.94f && saturation < 0.08f)
+                return 0f;
+            if (luma < 0.055f && saturation < 0.35f)
+                return 0f;
+
             float blueDominance = b - Math.Max(r, g) * 0.92f;
             float cyanDominance = Math.Min(g, b) - r * 1.22f;
+            float aquaLift = Math.Min(g, b) - r;
             float water = Math.Max(
                 SmoothStep(0.02f, 0.23f, blueDominance) * SmoothStep(0.18f, 0.50f, b),
                 SmoothStep(0.04f, 0.30f, cyanDominance) * SmoothStep(0.18f, 0.52f, Math.Min(g, b)));
 
+            float celeste = SmoothStep(0.07f, 0.22f, aquaLift)
+                * SmoothStep(0.50f, 0.78f, Math.Min(g, b))
+                * SmoothStep(0.88f, 0.56f, Math.Abs(g - b));
+            water = Math.Max(water, celeste);
+
             if (b > 0.18f && b > r * 1.10f && b > g * 0.96f)
                 water = Math.Max(water, 0.78f + saturation * 0.18f);
+            if (luma > 0.72f && Math.Min(g, b) > 0.70f && r < Math.Min(g, b) * 0.94f)
+                water = Math.Max(water, 0.92f);
 
             if (luma < 0.045f)
                 water *= 0.35f;
