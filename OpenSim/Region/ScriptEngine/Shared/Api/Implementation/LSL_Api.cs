@@ -9048,7 +9048,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                                 if (optIndex >= options.Length)
                                     return ScriptBaseClass.TRANSFER_BAD_OPTS;
                                 transferRootSpecified = true;
-                                transferRootPath = options.GetStrictLSLStringItem(optIndex++).Trim('|');
+                                transferRootPath = options.GetStrictLSLStringItem(optIndex++).m_string.Trim('|');
                                 break;
 
                             case ScriptBaseClass.TRANSFER_FLAGS:
