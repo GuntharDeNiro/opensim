@@ -1503,6 +1503,29 @@
     ; PostsPerPage = 5
 
 
+[TextBuild]
+    ;# {Enabled} {} {Enable chat-driven text build commands} {true false} false
+    ; Enabled = false
+
+    ;# {CommandChannel} {Enabled} {Chat channel for text build commands} {} 88
+    ; CommandChannel = 88
+
+    ;# {EstateManagerOnly} {Enabled} {Restrict text build commands to estate managers} {true false} true
+    ; EstateManagerOnly = true
+
+    ;# {ImageTerrainMinLandHeight} {Enabled} {Minimum land height above water for terrain generated from cartography textures} {} 1.15
+    ; ImageTerrainMinLandHeight = 1.15
+
+    ;# {ImageTerrainMaxLandHeight} {Enabled} {Maximum land relief above water for terrain generated from cartography textures} {} 30.0
+    ; ImageTerrainMaxLandHeight = 30.0
+
+    ;# {ImageTerrainSeaDepth} {Enabled} {Sea depth below water for terrain generated from cartography textures} {} 5.0
+    ; ImageTerrainSeaDepth = 5.0
+
+    ;# {ImageTerrainFitLandToRegion} {Enabled} {Crop detected land silhouette to fill the region} {true false} true
+    ; ImageTerrainFitLandToRegion = true
+
+
 [Terrain]
     ;# {InitialTerrain} {} {Initial terrain type} {pinhead-island flat} pinhead-island
     ; InitialTerrain = "pinhead-island"

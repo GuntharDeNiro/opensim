@@ -584,7 +584,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             EnsureFeature(content.Features, "Lag-resistant walk animations",
                 "Walking animations recover cleanly after lag spikes, so avatars do not remain stuck in broken walk states when the simulator catches up.");
             EnsureFeature(content.Features, "AI-connected text build tools",
-                "Estate builders can use text commands connected to AI to plan, generate and refine terrain or building ideas directly from the simulator workflow.");
+                "Estate builders can use text commands connected to AI or uploaded cartography textures to plan, generate and refine terrain or building ideas directly from the simulator workflow.");
             EnsureFeature(content.Features, "Automatic cloud avatar recovery",
                 "If an avatar becomes a cloud, the server automatically handles the recovery and restores the normal appearance within a few seconds.");
             EnsureFeature(content.Features, "Group auto invite",
@@ -742,8 +742,10 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Overview = "The text build tool connects in-world commands to AI-assisted building workflows. Builders can describe what they want, iterate on ideas and use text as a faster control surface for terrain, layout or object planning inside the simulator workflow.";
                     content.Usage.Add("Enable the text build module and use its configured in-world command channel.");
                     content.Usage.Add("Speak concise build requests on that channel, then refine the result with follow-up instructions.");
+                    content.Usage.Add("To generate real-world shaped terrain, upload a cartography or satellite texture and say a command such as build terrain from texture <uuid> or costruisci Sardegna da texture <uuid>.");
                     content.Usage.Add("Use it for planning, layout, terrain and fast creative iteration, then review the generated changes like any other build work.");
                     content.Notes.Add("AI-assisted building should stay permission-aware: restrict access to trusted builders or estate staff.");
+                    content.Notes.Add("Cartography terrain uses the texture's detected land/water silhouette, crops the land mass to the region by default and derives relief from the image colors.");
                     break;
 
                 case "automatic-cloud-avatar-recovery":
@@ -1038,7 +1040,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 + "Feature4 = \"Wave-following boats|Boats can now move with the sea surface, following wave motion for a more natural marina and sailing experience.\"\n"
                 + "Feature5 = \"Smooth region crossings|Avatar and vehicle crossings between neighbouring regions are smoothed to reduce the hard stop, rubber-banding and visual pop of stock OpenSim border transfers.\"\n"
                 + "Feature6 = \"Lag-resistant walk animations|Walking animations recover cleanly after lag spikes, so avatars do not remain stuck in broken walk states when the simulator catches up.\"\n"
-                + "Feature7 = \"AI-connected text build tools|Estate builders can use text commands connected to AI to plan, generate and refine terrain or building ideas directly from the simulator workflow.\"\n"
+                + "Feature7 = \"AI-connected text build tools|Estate builders can use text commands connected to AI or uploaded cartography textures to plan, generate and refine terrain or building ideas directly from the simulator workflow.\"\n"
                 + "Feature8 = \"Automatic cloud avatar recovery|If an avatar becomes a cloud, the server automatically handles the recovery and restores the normal appearance within a few seconds.\"\n"
                 + "Feature9 = \"Group auto invite|Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects.\"\n"
                 + "Feature10 = \"Viewer polish|Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.\"\n"
@@ -1304,7 +1306,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     normalized.Add(new FeatureItem
                     {
                         Title = "AI-connected text build tools",
-                        Body = "Estate builders can use text commands connected to AI to plan, generate and refine terrain or building ideas directly from the simulator workflow."
+                        Body = "Estate builders can use text commands connected to AI or uploaded cartography textures to plan, generate and refine terrain or building ideas directly from the simulator workflow."
                     });
                     continue;
                 }
@@ -1394,7 +1396,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             features.Add(new FeatureItem
             {
                 Title = "AI-connected text build tools",
-                Body = "Estate builders can use text commands connected to AI to plan, generate and refine terrain or building ideas directly from the simulator workflow."
+                Body = "Estate builders can use text commands connected to AI or uploaded cartography textures to plan, generate and refine terrain or building ideas directly from the simulator workflow."
             });
             features.Add(new FeatureItem
             {
