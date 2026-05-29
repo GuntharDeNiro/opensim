@@ -41,6 +41,16 @@ The scripts use:
 - `llGetLinkSitFlags`
 - `PRIM_SCRIPTED_SIT_ONLY`
 - `PRIM_ALLOW_UNSIT`
+- `llDetectedRezzer`
+- `llGetAttachedListFiltered`
+- `llFindNotecardTextSync`
+- `llMatchGroup`
+- `llSetParcelForSale`
+- `llReturnObjectsByID`
+- `llReturnObjectsByOwner`
+- `llSetGroundTexture`
+- `llSetLinkRenderMaterial`
+- `llSetLinkGLTFOverrides`
 
 ## Files
 
@@ -57,6 +67,9 @@ The scripts use:
 - `11_experience_leaderboard.lsl`: persistent player score storage and listing.
 - `12_experience_seat_manager.lsl`: Experience scripted sitting on linked seats.
 - `13_scripted_only_sit_flags.lsl`: blocks manual sit and seats avatars only through `llSitOnLink`.
+- `14_modern_estate_operations_console.lsl`: complex estate console using group matching, attachment filtering, policy notecard search, parcel sale, object return, terrain and PBR helpers.
+- `15_rezzer_provenance_quarantine.lsl`: complex provenance scanner using rezzer detection, notecard trust policy, HUD filtering and scripted return-by-ID quarantine.
 
 Stock OpenSim may fail to compile or run these scripts because Experience events,
-KVP functions and scripted-only sit flags are not available there.
+KVP functions, scripted-only sit flags and newer Second Life LSL compatibility
+functions are not available there.
