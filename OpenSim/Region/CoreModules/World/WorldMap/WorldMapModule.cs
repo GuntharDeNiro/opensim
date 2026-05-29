@@ -100,6 +100,7 @@ namespace OpenSim.Region.CoreModules.World.WorldMap
         protected bool m_exportPrintScale = false; // prints the scale of map in meters on exported map
         protected bool m_exportPrintRegionName = false; // prints the region name exported map
         protected bool m_localV1MapAssets = false; // keep V1 map assets only on  local cache
+        protected bool m_storeLegacyMaptileAssets = false;
 
         private readonly object m_sceneLock = new object();
         public WorldMapModule()
@@ -158,6 +159,8 @@ namespace OpenSim.Region.CoreModules.World.WorldMap
                 Util.GetConfigVarFromSections<bool>(config, "ExportMapAddRegionName", configSections, m_exportPrintRegionName);
             m_localV1MapAssets =
                 Util.GetConfigVarFromSections<bool>(config, "LocalV1MapAssets", configSections, m_localV1MapAssets);
+            m_storeLegacyMaptileAssets =
+                Util.GetConfigVarFromSections<bool>(config, "StoreLegacyMaptileAssets", configSections, m_storeLegacyMaptileAssets);
         }
 
         public virtual void AddRegion(Scene scene)
@@ -1170,16 +1173,18 @@ namespace OpenSim.Region.CoreModules.World.WorldMap
         public void OnHTTPGetMapImage(IOSHttpRequest request, IOSHttpResponse response)
         {
             response.KeepAlive = false;
-            if (request.HttpMethod != "GET" || m_scene.RegionInfo.RegionSettings.TerrainImageID.IsZero())
+            if (request.HttpMethod != "GET")
             {
                 response.StatusCode = (int)HttpStatusCode.NotFound;
                 return;
             }
 
-            byte[] jpeg = null;
+            byte[] jpeg = myMapImageJPEG;
             m_log.Debug("[WORLD MAP]: Sending map image jpeg");
 
-            if (myMapImageJPEG.Length == 0)
+            if ((jpeg == null || jpeg.Length == 0) &&
+                m_storeLegacyMaptileAssets &&
+                m_scene.RegionInfo.RegionSettings.TerrainImageID.IsNotZero())
             {
                 MemoryStream imgstream = null;
                 Bitmap mapTexture = new Bitmap(1, 1);
@@ -1238,12 +1243,7 @@ namespace OpenSim.Region.CoreModules.World.WorldMap
                         imgstream.Dispose();
                 }
             }
-            else
-            {
-                // Use cached version so we don't have to loose our mind
-                jpeg = myMapImageJPEG;
-            }
-            if(jpeg == null)
+            if(jpeg == null || jpeg.Length == 0)
             {
                 response.StatusCode = (int)HttpStatusCode.NotFound;
                 return;
@@ -1573,9 +1573,10 @@ namespace OpenSim.Region.CoreModules.World.WorldMap
         private void GenerateMaptile(Bitmap mapbmp)
         {
             bool needRegionSave = false;
+            bool storeLegacyAssets = m_storeLegacyMaptileAssets || m_mapImageServiceModule == null;
 
             // remove old assets
-            if (m_scene.RegionInfo.RegionSettings.TerrainImageID.IsNotZero())
+            if (storeLegacyAssets && m_scene.RegionInfo.RegionSettings.TerrainImageID.IsNotZero())
             {
                 m_scene.AssetService.Delete(m_scene.RegionInfo.RegionSettings.TerrainImageID.ToString());
                 m_scene.RegionInfo.RegionSettings.TerrainImageID = UUID.Zero;
@@ -1583,7 +1584,7 @@ namespace OpenSim.Region.CoreModules.World.WorldMap
                 needRegionSave = true;
             }
 
-            if (m_scene.RegionInfo.RegionSettings.ParcelImageID.IsNotZero())
+            if (storeLegacyAssets && m_scene.RegionInfo.RegionSettings.ParcelImageID.IsNotZero())
             {
                 m_scene.AssetService.Delete(m_scene.RegionInfo.RegionSettings.ParcelImageID.ToString());
                 m_scene.RegionInfo.RegionSettings.ParcelImageID = UUID.Zero;
@@ -1594,52 +1595,62 @@ namespace OpenSim.Region.CoreModules.World.WorldMap
             {
                 try
                 {
-                    byte[] data;
-
-                    // if large region limit its size since new viewers will not use it
-                    // but it is still usable for ossl
-                    if(m_scene.RegionInfo.RegionSizeX > Constants.RegionSize ||
-                            m_scene.RegionInfo.RegionSizeY > Constants.RegionSize)
+                    if (!storeLegacyAssets)
                     {
-                        int bx = mapbmp.Width;
-                        int by = mapbmp.Height;
-                        int mb = bx;
-                        if(mb < by)
-                            mb = by;
-                        if(mb > Constants.RegionSize && mb > 0)
+                        myMapImageJPEG = EncodeMaptileJpeg(mapbmp);
+                        m_log.DebugFormat("[WORLD MAP]: Skipping legacy maptile asset store for {0}; MapImageService upload will publish the tile", m_regionName);
+                    }
+                    else
+                    {
+                        byte[] data;
+
+                        // if large region limit its size since new viewers will not use it
+                        // but it is still usable for ossl
+                        if(m_scene.RegionInfo.RegionSizeX > Constants.RegionSize ||
+                                m_scene.RegionInfo.RegionSizeY > Constants.RegionSize)
                         {
-                            float scale = (float)Constants.RegionSize/(float)mb;
-                            using(Bitmap scaledbmp = Util.ResizeImageSolid(mapbmp, (int)(bx * scale), (int)(by * scale)))
-                                data = OpenJPEG.EncodeFromImage(scaledbmp, true);
+                            int bx = mapbmp.Width;
+                            int by = mapbmp.Height;
+                            int mb = bx;
+                            if(mb < by)
+                                mb = by;
+                            if(mb > Constants.RegionSize && mb > 0)
+                            {
+                                float scale = (float)Constants.RegionSize/(float)mb;
+                                using(Bitmap scaledbmp = Util.ResizeImageSolid(mapbmp, (int)(bx * scale), (int)(by * scale)))
+                                    data = OpenJPEG.EncodeFromImage(scaledbmp, true);
+                            }
+                            else
+                                data = OpenJPEG.EncodeFromImage(mapbmp, true);
                         }
                         else
                             data = OpenJPEG.EncodeFromImage(mapbmp, true);
-                    }
-                    else
-                        data = OpenJPEG.EncodeFromImage(mapbmp, true);
 
-                    if (data != null && data.Length > 0)
-                    {
-                        UUID terrainImageID = UUID.Random();
+                        if (data != null && data.Length > 0)
+                        {
+                            myMapImageJPEG = EncodeMaptileJpeg(mapbmp);
 
-                        AssetBase asset = new AssetBase(
-                            terrainImageID,
-                            "terrainImage_" + m_scene.RegionInfo.RegionID.ToString(),
-                            (sbyte)AssetType.Texture,
-                            m_scene.RegionInfo.RegionID.ToString());
-                        asset.Data = data;
-                        asset.Description = m_regionName;
-                        asset.Local = m_localV1MapAssets;
-                        asset.Temporary = false;
-                        asset.Flags = AssetFlags.Maptile;
+                            UUID terrainImageID = UUID.Random();
 
-                        // Store the new one
-                        m_log.DebugFormat("[WORLD MAP]: Storing map image {0} for {1}", asset.ID, m_regionName);
+                            AssetBase asset = new AssetBase(
+                                terrainImageID,
+                                "terrainImage_" + m_scene.RegionInfo.RegionID.ToString(),
+                                (sbyte)AssetType.Texture,
+                                m_scene.RegionInfo.RegionID.ToString());
+                            asset.Data = data;
+                            asset.Description = m_regionName;
+                            asset.Local = m_localV1MapAssets;
+                            asset.Temporary = false;
+                            asset.Flags = AssetFlags.Maptile;
 
-                        m_scene.AssetService.Store(asset);
+                            // Store the new one
+                            m_log.DebugFormat("[WORLD MAP]: Storing map image {0} for {1}", asset.ID, m_regionName);
 
-                        m_scene.RegionInfo.RegionSettings.TerrainImageID = terrainImageID;
-                        needRegionSave = true;
+                            m_scene.AssetService.Store(asset);
+
+                            m_scene.RegionInfo.RegionSettings.TerrainImageID = terrainImageID;
+                            needRegionSave = true;
+                        }
                     }
                 }
                 catch (Exception e)
@@ -1649,7 +1660,7 @@ namespace OpenSim.Region.CoreModules.World.WorldMap
             }
 
             // V2/3 still seem to need this, or we are missing something somewhere
-            byte[] overlay = GenerateOverlay();
+            byte[] overlay = storeLegacyAssets ? GenerateOverlay() : null;
             if (overlay != null)
             {
                 UUID parcelImageID = UUID.Random();
@@ -1673,6 +1684,21 @@ namespace OpenSim.Region.CoreModules.World.WorldMap
 
             if (needRegionSave)
                 m_scene.RegionInfo.RegionSettings.Save();
+        }
+
+        private static byte[] EncodeMaptileJpeg(Bitmap mapbmp)
+        {
+            if (mapbmp == null)
+                return [];
+
+            using (MemoryStream imgstream = new MemoryStream())
+            {
+                EncoderParameters myEncoderParameters = new EncoderParameters();
+                myEncoderParameters.Param[0] = new EncoderParameter(Encoder.Quality, 95L);
+
+                mapbmp.Save(imgstream, GetEncoderInfo("image/jpeg"), myEncoderParameters);
+                return imgstream.ToArray();
+            }
         }
 
         private void MakeRootAgent(ScenePresence avatar)

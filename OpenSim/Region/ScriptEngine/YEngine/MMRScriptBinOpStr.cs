@@ -106,6 +106,10 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         private static MethodInfo infoMethRotDivRot = GetBinOpsMethod("MethRotDivRot", [typeof(LSL_Rotation), typeof(LSL_Rotation)]);
         private static MethodInfo infoMethVecEqVec = GetBinOpsMethod("MethVecEqVec", [typeof(LSL_Vector), typeof(LSL_Vector)]);
         private static MethodInfo infoMethVecNeVec = GetBinOpsMethod("MethVecNeVec", [typeof(LSL_Vector), typeof(LSL_Vector)]);
+        private static MethodInfo infoMethVecEqRot = GetBinOpsMethod("MethVecEqRot", [typeof(LSL_Vector), typeof(LSL_Rotation)]);
+        private static MethodInfo infoMethVecNeRot = GetBinOpsMethod("MethVecNeRot", [typeof(LSL_Vector), typeof(LSL_Rotation)]);
+        private static MethodInfo infoMethRotEqVec = GetBinOpsMethod("MethRotEqVec", [typeof(LSL_Rotation), typeof(LSL_Vector)]);
+        private static MethodInfo infoMethRotNeVec = GetBinOpsMethod("MethRotNeVec", [typeof(LSL_Rotation), typeof(LSL_Vector)]);
         private static MethodInfo infoMethVecAddVec = GetBinOpsMethod("MethVecAddVec", [typeof(LSL_Vector), typeof(LSL_Vector)]);
         private static MethodInfo infoMethVecSubVec = GetBinOpsMethod("MethVecSubVec", [typeof(LSL_Vector), typeof(LSL_Vector)]);
         private static MethodInfo infoMethVecMulVec = GetBinOpsMethod("MethVecMulVec", [typeof(LSL_Vector), typeof(LSL_Vector)]);
@@ -388,6 +392,8 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         {
             bos.Add("rotation==rotation", new BinOpStr(typeof(bool), BinOpStrRotEqRot));
             bos.Add("rotation!=rotation", new BinOpStr(typeof(bool), BinOpStrRotNeRot));
+            bos.Add("rotation==vector", new BinOpStr(typeof(bool), BinOpStrRotEqVec));
+            bos.Add("rotation!=vector", new BinOpStr(typeof(bool), BinOpStrRotNeVec));
             bos.Add("rotation+rotation", new BinOpStr(typeof(LSL_Rotation), BinOpStrRotAddRot, true));
             bos.Add("rotation-rotation", new BinOpStr(typeof(LSL_Rotation), BinOpStrRotSubRot, true));
             bos.Add("rotation*rotation", new BinOpStr(typeof(LSL_Rotation), BinOpStrRotMulRot, true));
@@ -410,6 +416,8 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         {
             bos.Add("vector==vector", new BinOpStr(typeof(bool), BinOpStrVecEqVec));
             bos.Add("vector!=vector", new BinOpStr(typeof(bool), BinOpStrVecNeVec));
+            bos.Add("vector==rotation", new BinOpStr(typeof(bool), BinOpStrVecEqRot));
+            bos.Add("vector!=rotation", new BinOpStr(typeof(bool), BinOpStrVecNeRot));
             bos.Add("vector+vector", new BinOpStr(typeof(LSL_Vector), BinOpStrVecAddVec, true));
             bos.Add("vector-vector", new BinOpStr(typeof(LSL_Vector), BinOpStrVecSubVec, true));
             bos.Add("vector*vector", new BinOpStr(typeof(double), BinOpStrVecMulVec));
@@ -1137,6 +1145,24 @@ namespace OpenSim.Region.ScriptEngine.Yengine
             result.PopPost(scg, errorAt, tokenTypeBool);
         }
 
+        private static void BinOpStrRotEqVec(ScriptCodeGen scg, Token errorAt, CompValu left, CompValu right, CompValu result)
+        {
+            result.PopPre(scg, errorAt);
+            left.PushVal(scg, errorAt, tokenTypeRot);
+            right.PushVal(scg, errorAt, tokenTypeVec);
+            scg.ilGen.Emit(errorAt, OpCodes.Call, infoMethRotEqVec);
+            result.PopPost(scg, errorAt, tokenTypeBool);
+        }
+
+        private static void BinOpStrRotNeVec(ScriptCodeGen scg, Token errorAt, CompValu left, CompValu right, CompValu result)
+        {
+            result.PopPre(scg, errorAt);
+            left.PushVal(scg, errorAt, tokenTypeRot);
+            right.PushVal(scg, errorAt, tokenTypeVec);
+            scg.ilGen.Emit(errorAt, OpCodes.Call, infoMethRotNeVec);
+            result.PopPost(scg, errorAt, tokenTypeBool);
+        }
+
         private static void BinOpStrRotAddRot(ScriptCodeGen scg, Token errorAt, CompValu left, CompValu right, CompValu result)
         {
             result.PopPre(scg, errorAt);
@@ -1266,6 +1292,24 @@ namespace OpenSim.Region.ScriptEngine.Yengine
             left.PushVal(scg, errorAt, tokenTypeVec);
             right.PushVal(scg, errorAt, tokenTypeVec);
             scg.ilGen.Emit(errorAt, OpCodes.Call, infoMethVecNeVec);
+            result.PopPost(scg, errorAt, tokenTypeBool);
+        }
+
+        private static void BinOpStrVecEqRot(ScriptCodeGen scg, Token errorAt, CompValu left, CompValu right, CompValu result)
+        {
+            result.PopPre(scg, errorAt);
+            left.PushVal(scg, errorAt, tokenTypeVec);
+            right.PushVal(scg, errorAt, tokenTypeRot);
+            scg.ilGen.Emit(errorAt, OpCodes.Call, infoMethVecEqRot);
+            result.PopPost(scg, errorAt, tokenTypeBool);
+        }
+
+        private static void BinOpStrVecNeRot(ScriptCodeGen scg, Token errorAt, CompValu left, CompValu right, CompValu result)
+        {
+            result.PopPre(scg, errorAt);
+            left.PushVal(scg, errorAt, tokenTypeVec);
+            right.PushVal(scg, errorAt, tokenTypeRot);
+            scg.ilGen.Emit(errorAt, OpCodes.Call, infoMethVecNeRot);
             result.PopPost(scg, errorAt, tokenTypeBool);
         }
 
@@ -1525,6 +1569,18 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool MethRotEqVec(LSL_Rotation left, LSL_Vector right)
+        {
+            return false;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool MethRotNeVec(LSL_Rotation left, LSL_Vector right)
+        {
+            return true;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static LSL_Rotation MethRotAddRot(LSL_Rotation left, LSL_Rotation right)
         {
             return left + right;
@@ -1558,6 +1614,18 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         public static bool MethVecNeVec(LSL_Vector left, LSL_Vector right)
         {
             return left != right;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool MethVecEqRot(LSL_Vector left, LSL_Rotation right)
+        {
+            return false;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool MethVecNeRot(LSL_Vector left, LSL_Rotation right)
+        {
+            return true;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

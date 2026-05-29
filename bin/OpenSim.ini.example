@@ -434,6 +434,10 @@
     ;; Disabled by default because full GC pauses the simulator and can trigger watchdog warnings.
     ; MaptileForceGC = false
 
+    ;# {StoreLegacyMaptileAssets} {GenerateMaptiles} {Store old V1 TerrainImageID/ParcelImageID maptile assets in the asset service?} {true false} false
+    ;; Leave this off when MapImageService is enabled. Remote asset POSTs can timeout and stall the simulator after the map image is already generated.
+    ; StoreLegacyMaptileAssets = false
+
     ;# {MaptileStaticUUID} {} {Asset ID for static map texture} {} 00000000-0000-0000-0000-000000000000
     ;; If not generating maptiles, use this static texture asset ID
     ;; This may be overridden on a per region basis in Regions.ini
@@ -512,8 +516,8 @@
     ;# {MapObjectVolumeMissingGeometryMinAlpha} {MapObjectVolumeDrawMissingGeometryFootprints} {Skip missing-geometry footprints when sampled texture alpha is at or below this value} {} 0.08
     ; MapObjectVolumeMissingGeometryMinAlpha = 0.08
 
-    ;# {MapObjectVolumeMaxTextureSamples} {PrettyPrimVolumeOnMapTile} {Maximum uncached texture assets sampled per map tile object pass; 0 means unlimited} {} 0
-    ; MapObjectVolumeMaxTextureSamples = 0
+    ;# {MapObjectVolumeMaxTextureSamples} {PrettyPrimVolumeOnMapTile} {Maximum uncached texture assets sampled per map tile object pass; 0 means unlimited} {} 128
+    ; MapObjectVolumeMaxTextureSamples = 128
 
     ;# {MapObjectVolumeMinimumOpacity} {PrettyPrimVolumeOnMapTile} {Minimum opacity after texture alpha is applied} {} 35
     ; MapObjectVolumeMinimumOpacity = 35
@@ -549,6 +553,9 @@
     ;# {MapObjectVolumeKeepMeshCache} {MapObjectVolumeRenderMeshGeometry} {Keep decoded mesh/sculpt geometry cached after each map pass?} {true false} false
     ;; Disabled by default so high-quality map rendering does not retain large mesh geometry in memory.
     ; MapObjectVolumeKeepMeshCache = false
+
+    ;# {MapObjectVolumeKeepMissingGeometryCache} {MapObjectVolumeRenderMeshGeometry} {Remember missing or undecodable sculpt/mesh assets between map passes so they are not retried every generation?} {true false} true
+    ; MapObjectVolumeKeepMissingGeometryCache = true
 
     ;# {MapTileAerialStyle} {} {Apply final aerial-photo style tone and softening pass?} {true false} true
     ; MapTileAerialStyle = true

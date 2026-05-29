@@ -408,7 +408,7 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             float missingGeometryMinAlpha = Math.Max(0f, Math.Min(1f, Util.GetConfigVarFromSections<float>(
                 m_config, "MapObjectVolumeMissingGeometryMinAlpha", MapConfigSections, 0.08f)));
             m_maxTextureAssetSamplesThisPass = Math.Max(0, Util.GetConfigVarFromSections<int>(
-                m_config, "MapObjectVolumeMaxTextureSamples", MapConfigSections, 0));
+                m_config, "MapObjectVolumeMaxTextureSamples", MapConfigSections, 128));
             m_textureAssetSamplesThisPass = 0;
             m_useCachedMapAssetsOnlyThisPass = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeUseCachedAssetsOnly", MapConfigSections, true);
@@ -418,6 +418,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             int geometryBudgetSkipped = 0;
             bool keepMeshCache = Util.GetConfigVarFromSections<bool>(
                 m_config, "MapObjectVolumeKeepMeshCache", MapConfigSections, false);
+            bool keepMissingGeometryCache = Util.GetConfigVarFromSections<bool>(
+                m_config, "MapObjectVolumeKeepMissingGeometryCache", MapConfigSections, true);
 
             EnsurePrimMesher(renderMeshGeometry);
 
@@ -474,6 +476,13 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
                                             if (part.Shape == null)
                                                 continue;
+
+                                            if (skipFlatTextureCards &&
+                                                IsLikelyFlatTextureCard(part) &&
+                                                HasTexturedMapFace(part))
+                                            {
+                                                continue;
+                                            }
 
                                             mapdotspot = GetPartMapColor(part, mapdotspot, prettyObjectVolume,
                                                 sampleTextureAssets,
@@ -565,12 +574,16 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
                                             try
                                             {
+                                                int geometryBudgetForPart = externalGeometry ? exactGeometryBudgetMS : 0;
                                                 drewExactGeometry = TryDrawMeshGeometry(g, meshBrushes, meshPens,
                                                     part, mapdotspot, fillOpacity, outlineOpacity,
                                                     drawMeshTriangleOutlines, faceShading, meshDetailLevel,
                                                     useTextureAlpha, minimumOpacity, skipAlphaMaskedFaces,
                                                     skipFlatTextureCards, alphaMaskedFaceMaxAlpha,
-                                                    alphaMaskedFaceMinArea);
+                                                    alphaMaskedFaceMinArea, tc, geometryBudgetForPart,
+                                                    out bool meshBudgetExhausted);
+                                                if (meshBudgetExhausted)
+                                                    geometryBudgetSkipped++;
                                             }
                                             catch (OutOfMemoryException e)
                                             {
@@ -904,7 +917,8 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
                 if (!keepMeshCache)
                     m_renderMeshCache.Clear();
-                m_failedRenderMeshCache.Clear();
+                if (!keepMissingGeometryCache)
+                    m_failedRenderMeshCache.Clear();
             }
 
             m_log.Debug("[MAPTILE]: Generating Maptile Step 2: Done in " + (Environment.TickCount - tc) + " ms");
@@ -1062,10 +1076,18 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             Color fallbackColor, int opacity, int outlineOpacity, bool drawOutlines,
             bool faceShading, DetailLevel lod, bool useTextureAlpha, int minimumOpacity,
             bool skipAlphaMaskedFaces, bool skipFlatTextureCards,
-            float alphaMaskedFaceMaxAlpha, int alphaMaskedFaceMinArea)
+            float alphaMaskedFaceMaxAlpha, int alphaMaskedFaceMinArea,
+            int passStartMS, int exactGeometryBudgetMS, out bool budgetExhausted)
         {
+            budgetExhausted = false;
             if (m_primMesher == null)
                 return false;
+
+            if (ExactGeometryBudgetExpired(passStartMS, exactGeometryBudgetMS))
+            {
+                budgetExhausted = true;
+                return false;
+            }
 
             FacetedMesh renderMesh;
             try
@@ -1103,6 +1125,11 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
             for (int i = 0; i < renderMesh.Faces.Count; i++)
             {
                 YieldMaptileWork(ref yieldCounter, ref lastYieldMS);
+                if (ExactGeometryBudgetExpired(passStartMS, exactGeometryBudgetMS))
+                {
+                    budgetExhausted = true;
+                    return added || handled;
+                }
 
                 Face face = renderMesh.Faces[i];
                 if (face.Vertices == null || face.Indices == null)
@@ -1146,6 +1173,11 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
                 for (int j = 0; j + 2 < face.Indices.Count; j += 3)
                 {
                     YieldMaptileWork(ref yieldCounter, ref lastYieldMS);
+                    if (ExactGeometryBudgetExpired(passStartMS, exactGeometryBudgetMS))
+                    {
+                        budgetExhausted = true;
+                        return added || handled;
+                    }
 
                     int index0 = face.Indices[j];
                     int index1 = face.Indices[j + 1];
@@ -1261,6 +1293,33 @@ namespace OpenSim.Region.CoreModules.World.LegacyMap
 
             float middle = scale.X + scale.Y + scale.Z - min - max;
             return min <= Math.Max(0.08f, middle * 0.08f);
+        }
+
+        private static bool HasTexturedMapFace(SceneObjectPart part)
+        {
+            Primitive.TextureEntry textureEntry = part?.Shape?.Textures;
+            if (textureEntry == null)
+                return false;
+
+            if (textureEntry.DefaultTexture != null && !textureEntry.DefaultTexture.TextureID.IsZero())
+                return true;
+
+            if (textureEntry.FaceTextures == null)
+                return false;
+
+            foreach (Primitive.TextureEntryFace face in textureEntry.FaceTextures)
+            {
+                if (face != null && !face.TextureID.IsZero())
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool ExactGeometryBudgetExpired(int passStartMS, int exactGeometryBudgetMS)
+        {
+            return exactGeometryBudgetMS > 0 &&
+                Util.EnvironmentTickCountSubtract(Environment.TickCount, passStartMS) >= exactGeometryBudgetMS;
         }
 
         private static Color QuantizeMapColor(Color color)
