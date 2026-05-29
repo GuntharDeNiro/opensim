@@ -644,6 +644,12 @@
     ;# {Map3DForceGC} {} {Force full GC after 3D maptile generation?} {true false} false
     ; Map3DForceGC = false
 
+    ;# {Map3DWaterDepthShading} {Warp3DImageModule} {Shade Warp3D map water by the terrain depth below it?} {true false} true
+    ; Map3DWaterDepthShading = true
+
+    ;# {Map3DWaterDepthOpacity} {Map3DWaterDepthShading} {Blend strength for Warp3D water depth colors} {} 0.85
+    ; Map3DWaterDepthOpacity = 0.85
+
     ;# {Map3DDrawFlatTextureCardSprites} {TexturePrims} {Draw alpha-textured flat cards as real texture sprites after the 3D pass so vertical billboard trees/decorations remain visible from the map view?} {true false} true
     ; Map3DDrawFlatTextureCardSprites = true
 

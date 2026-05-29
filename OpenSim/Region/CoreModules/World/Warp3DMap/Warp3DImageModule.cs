@@ -96,6 +96,13 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
         private float m_spriteMinAlphaCoverage = 0.02f;
         private float m_spriteMaxOpaqueCoverage = 0.98f;
         private float m_spriteMaxSizeMeters = 32f;
+        private bool m_waterDepthShading = true;
+        private Color m_waterBaseColor = Color.FromArgb(29, 72, 96);
+        private Color m_waterShallowColor = Color.FromArgb(108, 135, 145);
+        private Color m_waterDeepColor = Color.FromArgb(36, 75, 90);
+        private float m_waterDepthRange = 36f;
+        private float m_waterNoiseStrength = 0.025f;
+        private float m_waterDepthOpacity = 0.85f;
 
         private const float m_cameraHeight = 4096f;
         private float m_renderMinHeight = -100f;
@@ -116,6 +123,7 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
         private int m_spriteCardsDrawn;
         private int m_spriteCardsSkipped;
         private int m_spriteTextureDecodesThisPass;
+        private int m_waterDepthPixels;
 
         private sealed class MapSpriteTexture : IDisposable
         {
@@ -186,6 +194,22 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
                 Util.GetConfigVarFromSections<float>(source, "Map3DSpriteMaxOpaqueCoverage", configSections, m_spriteMaxOpaqueCoverage)));
             m_spriteMaxSizeMeters = Math.Max(1f,
                 Util.GetConfigVarFromSections<float>(source, "Map3DSpriteMaxSizeMeters", configSections, m_spriteMaxSizeMeters));
+            m_waterBaseColor = ColorTranslator.FromHtml(Util.GetConfigVarFromSections<string>(
+                source, "MapColorWater", configSections, "#1D475F"));
+            m_waterDepthShading = Util.GetConfigVarFromSections<bool>(
+                source, "MapWaterDepthShading", configSections, m_waterDepthShading);
+            m_waterDepthShading = Util.GetConfigVarFromSections<bool>(
+                source, "Map3DWaterDepthShading", configSections, m_waterDepthShading);
+            m_waterShallowColor = ColorTranslator.FromHtml(Util.GetConfigVarFromSections<string>(
+                source, "MapWaterShallowColor", configSections, "#6C8791"));
+            m_waterDeepColor = ColorTranslator.FromHtml(Util.GetConfigVarFromSections<string>(
+                source, "MapWaterDeepColor", configSections, "#244B5A"));
+            m_waterDepthRange = Math.Max(1f, Util.GetConfigVarFromSections<float>(
+                source, "MapWaterDepthRange", configSections, m_waterDepthRange));
+            m_waterNoiseStrength = Math.Max(0f, Math.Min(0.2f, Util.GetConfigVarFromSections<float>(
+                source, "MapWaterNoiseStrength", configSections, m_waterNoiseStrength)));
+            m_waterDepthOpacity = Math.Max(0f, Math.Min(1f, Util.GetConfigVarFromSections<float>(
+                source, "Map3DWaterDepthOpacity", configSections, m_waterDepthOpacity)));
 
             m_renderMaxHeight = Util.GetConfigVarFromSections<float>(source, "RenderMaxHeight", configSections, m_renderMaxHeight);
             m_renderMinHeight = Util.GetConfigVarFromSections<float>(source, "RenderMinHeight", configSections, m_renderMinHeight);
@@ -337,6 +361,7 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
             m_spriteCardsDrawn = 0;
             m_spriteCardsSkipped = 0;
             m_spriteTextureDecodesThisPass = 0;
+            m_waterDepthPixels = 0;
 
             WarpRenderer renderer = new WarpRenderer();
 
@@ -368,6 +393,7 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
             renderer.Render();
 
             Bitmap bitmap = renderer.Scene.getImage();
+            ApplyWaterDepthShading(bitmap);
             if (m_drawFlatTextureCardSprites)
                 DrawFlatTextureCardSprites(bitmap);
 
@@ -390,9 +416,9 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
             }
 
             m_log.DebugFormat(
-                "[WARP 3D IMAGE MODULE]: Rendered {0} parts/{1} faces, drew {2} texture-card sprites, skipped {3} missing exact geometry, {4} flat texture-card faces, {5} texture-card sprites and {6} budget-limited items in {7}ms",
-                m_renderedParts, m_renderedFaces, m_spriteCardsDrawn, m_missingGeometrySkipped,
-                m_flatTextureCardSkipped, m_spriteCardsSkipped, m_budgetSkipped,
+                "[WARP 3D IMAGE MODULE]: Rendered {0} parts/{1} faces, drew {2} texture-card sprites, depth-shaded {3} water pixels, skipped {4} missing exact geometry, {5} flat texture-card faces, {6} texture-card sprites and {7} budget-limited items in {8}ms",
+                m_renderedParts, m_renderedFaces, m_spriteCardsDrawn, m_waterDepthPixels,
+                m_missingGeometrySkipped, m_flatTextureCardSkipped, m_spriteCardsSkipped, m_budgetSkipped,
                 Util.EnvironmentTickCountSubtract(Environment.TickCount, m_renderStartMS));
             return bitmap;
         }
@@ -430,6 +456,92 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
             warp_Material waterMaterial = new warp_Material(ConvertColor(WATER_COLOR));
             renderer.Scene.addMaterial("WaterMat", waterMaterial);
             renderer.SetObjectMaterial("Water", "WaterMat");
+        }
+
+        private void ApplyWaterDepthShading(Bitmap bitmap)
+        {
+            if (!m_waterDepthShading || bitmap == null || m_scene?.Heightmap == null)
+                return;
+
+            ITerrainChannel terrain = m_scene.Heightmap;
+            if (terrain.Width <= 0 || terrain.Height <= 0)
+                return;
+
+            float waterHeight = (float)m_scene.RegionInfo.RegionSettings.WaterHeight;
+            float scaleX = (terrain.Width - 1f) / Math.Max(1, bitmap.Width - 1);
+            float scaleY = (terrain.Height - 1f) / Math.Max(1, bitmap.Height - 1);
+
+            for (int py = 0; py < bitmap.Height; py++)
+            {
+                int ty = ClampInt((int)Math.Round((bitmap.Height - 1 - py) * scaleY), 0, terrain.Height - 1);
+
+                for (int px = 0; px < bitmap.Width; px++)
+                {
+                    int tx = ClampInt((int)Math.Round(px * scaleX), 0, terrain.Width - 1);
+                    float depth = waterHeight - terrain[tx, ty];
+                    if (depth <= 0f)
+                        continue;
+
+                    Color pixel = bitmap.GetPixel(px, py);
+                    float blendAmount = GetWaterPixelBlendAmount(pixel);
+                    if (blendAmount <= 0f)
+                        continue;
+
+                    Color waterColor = GetWaterDepthColor(depth, tx, ty);
+                    bitmap.SetPixel(px, py, Blend(pixel, waterColor, blendAmount));
+                    m_waterDepthPixels++;
+                }
+            }
+        }
+
+        private Color GetWaterDepthColor(float depth, int x, int y)
+        {
+            float ratio = Math.Max(0f, Math.Min(1f, depth / m_waterDepthRange));
+            ratio = SmoothStep(ratio);
+
+            float noise = (float)TerrainUtil.InterpolatedNoise(x / 11.0, y / 11.0) * m_waterNoiseStrength;
+            float fineNoise = (float)TerrainUtil.InterpolatedNoise(x + 91, y + 17) * m_waterNoiseStrength * 0.45f;
+            ratio = Math.Max(0f, Math.Min(1f, ratio + noise + fineNoise));
+
+            Color depthColor = Blend(m_waterShallowColor, m_waterDeepColor, ratio);
+            return Blend(depthColor, m_waterBaseColor, 0.22f);
+        }
+
+        private float GetWaterPixelBlendAmount(Color pixel)
+        {
+            if (pixel.A == 0)
+                return 0f;
+
+            int max = Math.Max(pixel.R, Math.Max(pixel.G, pixel.B));
+            int min = Math.Min(pixel.R, Math.Min(pixel.G, pixel.B));
+            if (max < 18)
+                return 0f;
+
+            // Keep labels, bright boats and warm/green object pixels from being tinted as water.
+            if (pixel.R > 225 && pixel.G > 225 && pixel.B > 225)
+                return 0f;
+            if (pixel.R > pixel.G + 45 && pixel.R > pixel.B + 45)
+                return 0f;
+            if (pixel.G > pixel.R + 55 && pixel.G > pixel.B + 35)
+                return 0f;
+
+            int baseDistance =
+                ((pixel.R - m_waterBaseColor.R) * (pixel.R - m_waterBaseColor.R)) +
+                ((pixel.G - m_waterBaseColor.G) * (pixel.G - m_waterBaseColor.G)) +
+                ((pixel.B - m_waterBaseColor.B) * (pixel.B - m_waterBaseColor.B));
+
+            bool blueGreenWater = pixel.B >= pixel.R + 8 && pixel.G >= pixel.R + 2;
+            bool mutedWater = (max - min) < 48 && pixel.B >= pixel.R - 4 && pixel.G >= pixel.R - 8;
+            bool nearBaseWater = baseDistance < 18000;
+
+            if (!blueGreenWater && !mutedWater && !nearBaseWater)
+                return 0f;
+
+            float confidence = blueGreenWater ? 1f : 0.65f;
+            if (nearBaseWater)
+                confidence = Math.Max(confidence, 0.8f);
+
+            return m_waterDepthOpacity * confidence;
         }
 
         // Add a terrain to the renderer.
@@ -1423,6 +1535,44 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
         {
             int c = warp_Color.getColor((byte)(color.R * 255f), (byte)(color.G * 255f), (byte)(color.B * 255f), (byte)(color.A * 255f));
             return c;
+        }
+
+        private static float SmoothStep(float value)
+        {
+            return value * value * (3f - (2f * value));
+        }
+
+        private static Color Blend(Color from, Color to, float amount)
+        {
+            amount = Math.Max(0f, Math.Min(1f, amount));
+            float inverse = 1f - amount;
+
+            return Color.FromArgb(
+                ClampByte((int)((from.R * inverse) + (to.R * amount))),
+                ClampByte((int)((from.G * inverse) + (to.G * amount))),
+                ClampByte((int)((from.B * inverse) + (to.B * amount))));
+        }
+
+        private static int ClampByte(int value)
+        {
+            if (value < 0)
+                return 0;
+
+            if (value > 255)
+                return 255;
+
+            return value;
+        }
+
+        private static int ClampInt(int value, int min, int max)
+        {
+            if (value < min)
+                return min;
+
+            if (value > max)
+                return max;
+
+            return value;
         }
 
         private static Image DecodeSculptMapImage(byte[] data)
