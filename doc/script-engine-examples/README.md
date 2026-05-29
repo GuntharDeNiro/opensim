@@ -51,6 +51,12 @@ The scripts use:
 - `llSetGroundTexture`
 - `llSetLinkRenderMaterial`
 - `llSetLinkGLTFOverrides`
+- `PRIM_RENDER_MATERIAL`
+- `PRIM_GLTF_NORMAL`
+- `PRIM_GLTF_EMISSIVE`
+- `PRIM_GLTF_METALLIC_ROUGHNESS`
+- `PRIM_GLTF_BASE_COLOR`
+- `PRIM_PHYSICS_MATERIAL`
 - `llGiveAgentInventory`
 - `llTransferOwnership`
 - `PARCEL_MEDIA_COMMAND_LOOP_SET`
@@ -78,6 +84,7 @@ The scripts use:
 - `15_rezzer_provenance_quarantine.lsl`: complex provenance scanner using rezzer detection, notecard trust policy, HUD filtering and scripted return-by-ID quarantine.
 - `16_inventory_transfer_and_ownership_lab.lsl`: complex inventory transfer lab using `llGiveAgentInventory`, destination roots, transfer result codes and ownership copy/take modes.
 - `17_parcel_media_loop_console.lsl`: parcel media console using loop-set command/query, media type, description, integer size and auto-align persistence.
+- `18_pbr_gltf_physics_param_lab.lsl`: render material, GLTF override readback and physics material primitive-param lab.
 
 Stock OpenSim may fail to compile or run these scripts because Experience events,
 KVP functions, scripted-only sit flags and newer Second Life LSL compatibility
