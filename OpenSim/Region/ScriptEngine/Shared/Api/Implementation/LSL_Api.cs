@@ -16856,10 +16856,10 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                         ret.Add(new LSL_Integer(land.SeeAVs ? 1 : 0));
                         break;
                     case ScriptBaseClass.PARCEL_DETAILS_PRIM_CAPACITY:
-                        ret.Add(new LSL_Integer(parcel.GetParcelMaxPrimCount()));
+                        ret.Add(new LSL_Integer(parcel.GetSimulatorMaxPrimCount()));
                         break;
-                    case 8:
-                        ret.Add(new LSL_Integer(parcel.PrimCounts.Total));
+                    case ScriptBaseClass.PARCEL_DETAILS_PRIM_USED:
+                        ret.Add(new LSL_Integer(parcel.PrimCounts.Simulator));
                         break;
                     case ScriptBaseClass.PARCEL_DETAILS_LANDING_POINT:
                         ret.Add(new LSL_Vector(land.UserLocation));

@@ -76,12 +76,16 @@ The scripts use:
 - `llRequestDisplayName`
 - `llRequestUserKey`
 - `llGetParcelPrimCount`
+- `llGetParcelDetails`
+- `llGetParcelPrimOwners`
 - `PARCEL_COUNT_TOTAL`
 - `PARCEL_COUNT_OWNER`
 - `PARCEL_COUNT_GROUP`
 - `PARCEL_COUNT_OTHER`
 - `PARCEL_COUNT_SELECTED`
 - `PARCEL_COUNT_TEMP`
+- `PARCEL_DETAILS_PRIM_CAPACITY`
+- `PARCEL_DETAILS_PRIM_USED`
 - `PARCEL_MEDIA_COMMAND_LOOP_SET`
 - `TRANSFER_DEST`
 - `TRANSFER_FLAGS`
@@ -110,7 +114,7 @@ The scripts use:
 - `18_pbr_gltf_physics_param_lab.lsl`: render material, GLTF override readback and physics material primitive-param lab.
 - `19_object_details_diagnostics_console.lsl`: complex object/avatar diagnostics console using `llGetObjectDetails` cost, render-weight, hover-height, selection, provenance, hover-text and damage readback.
 - `20_identity_lookup_console.lsl`: complex identity diagnostics console using synchronous and asynchronous name, username, display-name and key lookups.
-- `21_parcel_prim_count_auditor.lsl`: parcel audit console using local and same-owner simulator-wide `llGetParcelPrimCount` for every `PARCEL_COUNT_*` category.
+- `21_parcel_prim_count_auditor.lsl`: parcel audit console using local and same-owner simulator-wide `llGetParcelPrimCount`, `llGetParcelDetails` capacity/used values and owner/count breakdowns.
 
 Stock OpenSim may fail to compile or run these scripts because Experience events,
 KVP functions, scripted-only sit flags and newer Second Life LSL compatibility

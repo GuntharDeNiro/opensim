@@ -121,6 +121,7 @@ so additions are deliberate and testable instead of guessed from individual scri
 - Parcel prim count compatibility
   - Completes `llGetParcelPrimCount` for same-owner simulator-wide `PARCEL_COUNT_OWNER`, `PARCEL_COUNT_GROUP`, `PARCEL_COUNT_OTHER` and `PARCEL_COUNT_SELECTED`.
   - Adds `PARCEL_COUNT_TEMP` support by counting temporary-on-rez non-mesh linksets on the target parcel or same-owner parcels.
+  - Aligns `llGetParcelDetails` `PARCEL_DETAILS_PRIM_CAPACITY` and `PARCEL_DETAILS_PRIM_USED` with Second Life's same-owner simulator-wide semantics.
   - Adds an in-world parcel prim count auditor example for estate/rental/rules consoles.
 
 ## Missing Or Backend-Limited After This Pass
