@@ -16655,6 +16655,100 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             ScriptSleep(m_sleepMsOnResetLandPassList);
         }
 
+        private static int GetParcelPrimCountForCategory(IPrimCounts pc, int category)
+        {
+            if (pc is null)
+                return 0;
+
+            if (category == ScriptBaseClass.PARCEL_COUNT_TOTAL)
+                return pc.Total;
+            if (category == ScriptBaseClass.PARCEL_COUNT_OWNER)
+                return pc.Owner;
+            if (category == ScriptBaseClass.PARCEL_COUNT_GROUP)
+                return pc.Group;
+            if (category == ScriptBaseClass.PARCEL_COUNT_OTHER)
+                return pc.Others;
+            if (category == ScriptBaseClass.PARCEL_COUNT_SELECTED)
+                return pc.Selected;
+
+            return 0;
+        }
+
+        private static bool IsMeshObject(SceneObjectGroup group)
+        {
+            SceneObjectPart[] parts = group.Parts;
+            for (int i = 0; i < parts.Length; ++i)
+            {
+                if (parts[i].Shape.MeshFlagEntry)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private int GetParcelTempPrimCount(ILandObject baseParcel, bool simWide)
+        {
+            if (baseParcel?.LandData is null)
+                return 0;
+
+            HashSet<UUID> parcelIDs = new();
+            UUID baseOwner = baseParcel.LandData.OwnerID;
+
+            if (simWide)
+            {
+                foreach (ILandObject parcel in World.LandChannel.AllParcels())
+                {
+                    LandData landData = parcel?.LandData;
+                    if (landData is not null && landData.OwnerID.Equals(baseOwner))
+                        parcelIDs.Add(landData.GlobalID);
+                }
+            }
+            else
+            {
+                parcelIDs.Add(baseParcel.LandData.GlobalID);
+            }
+
+            int count = 0;
+            World.ForEachSOG(delegate(SceneObjectGroup group)
+            {
+                if (group is null || group.IsDeleted || group.IsAttachment || !group.IsTemporary)
+                    return;
+
+                if (IsMeshObject(group))
+                    return;
+
+                Vector3 position = group.AbsolutePosition;
+                ILandObject parcel = World.LandChannel.GetLandObject(position.X, position.Y);
+                if (parcel?.LandData is not null && parcelIDs.Contains(parcel.LandData.GlobalID))
+                    count += group.PrimCount;
+            });
+
+            return count;
+        }
+
+        private int GetSimulatorParcelPrimCount(ILandObject baseParcel, int category)
+        {
+            if (baseParcel?.LandData is null)
+                return 0;
+
+            if (category == ScriptBaseClass.PARCEL_COUNT_TEMP)
+                return GetParcelTempPrimCount(baseParcel, true);
+
+            UUID baseOwner = baseParcel.LandData.OwnerID;
+            int count = 0;
+
+            foreach (ILandObject parcel in World.LandChannel.AllParcels())
+            {
+                LandData landData = parcel?.LandData;
+                if (landData is null || !landData.OwnerID.Equals(baseOwner))
+                    continue;
+
+                count += GetParcelPrimCountForCategory(parcel.PrimCounts, category);
+            }
+
+            return count;
+        }
+
         public LSL_Integer llGetParcelPrimCount(LSL_Vector pos, int category, int sim_wide)
         {
 
@@ -16663,37 +16757,13 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             if (lo == null)
                 return 0;
 
-            IPrimCounts pc = lo.PrimCounts;
-
             if (sim_wide != ScriptBaseClass.FALSE)
-            {
-                if (category == ScriptBaseClass.PARCEL_COUNT_TOTAL)
-                {
-                    return pc.Simulator;
-                }
-                else
-                {
-                    // counts not implemented yet
-                    return 0;
-                }
-            }
-            else
-            {
-                if (category == ScriptBaseClass.PARCEL_COUNT_TOTAL)
-                    return pc.Total;
-                else if (category == ScriptBaseClass.PARCEL_COUNT_OWNER)
-                    return pc.Owner;
-                else if (category == ScriptBaseClass.PARCEL_COUNT_GROUP)
-                    return pc.Group;
-                else if (category == ScriptBaseClass.PARCEL_COUNT_OTHER)
-                    return pc.Others;
-                else if (category == ScriptBaseClass.PARCEL_COUNT_SELECTED)
-                    return pc.Selected;
-                else if (category == ScriptBaseClass.PARCEL_COUNT_TEMP)
-                    return 0; // counts not implemented yet
-            }
+                return GetSimulatorParcelPrimCount(lo, category);
 
-            return 0;
+            if (category == ScriptBaseClass.PARCEL_COUNT_TEMP)
+                return GetParcelTempPrimCount(lo, false);
+
+            return GetParcelPrimCountForCategory(lo.PrimCounts, category);
         }
 
         public LSL_List llGetParcelPrimOwners(LSL_Vector pos)

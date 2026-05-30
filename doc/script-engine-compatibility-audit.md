@@ -118,6 +118,11 @@ so additions are deliberate and testable instead of guessed from individual scri
   - Improves `llName2Key` to resolve local cached account names synchronously before falling back to `NULL_KEY`.
   - Adds an in-world identity lookup example covering synchronous and dataserver-based name/key lookups.
 
+- Parcel prim count compatibility
+  - Completes `llGetParcelPrimCount` for same-owner simulator-wide `PARCEL_COUNT_OWNER`, `PARCEL_COUNT_GROUP`, `PARCEL_COUNT_OTHER` and `PARCEL_COUNT_SELECTED`.
+  - Adds `PARCEL_COUNT_TEMP` support by counting temporary-on-rez non-mesh linksets on the target parcel or same-owner parcels.
+  - Adds an in-world parcel prim count auditor example for estate/rental/rules consoles.
+
 ## Missing Or Backend-Limited After This Pass
 
 - True Second Life navmesh/pathfinding character simulation.
