@@ -1030,7 +1030,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 int terrainSmoothPasses = recipe.PhysicalMap
                     ? Math.Max(m_imageTerrainSmoothPasses, 16)
                     : m_imageTerrainSmoothPasses;
-                SmoothImageTerrainHeightmap(width, height, terrainSmoothPasses, recipe.ImageData, (float)m_scene.RegionInfo.RegionSettings.WaterHeight);
+                SmoothImageTerrainHeightmap(width, height, terrainSmoothPasses, recipe.ImageData, (float)m_scene.RegionInfo.RegionSettings.WaterHeight, recipe.PhysicalMap);
             }
 
             m_scene.Heightmap.GetTerrainData().TaintAllTerrain();
@@ -1064,7 +1064,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             }
         }
 
-        private void SmoothImageTerrainHeightmap(int width, int height, int passes, ImageTerrainData image, float water)
+        private void SmoothImageTerrainHeightmap(int width, int height, int passes, ImageTerrainData image, float water, bool physicalMap)
         {
             if (passes <= 0 || width <= 1 || height <= 1)
                 return;
@@ -1124,6 +1124,9 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 next = swap;
             }
 
+            if (physicalMap)
+                LimitTerrainSlope(width, height, current, landMask, water, 0.30f, 24);
+
             for (int x = 0; x < width; ++x)
             {
                 for (int y = 0; y < height; ++y)
@@ -1133,6 +1136,69 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                     m_scene.Heightmap[x, y] = ClampTerrainHeight(value);
                 }
             }
+        }
+
+        private static void LimitTerrainSlope(int width, int height, float[] values, bool[] landMask, float water, float maxStep, int passes)
+        {
+            if (values == null || landMask == null || values.Length == 0 || landMask.Length < values.Length || width <= 1 || height <= 1)
+                return;
+
+            int pixelCount = width * height;
+            float[] original = values;
+            float[] next = new float[pixelCount];
+
+            for (int pass = 0; pass < passes; ++pass)
+            {
+                Array.Copy(values, next, pixelCount);
+
+                for (int y = 0; y < height; ++y)
+                {
+                    int y0 = Math.Max(0, y - 1);
+                    int y1 = Math.Min(height - 1, y + 1);
+
+                    for (int x = 0; x < width; ++x)
+                    {
+                        int index = y * width + x;
+                        if (!landMask[index])
+                            continue;
+
+                        float sum = 0f;
+                        int count = 0;
+
+                        for (int sy = y0; sy <= y1; ++sy)
+                        {
+                            for (int sx = Math.Max(0, x - 1); sx <= Math.Min(width - 1, x + 1); ++sx)
+                            {
+                                int sample = sy * width + sx;
+                                if (sample == index || !landMask[sample])
+                                    continue;
+
+                                sum += values[sample];
+                                count++;
+                            }
+                        }
+
+                        if (count == 0)
+                            continue;
+
+                        float average = sum / count;
+                        float value = values[index];
+                        if (value > average + maxStep)
+                            value = average + maxStep;
+                        else if (value < average - maxStep)
+                            value = average - maxStep;
+
+                        next[index] = Math.Max(value, water + 0.12f);
+                    }
+                }
+
+                float[] swap = values;
+                values = next;
+                next = swap;
+            }
+
+            if (!object.ReferenceEquals(values, original))
+                Array.Copy(values, original, pixelCount);
         }
 
         private ImageTerrainData LoadImageTerrainData(UUID textureID, bool physicalMap)
@@ -2000,12 +2066,12 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 * SmoothStep(0.58f, 0.18f, luma)
                 * SmoothStep(0.02f, 0.22f, r - b);
 
-            float relief = 0.10f;
-            relief = Math.Max(relief, 0.16f + vegetation * 0.10f);
-            relief = Math.Max(relief, 0.28f + palePlain * 0.16f);
-            relief = Math.Max(relief, 0.36f + tanHill * 0.28f);
-            relief = Math.Max(relief, 0.58f + brownMountain * 0.34f);
-            relief = Math.Max(relief, 0.74f + darkRidge * 0.22f);
+            float relief = 0.06f;
+            relief = Math.Max(relief, 0.10f + vegetation * 0.08f);
+            relief = Math.Max(relief, 0.18f + palePlain * 0.10f);
+            relief = Math.Max(relief, 0.24f + tanHill * 0.16f);
+            relief = Math.Max(relief, 0.36f + brownMountain * 0.20f);
+            relief = Math.Max(relief, 0.48f + darkRidge * 0.16f);
 
             return Clamp(relief * alpha, 0f, 1f);
         }
@@ -2086,8 +2152,19 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             if (style == TerrainStyle.ImageMap)
             {
                 double water = recipe.WaterHeight > 0f ? recipe.WaterHeight : settings.WaterHeight;
-                double low = water + Math.Max(0.35, m_imageTerrainMinLandHeight * 0.85);
-                double high = water + Math.Max(low - water + 1.0, m_imageTerrainMaxLandHeight * 0.58);
+                double low;
+                double high;
+
+                if (recipe.PhysicalMap)
+                {
+                    low = water + 0.18;
+                    high = water + Math.Max(1.4, Math.Min(3.2, m_imageTerrainMaxLandHeight * 0.28));
+                }
+                else
+                {
+                    low = water + Math.Max(0.35, m_imageTerrainMinLandHeight * 0.85);
+                    high = water + Math.Max(low - water + 1.0, m_imageTerrainMaxLandHeight * 0.58);
+                }
 
                 settings.Elevation1NW = settings.Elevation1NE = settings.Elevation1SE = settings.Elevation1SW = low;
                 settings.Elevation2NW = settings.Elevation2NE = settings.Elevation2SE = settings.Elevation2SW = high;
@@ -2153,7 +2230,9 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             float relief = image.SampleRelief(u, v, targetAspect);
 
             float waterNoise = recipe.PhysicalMap ? 0f : Math.Abs(FractalNoise(x * 0.012f, y * 0.012f, 23003));
-            float seaDepth = Math.Max(28f, m_imageTerrainSeaDepth * 6f);
+            float seaDepth = recipe.PhysicalMap
+                ? Clamp(m_imageTerrainSeaDepth * 0.55f, 1.1f, 3.0f)
+                : Math.Max(28f, m_imageTerrainSeaDepth * 6f);
             float seaHeight = water - seaDepth * (0.96f + waterNoise * 0.04f);
             if (!isLand)
                 return ClampTerrainHeight(seaHeight);
@@ -2162,6 +2241,25 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 ? 0f
                 : FractalNoise(x * 0.014f, y * 0.014f, 23029) * 0.52f
                     + FractalNoise(x * 0.035f, y * 0.035f, 23041) * 0.18f;
+
+            if (recipe.PhysicalMap)
+            {
+                relief = SmoothStep(0.10f, 0.96f, relief);
+                relief = (float)Math.Pow(relief, 1.85);
+
+                float inland = SmoothStep(0.36f, 0.98f, land);
+                float shoreBand = 1f - SmoothStep(0.54f, 0.98f, land);
+                float physicalMinRise = Clamp(Math.Min(m_imageTerrainMinLandHeight, 0.38f), 0.16f, 0.50f);
+                float physicalMaxRise = Math.Max(physicalMinRise + 0.8f, Math.Min(m_imageTerrainMaxLandHeight, 4.8f));
+                float landRise = physicalMinRise + (physicalMaxRise - physicalMinRise) * relief;
+                float landHeight = water + Lerp(0.16f, landRise, inland);
+
+                if (shoreBand > 0f)
+                    landHeight = Lerp(landHeight, water + 0.13f, shoreBand * 0.92f);
+
+                return ClampTerrainHeight(Math.Max(landHeight, water + 0.10f));
+            }
+
             float inland = SmoothStep(0.48f, 0.92f, land);
             float landRise = m_imageTerrainMinLandHeight + (m_imageTerrainMaxLandHeight - m_imageTerrainMinLandHeight) * relief;
             float landHeight = water + Lerp(0.35f, landRise, inland) + hillNoise * Math.Max(0.05f, inland);
