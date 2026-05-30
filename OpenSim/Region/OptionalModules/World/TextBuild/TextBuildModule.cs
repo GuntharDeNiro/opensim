@@ -1026,7 +1026,12 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             }
 
             if (recipe.Style == TerrainStyle.ImageMap)
-                SmoothImageTerrainHeightmap(width, height, m_imageTerrainSmoothPasses, recipe.ImageData, (float)m_scene.RegionInfo.RegionSettings.WaterHeight);
+            {
+                int terrainSmoothPasses = recipe.PhysicalMap
+                    ? Math.Max(m_imageTerrainSmoothPasses, 16)
+                    : m_imageTerrainSmoothPasses;
+                SmoothImageTerrainHeightmap(width, height, terrainSmoothPasses, recipe.ImageData, (float)m_scene.RegionInfo.RegionSettings.WaterHeight);
+            }
 
             m_scene.Heightmap.GetTerrainData().TaintAllTerrain();
             if (m_scene.PhysicsScene != null)
@@ -1213,7 +1218,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 }
             }
 
-            RefineImageLandMask(width, height, land);
+            RefineImageLandMask(width, height, land, physicalMap);
             if (fitLandToRegion && !physicalMap)
                 ClipBorderLandShelves(width, height, land);
 
@@ -1246,8 +1251,10 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
 
             float[] coastLand = BuildHardLandMask(land);
 
-            land = SmoothMapValues((float[])coastLand.Clone(), width, height, Math.Min(3, smoothPasses));
-            relief = SmoothMapValues(relief, width, height, smoothPasses);
+            int landSmoothPasses = physicalMap ? Math.Max(7, smoothPasses + 2) : Math.Min(3, smoothPasses);
+            int reliefSmoothPasses = physicalMap ? Math.Max(16, smoothPasses * 3) : smoothPasses;
+            land = SmoothMapValues((float[])coastLand.Clone(), width, height, landSmoothPasses);
+            relief = SmoothMapValues(relief, width, height, reliefSmoothPasses);
 
             return new ImageTerrainData(textureID, width, height, land, relief, coastLand, minX, minY, maxX, maxY);
         }
@@ -1296,13 +1303,16 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             return mask;
         }
 
-        private static void RefineImageLandMask(int width, int height, float[] land)
+        private static void RefineImageLandMask(int width, int height, float[] land, bool physicalMap)
         {
             int pixelCount = width * height;
             if (width <= 0 || height <= 0 || land == null || land.Length < pixelCount)
                 return;
 
             const float waterThreshold = 0.46f;
+            if (physicalMap)
+                CloseNarrowLandGaps(width, height, pixelCount, land, waterThreshold, 3, 5, 0.88f);
+
             bool[] sea = new bool[pixelCount];
             int[] queue = new int[pixelCount];
             int head = 0;
@@ -1345,8 +1355,11 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                     EnqueueSea(index + width);
             }
 
-            FillSmallInteriorWaterGaps(width, height, pixelCount, land, sea, waterThreshold, queue);
-            RemoveSmallLandSpecks(width, height, pixelCount, land, waterThreshold, queue);
+            int holeFillLimit = physicalMap ? Math.Max(96, pixelCount / 60) : Math.Max(24, pixelCount / 1400);
+            float holeFillValue = physicalMap ? 0.92f : 0.68f;
+            int smallLandLimit = physicalMap ? Math.Max(10, pixelCount / 12000) : Math.Max(12, pixelCount / 5000);
+            FillSmallInteriorWaterGaps(width, height, pixelCount, land, sea, waterThreshold, queue, holeFillLimit, holeFillValue);
+            RemoveSmallLandSpecks(width, height, pixelCount, land, waterThreshold, queue, smallLandLimit);
         }
 
         private static void ClipBorderLandShelves(int width, int height, float[] land)
@@ -1623,6 +1636,75 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             return true;
         }
 
+        private static void CloseNarrowLandGaps(
+            int width,
+            int height,
+            int pixelCount,
+            float[] land,
+            float landThreshold,
+            int passes,
+            int requiredNeighbors,
+            float fillValue)
+        {
+            if (passes <= 0 || width <= 1 || height <= 1 || land == null || land.Length < pixelCount)
+                return;
+
+            float[] current = land;
+            float[] next = new float[pixelCount];
+
+            for (int pass = 0; pass < passes; ++pass)
+            {
+                Array.Copy(current, next, pixelCount);
+
+                for (int y = 0; y < height; ++y)
+                {
+                    int y0 = Math.Max(0, y - 1);
+                    int y1 = Math.Min(height - 1, y + 1);
+
+                    for (int x = 0; x < width; ++x)
+                    {
+                        int index = y * width + x;
+                        if (current[index] >= landThreshold)
+                            continue;
+
+                        int landNeighbors = 0;
+                        float neighborSum = 0f;
+
+                        for (int sy = y0; sy <= y1; ++sy)
+                        {
+                            for (int sx = Math.Max(0, x - 1); sx <= Math.Min(width - 1, x + 1); ++sx)
+                            {
+                                int sample = sy * width + sx;
+                                if (sample == index || current[sample] < landThreshold)
+                                    continue;
+
+                                landNeighbors++;
+                                neighborSum += current[sample];
+                            }
+                        }
+
+                        if (landNeighbors >= requiredNeighbors)
+                            next[index] = Math.Max(fillValue, neighborSum / landNeighbors);
+                    }
+                }
+
+                if (current == land)
+                {
+                    current = next;
+                    next = new float[pixelCount];
+                }
+                else
+                {
+                    float[] swap = current;
+                    current = next;
+                    next = swap;
+                }
+            }
+
+            if (current != land)
+                Array.Copy(current, land, pixelCount);
+        }
+
         private static void FillSmallInteriorWaterGaps(
             int width,
             int height,
@@ -1632,8 +1714,21 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             float waterThreshold,
             int[] queue)
         {
+            FillSmallInteriorWaterGaps(width, height, pixelCount, land, sea, waterThreshold, queue, Math.Max(24, pixelCount / 1400), 0.68f);
+        }
+
+        private static void FillSmallInteriorWaterGaps(
+            int width,
+            int height,
+            int pixelCount,
+            float[] land,
+            bool[] sea,
+            float waterThreshold,
+            int[] queue,
+            int smallWaterLimit,
+            float fillValue)
+        {
             bool[] visited = new bool[pixelCount];
-            int smallWaterLimit = Math.Max(24, pixelCount / 1400);
 
             for (int i = 0; i < pixelCount; ++i)
             {
@@ -1673,7 +1768,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 if (tail <= smallWaterLimit)
                 {
                     for (int j = 0; j < tail; ++j)
-                        land[queue[j]] = 0.68f;
+                        land[queue[j]] = fillValue;
                 }
             }
         }
@@ -1686,8 +1781,19 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             float landThreshold,
             int[] queue)
         {
+            RemoveSmallLandSpecks(width, height, pixelCount, land, landThreshold, queue, Math.Max(12, pixelCount / 5000));
+        }
+
+        private static void RemoveSmallLandSpecks(
+            int width,
+            int height,
+            int pixelCount,
+            float[] land,
+            float landThreshold,
+            int[] queue,
+            int smallLandLimit)
+        {
             bool[] visited = new bool[pixelCount];
-            int smallLandLimit = Math.Max(12, pixelCount / 5000);
 
             for (int i = 0; i < pixelCount; ++i)
             {
