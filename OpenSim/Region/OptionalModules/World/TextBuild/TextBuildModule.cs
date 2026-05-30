@@ -153,7 +153,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             TerrainRecipe terrainRecipe = ResolveTerrainRecipe(request);
             if (terrainRecipe != null)
             {
-                ApplyTerrainRecipe(client, terrainRecipe);
+                ApplyTerrainRecipe(client, sp, terrainRecipe);
                 return;
             }
 
@@ -217,6 +217,9 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 return false;
 
             if (!object.ReferenceEquals(client.SceneAgent, sp))
+                return false;
+
+            if (!object.ReferenceEquals(sp.ControllingClient, client))
                 return false;
 
             if (!IsInsideRegion(sp.AbsolutePosition))
@@ -988,8 +991,19 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             return fallback;
         }
 
-        private void ApplyTerrainRecipe(IClientAPI client, TerrainRecipe recipe)
+        private void ApplyTerrainRecipe(IClientAPI client, ScenePresence sp, TerrainRecipe recipe)
         {
+            if (client == null || sp == null || m_scene == null ||
+                sp.IsChildAgent || sp.IsInTransit || sp.IsDeleted ||
+                !object.ReferenceEquals(sp.Scene, m_scene) ||
+                !object.ReferenceEquals(sp.ControllingClient, client) ||
+                !IsInsideRegion(sp.AbsolutePosition))
+            {
+                if (client != null)
+                    SendReply(client, "TextBuild: terrain can only be shaped from your current root region.");
+                return;
+            }
+
             if (m_scene.Heightmap == null)
             {
                 SendReply(client, "TextBuild: terrain is not available in this region.");
@@ -1220,8 +1234,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             int maxX = width - 1;
             int maxY = height - 1;
             bool foundBounds = fitLandToRegion &&
-                (TryFindDominantLandBounds(width, height, land, out minX, out minY, out maxX, out maxY) ||
-                 TryFindAnyLandBounds(width, height, land, out minX, out minY, out maxX, out maxY));
+                TryFindDominantLandBounds(width, height, land, out minX, out minY, out maxX, out maxY);
 
             if (!foundBounds)
             {
@@ -1232,8 +1245,8 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             }
             else
             {
-                int padX = Math.Max(2, (int)((maxX - minX + 1) * 0.08f));
-                int padY = Math.Max(2, (int)((maxY - minY + 1) * 0.08f));
+                int padX = Math.Max(1, Math.Min(3, (maxX - minX + 1) / 128));
+                int padY = Math.Max(1, Math.Min(3, (maxY - minY + 1) / 128));
                 minX = Math.Max(0, minX - padX);
                 minY = Math.Max(0, minY - padY);
                 maxX = Math.Min(width - 1, maxX + padX);
@@ -1550,7 +1563,6 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             FillSmallInteriorWaterGaps(width, height, pixelCount, land, sea, waterThreshold, queue);
 
             int bestArea = 0;
-            int largestBorderArea = 0;
             for (int i = 0; i < pixelCount; ++i)
             {
                 if (visited[i] || sea[i] || land[i] <= landThreshold)
@@ -1598,9 +1610,6 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                         EnqueueLand(index + width);
                 }
 
-                if (touchesBorder)
-                    largestBorderArea = Math.Max(largestBorderArea, area);
-
                 if (!touchesBorder && area > bestArea)
                 {
                     bestArea = area;
@@ -1611,7 +1620,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 }
             }
 
-            if (bestArea < Math.Max(32, pixelCount / 50) || largestBorderArea > bestArea * 2)
+            if (bestArea < Math.Max(32, pixelCount / 200))
                 return false;
 
             int boundsWidth = maxX - minX + 1;
@@ -1907,7 +1916,8 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
 
             float openWater = 1f - SmoothStep(0.04f, 0.50f, land);
             float waterNoise = Math.Abs(FractalNoise(x * 0.012f, y * 0.012f, 23003));
-            float seaHeight = water - m_imageTerrainSeaDepth * (0.82f + waterNoise * 0.08f) * openWater;
+            float seaDepth = Math.Max(12f, m_imageTerrainSeaDepth * 3f);
+            float seaHeight = water - seaDepth * (0.92f + waterNoise * 0.08f) * Math.Max(0.35f, openWater);
             if (!isLand)
                 return ClampTerrainHeight(seaHeight);
 
