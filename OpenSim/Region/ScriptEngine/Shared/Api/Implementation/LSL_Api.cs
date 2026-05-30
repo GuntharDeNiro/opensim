@@ -7824,18 +7824,31 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 sop.SoundRadius = radius;
         }
 
+        private string GetCachedAvatarName(UUID key)
+        {
+            ScenePresence presence = World.GetScenePresence(key);
+            if (presence is not null)
+                return presence.Name;
+
+            UserAccount account = m_userAccountService?.GetUserAccount(RegionScopeID, key);
+            return account is null ? string.Empty : account.Name;
+        }
+
+        private string GetCachedKeyName(UUID key)
+        {
+            string name = GetCachedAvatarName(key);
+            if (!string.IsNullOrEmpty(name))
+                return name;
+
+            SceneObjectPart sop = World.GetSceneObjectPart(key);
+            return sop is null ? string.Empty : sop.Name;
+        }
+
         public LSL_String llKey2Name(LSL_Key id)
         {
             if (UUID.TryParse(id, out UUID key) && key.IsNotZero())
-            {
-                ScenePresence presence = World.GetScenePresence(key);
-                if (presence is not null)
-                    return presence.Name;
+                return GetCachedKeyName(key);
 
-                SceneObjectPart sop = World.GetSceneObjectPart(key);
-                if (sop is not null)
-                    return sop.Name;
-            }
             return LSL_String.Empty;
         }
 
@@ -7887,6 +7900,29 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     return sp.UUID.ToString();
             }
 
+            IUserManagement userManager = World.RequestModuleInterface<IUserManagement>();
+            if (nc == 2)
+            {
+                if (userManager is not null)
+                {
+                    UUID userID = userManager.GetUserIdByName(firstName, lastName);
+                    if (!userID.IsZero())
+                        return userID.ToString();
+                }
+
+                UserAccount account = m_userAccountService?.GetUserAccount(RegionScopeID, firstName, lastName);
+                if (account is not null && account.PrincipalID.IsNotZero())
+                    return account.PrincipalID.ToString();
+            }
+            else if (userManager is not null)
+            {
+                string hgfirst = firstName + "." + lastName;
+                string hglast = "@" + server;
+                UUID userID = userManager.GetUserIdByName(hgfirst, hglast);
+                if (!userID.IsZero())
+                    return userID.ToString();
+            }
+
             return ScriptBaseClass.NULL_KEY;
         }
 
@@ -7929,6 +7965,13 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                         userID = userManager.GetUserIdByName(firstName, lastName);
                         if (!userID.IsZero())
                             reply = userID.ToString();
+                    }
+
+                    if (reply == ScriptBaseClass.NULL_KEY)
+                    {
+                        UserAccount account = m_userAccountService?.GetUserAccount(RegionScopeID, firstName, lastName);
+                        if (account is not null && account.PrincipalID.IsNotZero())
+                            reply = account.PrincipalID.ToString();
                     }
                 }
                 else
@@ -17132,7 +17175,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             ret.Add(new LSL_String(""));
                             break;
                         case ScriptBaseClass.OBJECT_SELECT_COUNT:
-                            ret.Add(new LSL_Integer(obj.ParentGroup.IsSelected ? 1 : 0));
+                            ret.Add(new LSL_Integer(0));
                             break;
                         case ScriptBaseClass.OBJECT_SIT_COUNT:
                             ret.Add(new LSL_Integer(0));
@@ -17413,7 +17456,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             ret.Add(new LSL_String(date.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture)));
                             break;
                         case ScriptBaseClass.OBJECT_SELECT_COUNT:
-                            ret.Add(new LSL_Integer(0));
+                            ret.Add(new LSL_Integer(obj.ParentGroup.IsSelected ? 1 : 0));
                             break;
                         case ScriptBaseClass.OBJECT_SIT_COUNT:
                             ret.Add(new LSL_Integer(obj.ParentGroup.GetSittingAvatarsCount()));
@@ -17846,7 +17889,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public LSL_String llGetUsername(LSL_Key id)
         {
-            return Name2Username(llKey2Name(id));
+            if (!UUID.TryParse(id, out UUID key) || key.IsZero())
+                return LSL_String.Empty;
+
+            string name = GetCachedAvatarName(key);
+            return string.IsNullOrEmpty(name) ? LSL_String.Empty : Name2Username(name);
         }
 
         public LSL_Key llRequestUsername(LSL_Key id)
@@ -17877,11 +17924,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 }
                 else
                 {
-                    UserAccount account = m_userAccountService.GetUserAccount(RegionScopeID, key);
-                    if (account != null)
-                    {
-                        name = account.FirstName + " " + account.LastName;
-                    }
+                    UserAccount account = m_userAccountService?.GetUserAccount(RegionScopeID, key);
+                    if (account is not null)
+                        name = account.Name;
                 }
                 m_AsyncCommands.DataserverPlugin.DataserverReply(eventID, Name2Username(name));
             }
@@ -17893,15 +17938,10 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public LSL_String llGetDisplayName(LSL_Key id)
         {
-            if (UUID.TryParse(id, out UUID key) && key.IsNotZero())
-            {
-                ScenePresence presence = World.GetScenePresence(key);
-                if (presence != null)
-                {
-                    return presence.Name;
-                }
-            }
-            return LSL_String.Empty;
+            if (!UUID.TryParse(id, out UUID key) || key.IsZero())
+                return LSL_String.Empty;
+
+            return GetCachedAvatarName(key);
         }
 
         public LSL_Key llRequestDisplayName(LSL_Key id)
@@ -17932,11 +17972,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 }
                 else
                 {
-                    UserAccount account = m_userAccountService.GetUserAccount(RegionScopeID, key);
+                    UserAccount account = m_userAccountService?.GetUserAccount(RegionScopeID, key);
                     if (account is not null)
-                    {
-                        name = account.FirstName + " " + account.LastName;
-                    }
+                        name = account.Name;
                 }
                 m_AsyncCommands.DataserverPlugin.DataserverReply(eventID, name);
             }

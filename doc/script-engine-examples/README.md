@@ -68,6 +68,13 @@ The scripts use:
 - `OBJECT_RENDER_WEIGHT`
 - `OBJECT_HOVER_HEIGHT`
 - `OBJECT_SELECT_COUNT`
+- `llKey2Name`
+- `llGetUsername`
+- `llGetDisplayName`
+- `llName2Key`
+- `llRequestUsername`
+- `llRequestDisplayName`
+- `llRequestUserKey`
 - `PARCEL_MEDIA_COMMAND_LOOP_SET`
 - `TRANSFER_DEST`
 - `TRANSFER_FLAGS`
@@ -95,6 +102,7 @@ The scripts use:
 - `17_parcel_media_loop_console.lsl`: parcel media console using loop-set command/query, media type, description, integer size and auto-align persistence.
 - `18_pbr_gltf_physics_param_lab.lsl`: render material, GLTF override readback and physics material primitive-param lab.
 - `19_object_details_diagnostics_console.lsl`: complex object/avatar diagnostics console using `llGetObjectDetails` cost, render-weight, hover-height, selection, provenance, hover-text and damage readback.
+- `20_identity_lookup_console.lsl`: complex identity diagnostics console using synchronous and asynchronous name, username, display-name and key lookups.
 
 Stock OpenSim may fail to compile or run these scripts because Experience events,
 KVP functions, scripted-only sit flags and newer Second Life LSL compatibility

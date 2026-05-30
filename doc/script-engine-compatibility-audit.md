@@ -113,6 +113,11 @@ so additions are deliberate and testable instead of guessed from individual scri
   - Returns object selection state for `OBJECT_SELECT_COUNT` when OpenSim exposes a selected linkset.
   - Updates the RegionWeb script reference entry for `llGetObjectDetails` with the new object-detail fields.
 
+- Identity and name lookup compatibility
+  - Improves `llKey2Name`, `llGetUsername` and `llGetDisplayName` to use cached local account data when the avatar is not currently in-region.
+  - Improves `llName2Key` to resolve local cached account names synchronously before falling back to `NULL_KEY`.
+  - Adds an in-world identity lookup example covering synchronous and dataserver-based name/key lookups.
+
 ## Missing Or Backend-Limited After This Pass
 
 - True Second Life navmesh/pathfinding character simulation.
