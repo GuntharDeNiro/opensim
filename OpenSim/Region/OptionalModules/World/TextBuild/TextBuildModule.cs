@@ -1057,8 +1057,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 recipe.WaterHeight = (float)m_scene.RegionInfo.RegionSettings.WaterHeight;
             }
 
-            if (recipe.Style != TerrainStyle.ImageMap)
-                ApplyTerrainTextureHeights(recipe);
+            ApplyTerrainTextureHeights(recipe);
 
             for (int x = 0; x < width; x++)
             {
@@ -1252,7 +1251,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                     System.Drawing.Color color = bitmap.GetPixel(x, y);
                     int index = y * width + x;
                     land[index] = physicalMap ? ClassifyPhysicalMapLand(color) : ClassifyMapLand(color);
-                    relief[index] = ClassifyMapRelief(color);
+                    relief[index] = physicalMap ? ClassifyPhysicalMapRelief(color) : ClassifyMapRelief(color);
                 }
             }
 
@@ -1268,7 +1267,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             if (fitLandToRegion)
             {
                 foundBounds = physicalMap
-                    ? TryFindAnyLandBounds(width, height, land, out minX, out minY, out maxX, out maxY)
+                    ? TryFindPhysicalMapBounds(width, height, land, out minX, out minY, out maxX, out maxY)
                     : TryFindDominantLandBounds(width, height, land, out minX, out minY, out maxX, out maxY);
             }
 
@@ -1327,6 +1326,133 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             }
 
             return count >= Math.Max(32, pixelCount / 5000);
+        }
+
+        private static bool TryFindPhysicalMapBounds(int width, int height, float[] land, out int minX, out int minY, out int maxX, out int maxY)
+        {
+            minX = width;
+            minY = height;
+            maxX = -1;
+            maxY = -1;
+
+            int pixelCount = width * height;
+            if (width <= 0 || height <= 0 || land == null || land.Length < pixelCount)
+                return false;
+
+            const float landThreshold = 0.50f;
+            bool[] visited = new bool[pixelCount];
+            int[] queue = new int[pixelCount];
+            List<LandComponentBounds> components = new List<LandComponentBounds>();
+
+            for (int i = 0; i < pixelCount; ++i)
+            {
+                if (visited[i] || land[i] < landThreshold)
+                    continue;
+
+                int head = 0;
+                int tail = 0;
+                int componentMinX = width;
+                int componentMinY = height;
+                int componentMaxX = -1;
+                int componentMaxY = -1;
+                bool touchesBorder = false;
+
+                visited[i] = true;
+                queue[tail++] = i;
+
+                while (head < tail)
+                {
+                    int index = queue[head++];
+                    int x = index % width;
+                    int y = index / width;
+                    componentMinX = Math.Min(componentMinX, x);
+                    componentMinY = Math.Min(componentMinY, y);
+                    componentMaxX = Math.Max(componentMaxX, x);
+                    componentMaxY = Math.Max(componentMaxY, y);
+                    touchesBorder |= x == 0 || y == 0 || x == width - 1 || y == height - 1;
+
+                    for (int dy = -1; dy <= 1; ++dy)
+                    {
+                        for (int dx = -1; dx <= 1; ++dx)
+                        {
+                            if (dx == 0 && dy == 0)
+                                continue;
+
+                            int nx = x + dx;
+                            int ny = y + dy;
+                            if (nx < 0 || ny < 0 || nx >= width || ny >= height)
+                                continue;
+
+                            int next = ny * width + nx;
+                            if (visited[next] || land[next] < landThreshold)
+                                continue;
+
+                            visited[next] = true;
+                            queue[tail++] = next;
+                        }
+                    }
+                }
+
+                if (tail >= Math.Max(8, pixelCount / 20000))
+                    components.Add(new LandComponentBounds(componentMinX, componentMinY, componentMaxX, componentMaxY, tail, touchesBorder));
+            }
+
+            if (components.Count == 0)
+                return false;
+
+            int bestIndex = -1;
+            float bestScore = -1f;
+            for (int i = 0; i < components.Count; ++i)
+            {
+                LandComponentBounds component = components[i];
+                float borderPenalty = component.TouchesBorder ? 0.18f : 1f;
+                float areaScore = component.Area * borderPenalty;
+                if (bestIndex < 0 || areaScore > bestScore)
+                {
+                    bestIndex = i;
+                    bestScore = areaScore;
+                }
+            }
+
+            if (bestIndex < 0)
+                return false;
+
+            LandComponentBounds best = components[bestIndex];
+            minX = best.MinX;
+            minY = best.MinY;
+            maxX = best.MaxX;
+            maxY = best.MaxY;
+
+            int bestWidth = Math.Max(1, best.MaxX - best.MinX + 1);
+            int bestHeight = Math.Max(1, best.MaxY - best.MinY + 1);
+            int islandAreaLimit = Math.Max(10, best.Area / 120);
+            int marginX = Math.Max(3, bestWidth / 7);
+            int marginY = Math.Max(3, bestHeight / 7);
+
+            for (int i = 0; i < components.Count; ++i)
+            {
+                if (i == bestIndex)
+                    continue;
+
+                LandComponentBounds component = components[i];
+                if (component.Area < islandAreaLimit || component.TouchesBorder)
+                    continue;
+
+                bool nearMainLand =
+                    component.MaxX >= best.MinX - marginX &&
+                    component.MinX <= best.MaxX + marginX &&
+                    component.MaxY >= best.MinY - marginY &&
+                    component.MinY <= best.MaxY + marginY;
+                if (!nearMainLand)
+                    continue;
+
+                minX = Math.Min(minX, component.MinX);
+                minY = Math.Min(minY, component.MinY);
+                maxX = Math.Max(maxX, component.MaxX);
+                maxY = Math.Max(maxY, component.MaxY);
+            }
+
+            return best.Area >= Math.Max(32, pixelCount / 5000);
         }
 
         private static float[] BuildHardLandMask(float[] land)
@@ -1856,9 +1982,9 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             float max = Math.Max(r, Math.Max(g, b));
             float min = Math.Min(r, Math.Min(g, b));
             float saturation = max <= 0.001f ? 0f : (max - min) / max;
-            float water = ClassifyMapWater(color);
+            float water = ClassifyPhysicalMapWater(color);
 
-            if (water > 0.48f)
+            if (water > 0.25f)
                 return 0f;
             if (luma > 0.94f && saturation < 0.16f)
                 return 0f;
@@ -1880,8 +2006,73 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 * (1f - SmoothStep(0.02f, 0.20f, b - Math.Max(r, g) * 0.92f));
 
             float land = Math.Max(Math.Max(greenLand, tanLand), Math.Max(brownLand, genericPhysicalLand * 0.72f));
-            land *= 1f - SmoothStep(0.22f, 0.55f, water);
+            land *= 1f - SmoothStep(0.08f, 0.34f, water);
             return Clamp(land * alpha, 0f, 1f);
+        }
+
+        private static float ClassifyPhysicalMapWater(System.Drawing.Color color)
+        {
+            float r = color.R / 255f;
+            float g = color.G / 255f;
+            float b = color.B / 255f;
+            float luma = r * 0.2126f + g * 0.7152f + b * 0.0722f;
+            float max = Math.Max(r, Math.Max(g, b));
+            float min = Math.Min(r, Math.Min(g, b));
+            float saturation = max <= 0.001f ? 0f : (max - min) / max;
+            float water = ClassifyMapWater(color);
+
+            float cyanBlue = Math.Min(g, b) - r * 0.84f;
+            water = Math.Max(water,
+                SmoothStep(0.02f, 0.18f, cyanBlue) *
+                SmoothStep(0.16f, 0.76f, Math.Min(g, b)));
+
+            if (b > r * 1.02f && g > r * 1.02f && b > 0.28f && g > 0.25f)
+                water = Math.Max(water, 0.86f);
+            if (luma > 0.64f && Math.Min(g, b) > 0.58f && r < Math.Min(g, b) * 0.98f)
+                water = Math.Max(water, 0.94f);
+            if (saturation < 0.08f && luma > 0.90f)
+                water = Math.Max(water, 0.80f);
+
+            return Clamp(water, 0f, 1f);
+        }
+
+        private static float ClassifyPhysicalMapRelief(System.Drawing.Color color)
+        {
+            float alpha = color.A / 255f;
+            if (alpha < 0.05f)
+                return 0f;
+
+            float r = color.R / 255f;
+            float g = color.G / 255f;
+            float b = color.B / 255f;
+            float luma = r * 0.2126f + g * 0.7152f + b * 0.0722f;
+            float max = Math.Max(r, Math.Max(g, b));
+            float min = Math.Min(r, Math.Min(g, b));
+            float saturation = max <= 0.001f ? 0f : (max - min) / max;
+            float water = ClassifyPhysicalMapWater(color);
+
+            if (water > 0.25f)
+                return 0f;
+
+            float vegetation = SmoothStep(0.015f, 0.20f, g - Math.Max(r, b) * 0.72f);
+            float palePlain = SmoothStep(0.60f, 0.86f, luma) * SmoothStep(0.06f, 0.32f, saturation);
+            float tanHill = SmoothStep(0.02f, 0.26f, (r + g) * 0.5f - b)
+                * SmoothStep(0.32f, 0.78f, r);
+            float brownMountain = SmoothStep(0.04f, 0.30f, r - b)
+                * SmoothStep(0.01f, 0.20f, r - g * 0.72f)
+                * SmoothStep(0.20f, 0.72f, luma);
+            float darkRidge = SmoothStep(0.22f, 0.58f, saturation)
+                * SmoothStep(0.58f, 0.18f, luma)
+                * SmoothStep(0.02f, 0.22f, r - b);
+
+            float relief = 0.10f;
+            relief = Math.Max(relief, 0.16f + vegetation * 0.10f);
+            relief = Math.Max(relief, 0.28f + palePlain * 0.16f);
+            relief = Math.Max(relief, 0.36f + tanHill * 0.28f);
+            relief = Math.Max(relief, 0.58f + brownMountain * 0.34f);
+            relief = Math.Max(relief, 0.74f + darkRidge * 0.22f);
+
+            return Clamp(relief * alpha, 0f, 1f);
         }
 
         private static float ClassifyMapWater(System.Drawing.Color color)
@@ -1957,7 +2148,18 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 return;
             }
 
-            if (style == TerrainStyle.TropicalIsland || style == TerrainStyle.RingIsland || style == TerrainStyle.Archipelago || style == TerrainStyle.ImageMap)
+            if (style == TerrainStyle.ImageMap)
+            {
+                double water = recipe.WaterHeight > 0f ? recipe.WaterHeight : settings.WaterHeight;
+                double low = water + Math.Max(0.35, m_imageTerrainMinLandHeight * 0.85);
+                double high = water + Math.Max(low - water + 1.0, m_imageTerrainMaxLandHeight * 0.58);
+
+                settings.Elevation1NW = settings.Elevation1NE = settings.Elevation1SE = settings.Elevation1SW = low;
+                settings.Elevation2NW = settings.Elevation2NE = settings.Elevation2SE = settings.Elevation2SW = high;
+                return;
+            }
+
+            if (style == TerrainStyle.TropicalIsland || style == TerrainStyle.RingIsland || style == TerrainStyle.Archipelago)
             {
                 settings.Elevation1NW = settings.Elevation1NE = settings.Elevation1SE = settings.Elevation1SW = 20.5;
                 settings.Elevation2NW = settings.Elevation2NE = settings.Elevation2SE = settings.Elevation2SW = 42.0;
@@ -2015,14 +2217,16 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             land = Math.Max(land, landCoverage);
             float relief = image.SampleRelief(u, v, targetAspect);
 
-            float waterNoise = Math.Abs(FractalNoise(x * 0.012f, y * 0.012f, 23003));
+            float waterNoise = recipe.PhysicalMap ? 0f : Math.Abs(FractalNoise(x * 0.012f, y * 0.012f, 23003));
             float seaDepth = Math.Max(28f, m_imageTerrainSeaDepth * 6f);
             float seaHeight = water - seaDepth * (0.96f + waterNoise * 0.04f);
             if (!isLand)
                 return ClampTerrainHeight(seaHeight);
 
-            float hillNoise = FractalNoise(x * 0.014f, y * 0.014f, 23029) * 0.52f
-                + FractalNoise(x * 0.035f, y * 0.035f, 23041) * 0.18f;
+            float hillNoise = recipe.PhysicalMap
+                ? 0f
+                : FractalNoise(x * 0.014f, y * 0.014f, 23029) * 0.52f
+                    + FractalNoise(x * 0.035f, y * 0.035f, 23041) * 0.18f;
             float inland = SmoothStep(0.48f, 0.92f, land);
             float landRise = m_imageTerrainMinLandHeight + (m_imageTerrainMaxLandHeight - m_imageTerrainMinLandHeight) * relief;
             float landHeight = water + Lerp(0.35f, landRise, inland) + hillNoise * Math.Max(0.05f, inland);
@@ -2717,6 +2921,26 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             Archipelago,
             Canyon,
             ImageMap
+        }
+
+        private struct LandComponentBounds
+        {
+            public readonly int MinX;
+            public readonly int MinY;
+            public readonly int MaxX;
+            public readonly int MaxY;
+            public readonly int Area;
+            public readonly bool TouchesBorder;
+
+            public LandComponentBounds(int minX, int minY, int maxX, int maxY, int area, bool touchesBorder)
+            {
+                MinX = minX;
+                MinY = minY;
+                MaxX = maxX;
+                MaxY = maxY;
+                Area = area;
+                TouchesBorder = touchesBorder;
+            }
         }
 
         private class TerrainRecipe
