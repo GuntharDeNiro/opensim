@@ -50,7 +50,6 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
     public class TextBuildModule : INonSharedRegionModule
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
-        private const float ImageTerrainWaterHeight = 21.0f;
         private const float ImageTerrainCoastThreshold = 0.50f;
         private const float ImageTerrainBorderShelfFraction = 0.12f;
 
@@ -205,8 +204,12 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
 
             if (chat.Scene != null && !object.ReferenceEquals(chat.Scene, m_scene))
                 return false;
+            if (chat.Scene != null && chat.Scene.RegionInfo.RegionID != m_scene.RegionInfo.RegionID)
+                return false;
 
             if (client.Scene != null && !object.ReferenceEquals(client.Scene, m_scene))
+                return false;
+            if (client.Scene != null && client.Scene.RegionInfo.RegionID != m_scene.RegionInfo.RegionID)
                 return false;
 
             if (client.SceneAgent == null || client.SceneAgent.IsChildAgent || client.SceneAgent.IsInTransit)
@@ -220,6 +223,8 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 return false;
 
             if (!object.ReferenceEquals(sp.ControllingClient, client))
+                return false;
+            if (sp.Scene == null || sp.Scene.RegionInfo.RegionID != m_scene.RegionInfo.RegionID)
                 return false;
 
             if (!IsInsideRegion(sp.AbsolutePosition))
@@ -413,17 +418,37 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             if (!wantsImageTerrain)
                 return false;
 
+            bool physicalMap = lower.Contains("fisica")
+                || lower.Contains("physical")
+                || lower.Contains("cartina")
+                || lower.Contains("geografica")
+                || lower.Contains("geographic")
+                || lower.Contains("topographic")
+                || lower.Contains("topografica")
+                || lower.Contains("relief")
+                || lower.Contains("rilievo")
+                || lower.Contains("cartografia")
+                || lower.Contains("italia")
+                || lower.Contains("italy")
+                || lower.Contains("italian")
+                || lower.Contains("penisola")
+                || lower.Contains("sardegna")
+                || lower.Contains("sardinia");
+
             string name;
             if (lower.Contains("sardegna") || lower.Contains("sardinia"))
-                name = "Sardinia image terrain";
+                name = physicalMap ? "Sardinia physical map terrain" : "Sardinia image terrain";
             else if (lower.Contains("italia") || lower.Contains("italy") || lower.Contains("italian") || lower.Contains("penisola"))
-                name = "Italy image terrain";
+                name = physicalMap ? "Italy physical map terrain" : "Italy image terrain";
+            else if (physicalMap)
+                name = "physical map terrain";
             else
                 name = "image-mapped terrain";
 
             recipe = new TerrainRecipe(name, TerrainStyle.ImageMap)
             {
-                SourceTexture = textureID
+                SourceTexture = textureID,
+                PhysicalMap = physicalMap
             };
             return true;
         }
@@ -996,6 +1021,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             if (client == null || sp == null || m_scene == null ||
                 sp.IsChildAgent || sp.IsInTransit || sp.IsDeleted ||
                 !object.ReferenceEquals(sp.Scene, m_scene) ||
+                sp.Scene.RegionInfo.RegionID != m_scene.RegionInfo.RegionID ||
                 !object.ReferenceEquals(sp.ControllingClient, client) ||
                 !IsInsideRegion(sp.AbsolutePosition))
             {
@@ -1021,17 +1047,18 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
 
             if (recipe.Style == TerrainStyle.ImageMap)
             {
-                recipe.ImageData = LoadImageTerrainData(recipe.SourceTexture);
+                recipe.ImageData = LoadImageTerrainData(recipe.SourceTexture, recipe.PhysicalMap);
                 if (recipe.ImageData == null)
                 {
                     SendReply(client, string.Format("TextBuild: could not decode cartography texture {0} as terrain source.", recipe.SourceTexture));
                     return;
                 }
 
-                ApplyImageTerrainWaterHeight();
+                recipe.WaterHeight = (float)m_scene.RegionInfo.RegionSettings.WaterHeight;
             }
 
-            ApplyTerrainTextureHeights(recipe);
+            if (recipe.Style != TerrainStyle.ImageMap)
+                ApplyTerrainTextureHeights(recipe);
 
             for (int x = 0; x < width; x++)
             {
@@ -1053,8 +1080,26 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             m_scene.EventManager.TriggerTerrainTainted();
             m_scene.EventManager.TriggerTerrainCheckUpdates();
             m_scene.EventManager.TriggerTerrainUpdate();
+            if (recipe.Style == TerrainStyle.ImageMap)
+                SendImageTerrainRegionHandshake();
 
             SendReply(client, string.Format("TextBuild: shaped terrain as {0}.", recipe.GetDescription()));
+        }
+
+        private void SendImageTerrainRegionHandshake()
+        {
+            try
+            {
+                IEstateModule estateModule = m_scene.RequestModuleInterface<IEstateModule>();
+                if (estateModule != null)
+                    estateModule.sendRegionHandshakeToAll();
+                else
+                    m_scene.ForEachClient(remoteClient => remoteClient.SendRegionHandshake());
+            }
+            catch (Exception e)
+            {
+                m_log.DebugFormat("[TEXT BUILD]: Failed to resend image terrain region handshake: {0}", e.Message);
+            }
         }
 
         private void SmoothImageTerrainHeightmap(int width, int height, int passes, ImageTerrainData image, float water)
@@ -1128,21 +1173,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             }
         }
 
-        private void ApplyImageTerrainWaterHeight()
-        {
-            if (Math.Abs(m_scene.RegionInfo.RegionSettings.WaterHeight - ImageTerrainWaterHeight) <= 0.001)
-                return;
-
-            m_scene.EventManager.TriggerRequestChangeWaterHeight(ImageTerrainWaterHeight);
-            if (Math.Abs(m_scene.RegionInfo.RegionSettings.WaterHeight - ImageTerrainWaterHeight) > 0.001)
-            {
-                m_scene.RegionInfo.RegionSettings.WaterHeight = ImageTerrainWaterHeight;
-                if (m_scene.PhysicsScene != null)
-                    m_scene.PhysicsScene.SetWaterLevel(ImageTerrainWaterHeight);
-            }
-        }
-
-        private ImageTerrainData LoadImageTerrainData(UUID textureID)
+        private ImageTerrainData LoadImageTerrainData(UUID textureID, bool physicalMap)
         {
             if (textureID.IsZero())
                 return null;
@@ -1161,7 +1192,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                     if (bitmap == null || bitmap.Width <= 0 || bitmap.Height <= 0)
                         return null;
 
-                    return CreateImageTerrainData(textureID, bitmap, m_imageTerrainFitLandToRegion, m_imageTerrainSmoothPasses);
+                    return CreateImageTerrainData(textureID, bitmap, m_imageTerrainFitLandToRegion, m_imageTerrainSmoothPasses, physicalMap);
                 }
             }
             catch (Exception e)
@@ -1207,7 +1238,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             }
         }
 
-        private static ImageTerrainData CreateImageTerrainData(UUID textureID, System.Drawing.Bitmap bitmap, bool fitLandToRegion, int smoothPasses)
+        private static ImageTerrainData CreateImageTerrainData(UUID textureID, System.Drawing.Bitmap bitmap, bool fitLandToRegion, int smoothPasses, bool physicalMap)
         {
             int width = bitmap.Width;
             int height = bitmap.Height;
@@ -1220,21 +1251,26 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 {
                     System.Drawing.Color color = bitmap.GetPixel(x, y);
                     int index = y * width + x;
-                    land[index] = ClassifyMapLand(color);
+                    land[index] = physicalMap ? ClassifyPhysicalMapLand(color) : ClassifyMapLand(color);
                     relief[index] = ClassifyMapRelief(color);
                 }
             }
 
             RefineImageLandMask(width, height, land);
-            if (fitLandToRegion)
+            if (fitLandToRegion && !physicalMap)
                 ClipBorderLandShelves(width, height, land);
 
             int minX = 0;
             int minY = 0;
             int maxX = width - 1;
             int maxY = height - 1;
-            bool foundBounds = fitLandToRegion &&
-                TryFindDominantLandBounds(width, height, land, out minX, out minY, out maxX, out maxY);
+            bool foundBounds = false;
+            if (fitLandToRegion)
+            {
+                foundBounds = physicalMap
+                    ? TryFindAnyLandBounds(width, height, land, out minX, out minY, out maxX, out maxY)
+                    : TryFindDominantLandBounds(width, height, land, out minX, out minY, out maxX, out maxY);
+            }
 
             if (!foundBounds)
             {
@@ -1802,6 +1838,65 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             if (luma < 0.055f && saturation < 0.35f)
                 return 0f;
 
+            float water = ClassifyMapWater(color);
+
+            return Clamp((1f - water) * alpha, 0f, 1f);
+        }
+
+        private static float ClassifyPhysicalMapLand(System.Drawing.Color color)
+        {
+            float alpha = color.A / 255f;
+            if (alpha < 0.05f)
+                return 0f;
+
+            float r = color.R / 255f;
+            float g = color.G / 255f;
+            float b = color.B / 255f;
+            float luma = r * 0.2126f + g * 0.7152f + b * 0.0722f;
+            float max = Math.Max(r, Math.Max(g, b));
+            float min = Math.Min(r, Math.Min(g, b));
+            float saturation = max <= 0.001f ? 0f : (max - min) / max;
+            float water = ClassifyMapWater(color);
+
+            if (water > 0.48f)
+                return 0f;
+            if (luma > 0.94f && saturation < 0.16f)
+                return 0f;
+            if (luma < 0.075f && saturation < 0.55f)
+                return 0f;
+            if (saturation < 0.065f && luma < 0.88f)
+                return 0f;
+
+            float greenLand = SmoothStep(0.015f, 0.22f, g - Math.Max(r, b) * 0.72f)
+                * SmoothStep(0.18f, 0.78f, g);
+            float tanLand = SmoothStep(0.025f, 0.26f, (r + g) * 0.5f - b)
+                * SmoothStep(0.20f, 0.86f, r)
+                * SmoothStep(0.16f, 0.84f, g);
+            float brownLand = SmoothStep(0.035f, 0.28f, r - b)
+                * SmoothStep(0.015f, 0.22f, g - b)
+                * SmoothStep(0.18f, 0.72f, luma);
+            float genericPhysicalLand = SmoothStep(0.09f, 0.30f, saturation)
+                * SmoothStep(0.12f, 0.88f, luma)
+                * (1f - SmoothStep(0.02f, 0.20f, b - Math.Max(r, g) * 0.92f));
+
+            float land = Math.Max(Math.Max(greenLand, tanLand), Math.Max(brownLand, genericPhysicalLand * 0.72f));
+            land *= 1f - SmoothStep(0.22f, 0.55f, water);
+            return Clamp(land * alpha, 0f, 1f);
+        }
+
+        private static float ClassifyMapWater(System.Drawing.Color color)
+        {
+            float alpha = color.A / 255f;
+            if (alpha < 0.05f)
+                return 1f;
+
+            float r = color.R / 255f;
+            float g = color.G / 255f;
+            float b = color.B / 255f;
+            float luma = r * 0.2126f + g * 0.7152f + b * 0.0722f;
+            float max = Math.Max(r, Math.Max(g, b));
+            float min = Math.Min(r, Math.Min(g, b));
+            float saturation = max <= 0.001f ? 0f : (max - min) / max;
             float blueDominance = b - Math.Max(r, g) * 0.92f;
             float cyanDominance = Math.Min(g, b) - r * 1.22f;
             float aquaLift = Math.Min(g, b) - r;
@@ -1822,7 +1917,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             if (luma < 0.045f)
                 water *= 0.35f;
 
-            return Clamp((1f - water) * alpha, 0f, 1f);
+            return Clamp(water * alpha, 0f, 1f);
         }
 
         private static float ClassifyMapRelief(System.Drawing.Color color)
@@ -1875,7 +1970,9 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
 
         private float GenerateTerrainHeight(TerrainRecipe recipe, int x, int y, int width, int height)
         {
-            float water = (float)m_scene.RegionInfo.RegionSettings.WaterHeight;
+            float water = recipe.Style == TerrainStyle.ImageMap && recipe.WaterHeight > 0f
+                ? recipe.WaterHeight
+                : (float)m_scene.RegionInfo.RegionSettings.WaterHeight;
             float heightValue;
 
             if (recipe.Style == TerrainStyle.ImageMap)
@@ -1910,14 +2007,17 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             float u = width <= 1 ? 0.5f : (x + 0.5f) / width;
             float v = height <= 1 ? 0.5f : (y + 0.5f) / height;
             float targetAspect = height <= 0 ? 1f : width / (float)height;
-            bool isLand = image.IsLand(u, v, targetAspect);
+            float du = width <= 1 ? 1f : 1f / width;
+            float dv = height <= 1 ? 1f : 1f / height;
+            float landCoverage = image.SampleLandCoverage(u, v, du, dv, targetAspect);
+            bool isLand = landCoverage >= 0.50f || image.IsLand(u, v, targetAspect);
             float land = image.SampleLand(u, v, targetAspect);
+            land = Math.Max(land, landCoverage);
             float relief = image.SampleRelief(u, v, targetAspect);
 
-            float openWater = 1f - SmoothStep(0.04f, 0.50f, land);
             float waterNoise = Math.Abs(FractalNoise(x * 0.012f, y * 0.012f, 23003));
-            float seaDepth = Math.Max(12f, m_imageTerrainSeaDepth * 3f);
-            float seaHeight = water - seaDepth * (0.92f + waterNoise * 0.08f) * Math.Max(0.35f, openWater);
+            float seaDepth = Math.Max(28f, m_imageTerrainSeaDepth * 6f);
+            float seaHeight = water - seaDepth * (0.96f + waterNoise * 0.04f);
             if (!isLand)
                 return ClampTerrainHeight(seaHeight);
 
@@ -2626,6 +2726,8 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             public readonly float MeterValue;
             public UUID SourceTexture = UUID.Zero;
             public ImageTerrainData ImageData;
+            public bool PhysicalMap;
+            public float WaterHeight;
             public float HeightScale = 1f;
             public float Roughness = 1f;
             public string FlatAreaSide = string.Empty;
@@ -2671,7 +2773,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                     details.Add("custom low terrain texture");
 
                 if (!SourceTexture.IsZero())
-                    details.Add("cartography texture " + SourceTexture);
+                    details.Add((PhysicalMap ? "physical cartography texture " : "cartography texture ") + SourceTexture);
 
                 if (Operations.Count > 0)
                     details.Add(string.Format(CultureInfo.InvariantCulture, "{0} AI terrain operations", Operations.Count));
