@@ -1264,11 +1264,9 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             int maxX = width - 1;
             int maxY = height - 1;
             bool foundBounds = false;
-            if (fitLandToRegion)
+            if (fitLandToRegion && !physicalMap)
             {
-                foundBounds = physicalMap
-                    ? TryFindPhysicalMapBounds(width, height, land, out minX, out minY, out maxX, out maxY)
-                    : TryFindDominantLandBounds(width, height, land, out minX, out minY, out maxX, out maxY);
+                foundBounds = TryFindDominantLandBounds(width, height, land, out minX, out minY, out maxX, out maxY);
             }
 
             if (!foundBounds)
@@ -1326,133 +1324,6 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             }
 
             return count >= Math.Max(32, pixelCount / 5000);
-        }
-
-        private static bool TryFindPhysicalMapBounds(int width, int height, float[] land, out int minX, out int minY, out int maxX, out int maxY)
-        {
-            minX = width;
-            minY = height;
-            maxX = -1;
-            maxY = -1;
-
-            int pixelCount = width * height;
-            if (width <= 0 || height <= 0 || land == null || land.Length < pixelCount)
-                return false;
-
-            const float landThreshold = 0.50f;
-            bool[] visited = new bool[pixelCount];
-            int[] queue = new int[pixelCount];
-            List<LandComponentBounds> components = new List<LandComponentBounds>();
-
-            for (int i = 0; i < pixelCount; ++i)
-            {
-                if (visited[i] || land[i] < landThreshold)
-                    continue;
-
-                int head = 0;
-                int tail = 0;
-                int componentMinX = width;
-                int componentMinY = height;
-                int componentMaxX = -1;
-                int componentMaxY = -1;
-                bool touchesBorder = false;
-
-                visited[i] = true;
-                queue[tail++] = i;
-
-                while (head < tail)
-                {
-                    int index = queue[head++];
-                    int x = index % width;
-                    int y = index / width;
-                    componentMinX = Math.Min(componentMinX, x);
-                    componentMinY = Math.Min(componentMinY, y);
-                    componentMaxX = Math.Max(componentMaxX, x);
-                    componentMaxY = Math.Max(componentMaxY, y);
-                    touchesBorder |= x == 0 || y == 0 || x == width - 1 || y == height - 1;
-
-                    for (int dy = -1; dy <= 1; ++dy)
-                    {
-                        for (int dx = -1; dx <= 1; ++dx)
-                        {
-                            if (dx == 0 && dy == 0)
-                                continue;
-
-                            int nx = x + dx;
-                            int ny = y + dy;
-                            if (nx < 0 || ny < 0 || nx >= width || ny >= height)
-                                continue;
-
-                            int next = ny * width + nx;
-                            if (visited[next] || land[next] < landThreshold)
-                                continue;
-
-                            visited[next] = true;
-                            queue[tail++] = next;
-                        }
-                    }
-                }
-
-                if (tail >= Math.Max(8, pixelCount / 20000))
-                    components.Add(new LandComponentBounds(componentMinX, componentMinY, componentMaxX, componentMaxY, tail, touchesBorder));
-            }
-
-            if (components.Count == 0)
-                return false;
-
-            int bestIndex = -1;
-            float bestScore = -1f;
-            for (int i = 0; i < components.Count; ++i)
-            {
-                LandComponentBounds component = components[i];
-                float borderPenalty = component.TouchesBorder ? 0.18f : 1f;
-                float areaScore = component.Area * borderPenalty;
-                if (bestIndex < 0 || areaScore > bestScore)
-                {
-                    bestIndex = i;
-                    bestScore = areaScore;
-                }
-            }
-
-            if (bestIndex < 0)
-                return false;
-
-            LandComponentBounds best = components[bestIndex];
-            minX = best.MinX;
-            minY = best.MinY;
-            maxX = best.MaxX;
-            maxY = best.MaxY;
-
-            int bestWidth = Math.Max(1, best.MaxX - best.MinX + 1);
-            int bestHeight = Math.Max(1, best.MaxY - best.MinY + 1);
-            int islandAreaLimit = Math.Max(10, best.Area / 120);
-            int marginX = Math.Max(3, bestWidth / 7);
-            int marginY = Math.Max(3, bestHeight / 7);
-
-            for (int i = 0; i < components.Count; ++i)
-            {
-                if (i == bestIndex)
-                    continue;
-
-                LandComponentBounds component = components[i];
-                if (component.Area < islandAreaLimit || component.TouchesBorder)
-                    continue;
-
-                bool nearMainLand =
-                    component.MaxX >= best.MinX - marginX &&
-                    component.MinX <= best.MaxX + marginX &&
-                    component.MaxY >= best.MinY - marginY &&
-                    component.MinY <= best.MaxY + marginY;
-                if (!nearMainLand)
-                    continue;
-
-                minX = Math.Min(minX, component.MinX);
-                minY = Math.Min(minY, component.MinY);
-                maxX = Math.Max(maxX, component.MaxX);
-                maxY = Math.Max(maxY, component.MaxY);
-            }
-
-            return best.Area >= Math.Max(32, pixelCount / 5000);
         }
 
         private static float[] BuildHardLandMask(float[] land)
@@ -2921,26 +2792,6 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             Archipelago,
             Canyon,
             ImageMap
-        }
-
-        private struct LandComponentBounds
-        {
-            public readonly int MinX;
-            public readonly int MinY;
-            public readonly int MaxX;
-            public readonly int MaxY;
-            public readonly int Area;
-            public readonly bool TouchesBorder;
-
-            public LandComponentBounds(int minX, int minY, int maxX, int maxY, int area, bool touchesBorder)
-            {
-                MinX = minX;
-                MinY = minY;
-                MaxX = maxX;
-                MaxY = maxY;
-                Area = area;
-                TouchesBorder = touchesBorder;
-            }
         }
 
         private class TerrainRecipe
