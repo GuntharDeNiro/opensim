@@ -124,6 +124,11 @@ so additions are deliberate and testable instead of guessed from individual scri
   - Aligns `llGetParcelDetails` `PARCEL_DETAILS_PRIM_CAPACITY` and `PARCEL_DETAILS_PRIM_USED` with Second Life's same-owner simulator-wide semantics.
   - Adds an in-world parcel prim count auditor example for estate/rental/rules consoles.
 
+- Money transfer guard compatibility
+  - Tightens `llGiveMoney` to require a positive amount, owner-granted `PERMISSION_DEBIT`, a non-group-owned object and an avatar target before calling the money backend.
+  - Applies the same owner-granted debit and non-object target checks to `llTransferLindenDollars`.
+  - Adds an in-world guarded payout lab example for vendor, rental-refund and reward-console testing.
+
 ## Missing Or Backend-Limited After This Pass
 
 - True Second Life navmesh/pathfinding character simulation.

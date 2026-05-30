@@ -3555,18 +3555,47 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public LSL_Integer llGiveMoney(LSL_Key destination, LSL_Integer amount)
         {
-            if (m_item.PermsGranter.IsZero())
+            if (amount <= 0)
+            {
+                Error("llGiveMoney", "Amount must be greater than zero");
                 return 0;
+            }
 
-            if ((m_item.PermsMask & ScriptBaseClass.PERMISSION_DEBIT) == 0)
+            if (m_host.OwnerID.Equals(m_host.GroupID))
+            {
+                Error("llGiveMoney", "Group-owned objects cannot give money");
+                return 0;
+            }
+
+            if (m_item is null || m_item.PermsGranter.IsZero() ||
+                    (m_item.PermsMask & ScriptBaseClass.PERMISSION_DEBIT) == 0)
             {
                 Error("llGiveMoney", "No permissions to give money");
+                return 0;
+            }
+
+            if (!m_item.PermsGranter.Equals(m_host.OwnerID))
+            {
+                Error("llGiveMoney", "PERMISSION_DEBIT must be granted by the object owner");
                 return 0;
             }
 
             if (!UUID.TryParse(destination, out UUID toID))
             {
                 Error("llGiveMoney", "Bad key in llGiveMoney");
+                return 0;
+            }
+
+            if (World.GetSceneObjectPart(toID) is not null)
+            {
+                Error("llGiveMoney", "Destination must be an avatar");
+                return 0;
+            }
+
+            if (!World.TryGetScenePresence(toID, out _) &&
+                    (m_userAccountService is null || m_userAccountService.GetUserAccount(RegionScopeID, toID) is null))
+            {
+                Error("llGiveMoney", "Destination avatar not found");
                 return 0;
             }
 
@@ -3577,14 +3606,17 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 return 0;
             }
 
-            void act(string _)
+            bool result = money.ObjectGiveMoney(m_host.ParentGroup.RootPart.UUID, m_host.ParentGroup.RootPart.OwnerID,
+                    toID, amount, UUID.Zero, out string reason);
+
+            if (!result)
             {
-                money.ObjectGiveMoney(m_host.ParentGroup.RootPart.UUID, m_host.ParentGroup.RootPart.OwnerID,
-                                        toID, amount, UUID.Zero, out _);
+                if (!string.IsNullOrEmpty(reason))
+                    Error("llGiveMoney", reason);
+                return ScriptBaseClass.FALSE;
             }
 
-            m_AsyncCommands.DataserverPlugin.RegisterRequest(m_host.LocalId, m_item.ItemID, act);
-            return 0;
+            return ScriptBaseClass.TRUE;
         }
 
         public void llMakeExplosion(int particles, double scale, double vel, double lifetime, double arc, string texture, LSL_Vector offset)
@@ -19674,7 +19706,19 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     break;
                 }
 
+                if (!m_item.PermsGranter.Equals(m_host.OwnerID))
+                {
+                    replydata = "MISSING_PERMISSION_DEBIT";
+                    break;
+                }
+
                 if (!UUID.TryParse(destination, out toID))
+                {
+                    replydata = "INVALID_AGENT";
+                    break;
+                }
+
+                if (World.GetSceneObjectPart(toID) is not null)
                 {
                     replydata = "INVALID_AGENT";
                     break;

@@ -78,6 +78,9 @@ The scripts use:
 - `llGetParcelPrimCount`
 - `llGetParcelDetails`
 - `llGetParcelPrimOwners`
+- `llGiveMoney`
+- `llTransferLindenDollars`
+- `PERMISSION_DEBIT`
 - `PARCEL_COUNT_TOTAL`
 - `PARCEL_COUNT_OWNER`
 - `PARCEL_COUNT_GROUP`
@@ -115,6 +118,7 @@ The scripts use:
 - `19_object_details_diagnostics_console.lsl`: complex object/avatar diagnostics console using `llGetObjectDetails` cost, render-weight, hover-height, selection, provenance, hover-text and damage readback.
 - `20_identity_lookup_console.lsl`: complex identity diagnostics console using synchronous and asynchronous name, username, display-name and key lookups.
 - `21_parcel_prim_count_auditor.lsl`: parcel audit console using local and same-owner simulator-wide `llGetParcelPrimCount`, `llGetParcelDetails` capacity/used values and owner/count breakdowns.
+- `22_money_transfer_guard_lab.lsl`: debit-permission payout console demonstrating guarded `llGiveMoney` and `llTransferLindenDollars` flows.
 
 Stock OpenSim may fail to compile or run these scripts because Experience events,
 KVP functions, scripted-only sit flags and newer Second Life LSL compatibility
