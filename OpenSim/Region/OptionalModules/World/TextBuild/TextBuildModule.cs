@@ -389,59 +389,17 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             if (!TryExtractUUID(request, out UUID textureID))
                 return false;
 
-            bool wantsImageTerrain =
-                lower.Contains("cartografia")
-                || lower.Contains("mappa reale")
-                || lower.Contains("mappa")
-                || lower.Contains("real map")
-                || lower.Contains("map")
-                || lower.Contains("world map")
-                || lower.Contains("satellite")
-                || lower.Contains("aerial")
-                || lower.Contains("texture")
-                || lower.Contains("uid")
-                || lower.Contains("uuid")
-                || lower.Contains("picture")
-                || lower.Contains("immagine")
-                || lower.Contains("heightmap")
-                || lower.Contains("terrain")
-                || lower.Contains("terreno")
-                || lower.Contains("coastline")
-                || lower.Contains("costa")
-                || lower.Contains("italia")
-                || lower.Contains("italy")
-                || lower.Contains("italian")
-                || lower.Contains("penisola")
-                || lower.Contains("sardegna")
-                || lower.Contains("sardinia");
-
-            if (!wantsImageTerrain)
-                return false;
-
-            bool physicalMap = lower.Contains("fisica")
-                || lower.Contains("physical")
-                || lower.Contains("cartina")
-                || lower.Contains("geografica")
-                || lower.Contains("geographic")
-                || lower.Contains("topographic")
-                || lower.Contains("topografica")
-                || lower.Contains("relief")
-                || lower.Contains("rilievo")
-                || lower.Contains("cartografia")
-                || lower.Contains("italia")
-                || lower.Contains("italy")
-                || lower.Contains("italian")
-                || lower.Contains("penisola")
-                || lower.Contains("sardegna")
-                || lower.Contains("sardinia");
+            bool physicalMap = !lower.Contains("legacy image map")
+                && !lower.Contains("legacy imagemap")
+                && !lower.Contains("silhouette terrain");
 
             string name;
             if (lower.Contains("sardegna") || lower.Contains("sardinia"))
-                name = physicalMap ? "Sardinia physical map terrain" : "Sardinia image terrain";
+                name = physicalMap ? "Sardinia heightmap terrain" : "Sardinia image terrain";
             else if (lower.Contains("italia") || lower.Contains("italy") || lower.Contains("italian") || lower.Contains("penisola"))
-                name = physicalMap ? "Italy physical map terrain" : "Italy image terrain";
+                name = physicalMap ? "Italy heightmap terrain" : "Italy image terrain";
             else if (physicalMap)
-                name = "physical map terrain";
+                name = "physical heightmap terrain";
             else
                 name = "image-mapped terrain";
 
