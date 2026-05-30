@@ -116,6 +116,7 @@ so additions are deliberate and testable instead of guessed from individual scri
 - Identity and name lookup compatibility
   - Improves `llKey2Name`, `llGetUsername` and `llGetDisplayName` to use cached local account data when the avatar is not currently in-region.
   - Improves `llName2Key` to resolve local cached account names synchronously before falling back to `NULL_KEY`.
+  - Aligns `llGetAgentLanguage` with Second Life visibility rules by requiring an in-region root avatar and public language sharing instead of returning a global default.
   - Adds an in-world identity lookup example covering synchronous and dataserver-based name/key lookups.
 
 - Parcel prim count compatibility

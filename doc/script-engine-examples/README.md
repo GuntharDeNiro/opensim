@@ -75,6 +75,7 @@ The scripts use:
 - `llRequestUsername`
 - `llRequestDisplayName`
 - `llRequestUserKey`
+- `llGetAgentLanguage`
 - `llGetParcelPrimCount`
 - `llGetParcelDetails`
 - `llGetParcelPrimOwners`
@@ -128,6 +129,7 @@ The scripts use:
 - `21_parcel_prim_count_auditor.lsl`: parcel audit console using local and same-owner simulator-wide `llGetParcelPrimCount`, `llGetParcelDetails` capacity/used values and owner/count breakdowns.
 - `22_money_transfer_guard_lab.lsl`: debit-permission payout console demonstrating guarded `llGiveMoney` and `llTransferLindenDollars` flows.
 - `23_script_memory_profiler_lab.lsl`: memory/profiler console demonstrating real YEngine heap used/free/limit/max reporting and active memory-limit enforcement.
+- `24_agent_language_privacy_panel.lsl`: avatar language scanner demonstrating SL-style in-region and public-language checks for `llGetAgentLanguage`.
 
 Stock OpenSim may fail to compile or run these scripts because Experience events,
 KVP functions, scripted-only sit flags and newer Second Life LSL compatibility

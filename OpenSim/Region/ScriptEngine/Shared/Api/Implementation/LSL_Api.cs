@@ -7725,19 +7725,33 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public LSL_String llGetAgentLanguage(LSL_Key id)
         {
-            // This should only return a value if the avatar is in the same region, but eh. idc.
+            if (!UUID.TryParse(id, out UUID key) || key.IsZero())
+                return LSL_String.Empty;
+
+            ScenePresence presence = World.GetScenePresence(key);
+            if (presence is null || presence.IsChildAgent)
+                return LSL_String.Empty;
+
             if (World.AgentPreferencesService == null)
+                return LSL_String.Empty;
+
+            try
             {
-                Error("llGetAgentLanguage", "No AgentPreferencesService present");
+                AgentPrefs prefs = World.AgentPreferencesService.GetAgentPreferences(key);
+                if (prefs is null || !prefs.LanguageIsPublic || string.IsNullOrWhiteSpace(prefs.Language))
+                    return LSL_String.Empty;
+
+                string language = prefs.Language.Trim();
+                int lineBreak = language.IndexOfAny(new[] { '\r', '\n' });
+                if (lineBreak >= 0)
+                    language = language[..lineBreak].Trim();
+
+                return string.IsNullOrEmpty(language) ? LSL_String.Empty : new LSL_String(language);
             }
-            else
+            catch
             {
-                if (UUID.TryParse(id, out UUID key) && key.IsNotZero())
-                {
-                    return new LSL_String(World.AgentPreferencesService.GetLang(key));
-                }
+                return LSL_String.Empty;
             }
-            return new LSL_String("en-us");
         }
         /// <summary>
         /// http://wiki.secondlife.com/wiki/LlGetAgentList
