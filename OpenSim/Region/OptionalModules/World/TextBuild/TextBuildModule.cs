@@ -52,6 +52,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
         private const float ImageTerrainWaterHeight = 21.0f;
         private const float ImageTerrainCoastThreshold = 0.50f;
+        private const float ImageTerrainBorderShelfFraction = 0.12f;
 
         private Scene m_scene;
         private bool m_enabled;
@@ -1058,8 +1059,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 {
                     float u = width <= 1 ? 0.5f : (x + 0.5f) / width;
                     float v = height <= 1 ? 0.5f : (y + 0.5f) / height;
-                    float coverage = image == null ? 0f : image.SampleLandCoverage(u, v, 1f / width, 1f / height, targetAspect);
-                    landMask[y * width + x] = coverage >= ImageTerrainCoastThreshold;
+                    landMask[y * width + x] = image != null && image.IsLand(u, v, targetAspect);
                     current[y * width + x] = m_scene.Heightmap[x, y];
                 }
             }
@@ -1212,6 +1212,8 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             }
 
             RefineImageLandMask(width, height, land);
+            if (fitLandToRegion)
+                ClipBorderLandShelves(width, height, land);
 
             int minX = 0;
             int minY = 0;
@@ -1238,9 +1240,9 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 maxY = Math.Min(height - 1, maxY + padY);
             }
 
-            float[] coastLand = (float[])land.Clone();
+            float[] coastLand = BuildHardLandMask(land);
 
-            land = SmoothMapValues(land, width, height, Math.Min(3, smoothPasses));
+            land = SmoothMapValues((float[])coastLand.Clone(), width, height, Math.Min(3, smoothPasses));
             relief = SmoothMapValues(relief, width, height, smoothPasses);
 
             return new ImageTerrainData(textureID, width, height, land, relief, coastLand, minX, minY, maxX, maxY);
@@ -1276,6 +1278,18 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             }
 
             return count >= Math.Max(32, pixelCount / 5000);
+        }
+
+        private static float[] BuildHardLandMask(float[] land)
+        {
+            if (land == null)
+                return null;
+
+            float[] mask = new float[land.Length];
+            for (int i = 0; i < land.Length; ++i)
+                mask[i] = land[i] >= ImageTerrainCoastThreshold ? 1f : 0f;
+
+            return mask;
         }
 
         private static void RefineImageLandMask(int width, int height, float[] land)
@@ -1329,6 +1343,152 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
 
             FillSmallInteriorWaterGaps(width, height, pixelCount, land, sea, waterThreshold, queue);
             RemoveSmallLandSpecks(width, height, pixelCount, land, waterThreshold, queue);
+        }
+
+        private static void ClipBorderLandShelves(int width, int height, float[] land)
+        {
+            int pixelCount = width * height;
+            if (width <= 0 || height <= 0 || land == null || land.Length < pixelCount)
+                return;
+
+            int clipDepth = Math.Max(3, (int)(Math.Min(width, height) * ImageTerrainBorderShelfFraction));
+            bool[] visited = new bool[pixelCount];
+            bool[] remove = new bool[pixelCount];
+            int[] queue = new int[pixelCount];
+            int[] depth = new int[pixelCount];
+            int head = 0;
+            int tail = 0;
+
+            void EnqueueBorderLand(int index, int nextDepth)
+            {
+                if (index < 0 || index >= pixelCount || visited[index] || land[index] < ImageTerrainCoastThreshold)
+                    return;
+
+                visited[index] = true;
+                queue[tail] = index;
+                depth[tail] = nextDepth;
+                tail++;
+            }
+
+            for (int x = 0; x < width; ++x)
+            {
+                EnqueueBorderLand(x, 0);
+                EnqueueBorderLand((height - 1) * width + x, 0);
+            }
+
+            for (int y = 1; y < height - 1; ++y)
+            {
+                EnqueueBorderLand(y * width, 0);
+                EnqueueBorderLand(y * width + width - 1, 0);
+            }
+
+            while (head < tail)
+            {
+                int index = queue[head];
+                int currentDepth = depth[head++];
+                if (currentDepth > clipDepth)
+                    continue;
+
+                remove[index] = true;
+                int x = index % width;
+                int y = index / width;
+                int nextDepth = currentDepth + 1;
+
+                if (nextDepth <= clipDepth)
+                {
+                    if (x > 0)
+                        EnqueueBorderLand(index - 1, nextDepth);
+                    if (x + 1 < width)
+                        EnqueueBorderLand(index + 1, nextDepth);
+                    if (y > 0)
+                        EnqueueBorderLand(index - width, nextDepth);
+                    if (y + 1 < height)
+                        EnqueueBorderLand(index + width, nextDepth);
+                }
+            }
+
+            for (int i = 0; i < pixelCount; ++i)
+            {
+                if (remove[i])
+                    land[i] = 0f;
+            }
+
+            RemoveLargeBorderShelfComponents(width, height, pixelCount, land, clipDepth, queue);
+            RemoveSmallLandSpecks(width, height, pixelCount, land, ImageTerrainCoastThreshold, queue);
+        }
+
+        private static void RemoveLargeBorderShelfComponents(int width, int height, int pixelCount, float[] land, int clipDepth, int[] queue)
+        {
+            bool[] visited = new bool[pixelCount];
+            int edgeZone = Math.Max(clipDepth * 2, Math.Min(width, height) / 8);
+
+            for (int i = 0; i < pixelCount; ++i)
+            {
+                if (visited[i] || land[i] < ImageTerrainCoastThreshold)
+                    continue;
+
+                int head = 0;
+                int tail = 0;
+                int minX = width;
+                int minY = height;
+                int maxX = -1;
+                int maxY = -1;
+                visited[i] = true;
+                queue[tail++] = i;
+
+                while (head < tail)
+                {
+                    int index = queue[head++];
+                    int x = index % width;
+                    int y = index / width;
+                    minX = Math.Min(minX, x);
+                    minY = Math.Min(minY, y);
+                    maxX = Math.Max(maxX, x);
+                    maxY = Math.Max(maxY, y);
+
+                    void EnqueueLand(int next)
+                    {
+                        if (next < 0 || next >= pixelCount || visited[next] || land[next] < ImageTerrainCoastThreshold)
+                            return;
+
+                        visited[next] = true;
+                        queue[tail++] = next;
+                    }
+
+                    if (x > 0)
+                        EnqueueLand(index - 1);
+                    if (x + 1 < width)
+                        EnqueueLand(index + 1);
+                    if (y > 0)
+                        EnqueueLand(index - width);
+                    if (y + 1 < height)
+                        EnqueueLand(index + width);
+                }
+
+                int componentWidth = maxX - minX + 1;
+                int componentHeight = maxY - minY + 1;
+                bool removeTopShelf = minY <= edgeZone && componentWidth >= width * 0.58f;
+                bool removeBottomShelf = maxY >= height - 1 - edgeZone && componentWidth >= width * 0.58f;
+                bool removeLeftShelf = minX <= edgeZone && componentHeight >= height * 0.58f;
+                bool removeRightShelf = maxX >= width - 1 - edgeZone && componentHeight >= height * 0.58f;
+
+                if (!removeTopShelf && !removeBottomShelf && !removeLeftShelf && !removeRightShelf)
+                    continue;
+
+                for (int j = 0; j < tail; ++j)
+                {
+                    int index = queue[j];
+                    int x = index % width;
+                    int y = index / width;
+                    if ((removeTopShelf && y <= minY + edgeZone) ||
+                        (removeBottomShelf && y >= maxY - edgeZone) ||
+                        (removeLeftShelf && x <= minX + edgeZone) ||
+                        (removeRightShelf && x >= maxX - edgeZone))
+                    {
+                        land[index] = 0f;
+                    }
+                }
+            }
         }
 
         private static bool TryFindDominantLandBounds(int width, int height, float[] land, out int minX, out int minY, out int maxX, out int maxY)
@@ -1741,8 +1901,7 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
             float u = width <= 1 ? 0.5f : (x + 0.5f) / width;
             float v = height <= 1 ? 0.5f : (y + 0.5f) / height;
             float targetAspect = height <= 0 ? 1f : width / (float)height;
-            float landCoverage = image.SampleLandCoverage(u, v, 1f / width, 1f / height, targetAspect);
-            bool isLand = landCoverage >= ImageTerrainCoastThreshold;
+            bool isLand = image.IsLand(u, v, targetAspect);
             float land = image.SampleLand(u, v, targetAspect);
             float relief = image.SampleRelief(u, v, targetAspect);
 
