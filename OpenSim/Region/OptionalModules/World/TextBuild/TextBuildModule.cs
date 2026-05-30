@@ -2247,17 +2247,17 @@ namespace OpenSim.Region.OptionalModules.World.TextBuild
                 relief = SmoothStep(0.10f, 0.96f, relief);
                 relief = (float)Math.Pow(relief, 1.85);
 
-                float inland = SmoothStep(0.36f, 0.98f, land);
-                float shoreBand = 1f - SmoothStep(0.54f, 0.98f, land);
+                float physicalInland = SmoothStep(0.36f, 0.98f, land);
+                float physicalShoreBand = 1f - SmoothStep(0.54f, 0.98f, land);
                 float physicalMinRise = Clamp(Math.Min(m_imageTerrainMinLandHeight, 0.38f), 0.16f, 0.50f);
                 float physicalMaxRise = Math.Max(physicalMinRise + 0.8f, Math.Min(m_imageTerrainMaxLandHeight, 4.8f));
-                float landRise = physicalMinRise + (physicalMaxRise - physicalMinRise) * relief;
-                float landHeight = water + Lerp(0.16f, landRise, inland);
+                float physicalLandRise = physicalMinRise + (physicalMaxRise - physicalMinRise) * relief;
+                float physicalLandHeight = water + Lerp(0.16f, physicalLandRise, physicalInland);
 
-                if (shoreBand > 0f)
-                    landHeight = Lerp(landHeight, water + 0.13f, shoreBand * 0.92f);
+                if (physicalShoreBand > 0f)
+                    physicalLandHeight = Lerp(physicalLandHeight, water + 0.13f, physicalShoreBand * 0.92f);
 
-                return ClampTerrainHeight(Math.Max(landHeight, water + 0.10f));
+                return ClampTerrainHeight(Math.Max(physicalLandHeight, water + 0.10f));
             }
 
             float inland = SmoothStep(0.48f, 0.92f, land);
