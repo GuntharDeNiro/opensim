@@ -85,6 +85,7 @@ namespace OpenSim.Region.ScriptEngine.Yengine
             m_StackSize = stackSize;
             m_StackLeft = stackSize;
             m_HeapSize = heapSize;
+            heapMax = heapSize;
             m_localsHeapUsed = 0;
             m_CompilerErrors = errors;
             m_StateFileName = GetStateFileName(scriptBasePath, m_ItemID);

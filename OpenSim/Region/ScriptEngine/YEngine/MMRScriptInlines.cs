@@ -157,6 +157,10 @@ namespace OpenSim.Region.ScriptEngine.Yengine
              */
             new TokenDeclInline_GetFreeMemory(ifd);
             new TokenDeclInline_GetUsedMemory(ifd);
+            new TokenDeclInline_GetMemoryLimit(ifd);
+            new TokenDeclInline_SetMemoryLimit(ifd);
+            new TokenDeclInline_GetSPMaxMemory(ifd);
+            new TokenDeclInline_ScriptProfiler(ifd);
 
             /*
              * These are all the xmr...() calls directly in XMRInstAbstract.
@@ -622,6 +626,68 @@ namespace OpenSim.Region.ScriptEngine.Yengine
             scg.PushXMRInst();
             scg.ilGen.Emit(errorAt, OpCodes.Call, getUsedMemMethInfo);
             result.Pop(scg, errorAt, new TokenTypeInt(null));
+        }
+    }
+
+    public class TokenDeclInline_GetMemoryLimit: TokenDeclInline
+    {
+        private static readonly MethodInfo getMemLimitMethInfo = typeof(XMRInstAbstract).GetMethod("xmrHeapLimit", new Type[] { });
+
+        public TokenDeclInline_GetMemoryLimit(VarDict ifd)
+                : base(ifd, false, "llGetMemoryLimit()", new TokenTypeInt(null)) { }
+
+        public override void CodeGen(ScriptCodeGen scg, Token errorAt, CompValuTemp result, CompValu[] args)
+        {
+            scg.PushXMRInst();
+            scg.ilGen.Emit(errorAt, OpCodes.Call, getMemLimitMethInfo);
+            result.Pop(scg, errorAt, new TokenTypeInt(null));
+        }
+    }
+
+    public class TokenDeclInline_SetMemoryLimit: TokenDeclInline
+    {
+        private static readonly MethodInfo setMemLimitMethInfo = typeof(XMRInstAbstract).GetMethod("xmrSetHeapLimit", new Type[] { typeof(int) });
+
+        public TokenDeclInline_SetMemoryLimit(VarDict ifd)
+                : base(ifd, false, "llSetMemoryLimit(integer)", new TokenTypeInt(null)) { }
+
+        public override void CodeGen(ScriptCodeGen scg, Token errorAt, CompValuTemp result, CompValu[] args)
+        {
+            scg.PushXMRInst();
+            args[0].PushVal(scg, errorAt, new TokenTypeInt(null));
+            scg.ilGen.Emit(errorAt, OpCodes.Call, setMemLimitMethInfo);
+            result.Pop(scg, errorAt, new TokenTypeInt(null));
+        }
+    }
+
+    public class TokenDeclInline_GetSPMaxMemory: TokenDeclInline
+    {
+        private static readonly MethodInfo getSPMaxMemMethInfo = typeof(XMRInstAbstract).GetMethod("xmrHeapMax", new Type[] { });
+
+        public TokenDeclInline_GetSPMaxMemory(VarDict ifd)
+                : base(ifd, false, "llGetSPMaxMemory()", new TokenTypeInt(null)) { }
+
+        public override void CodeGen(ScriptCodeGen scg, Token errorAt, CompValuTemp result, CompValu[] args)
+        {
+            scg.PushXMRInst();
+            scg.ilGen.Emit(errorAt, OpCodes.Call, getSPMaxMemMethInfo);
+            result.Pop(scg, errorAt, new TokenTypeInt(null));
+        }
+    }
+
+    public class TokenDeclInline_ScriptProfiler: TokenDeclInline
+    {
+        private static readonly MethodInfo scriptProfilerMethInfo = typeof(XMRInstAbstract).GetMethod("xmrScriptProfiler", new Type[] { typeof(int) });
+
+        public TokenDeclInline_ScriptProfiler(VarDict ifd)
+                : base(ifd, false, "llScriptProfiler(integer)", new TokenTypeVoid(null)) { }
+
+        public override void CodeGen(ScriptCodeGen scg, Token errorAt, CompValuTemp result, CompValu[] args)
+        {
+            scg.PushXMRInst();
+            args[0].PushVal(scg, errorAt, new TokenTypeInt(null));
+            scg.ilGen.Emit(errorAt, OpCodes.Call, scriptProfilerMethInfo);
+            result.Pop(scg, errorAt, new TokenTypeVoid(null));
         }
     }
  

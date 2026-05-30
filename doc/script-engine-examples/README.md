@@ -81,6 +81,14 @@ The scripts use:
 - `llGiveMoney`
 - `llTransferLindenDollars`
 - `PERMISSION_DEBIT`
+- `llGetFreeMemory`
+- `llGetUsedMemory`
+- `llGetMemoryLimit`
+- `llSetMemoryLimit`
+- `llGetSPMaxMemory`
+- `llScriptProfiler`
+- `PROFILE_NONE`
+- `PROFILE_SCRIPT_MEMORY`
 - `PARCEL_COUNT_TOTAL`
 - `PARCEL_COUNT_OWNER`
 - `PARCEL_COUNT_GROUP`
@@ -119,6 +127,7 @@ The scripts use:
 - `20_identity_lookup_console.lsl`: complex identity diagnostics console using synchronous and asynchronous name, username, display-name and key lookups.
 - `21_parcel_prim_count_auditor.lsl`: parcel audit console using local and same-owner simulator-wide `llGetParcelPrimCount`, `llGetParcelDetails` capacity/used values and owner/count breakdowns.
 - `22_money_transfer_guard_lab.lsl`: debit-permission payout console demonstrating guarded `llGiveMoney` and `llTransferLindenDollars` flows.
+- `23_script_memory_profiler_lab.lsl`: memory/profiler console demonstrating real YEngine heap used/free/limit/max reporting and active memory-limit enforcement.
 
 Stock OpenSim may fail to compile or run these scripts because Experience events,
 KVP functions, scripted-only sit flags and newer Second Life LSL compatibility

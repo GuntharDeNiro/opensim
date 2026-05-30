@@ -129,6 +129,11 @@ so additions are deliberate and testable instead of guessed from individual scri
   - Applies the same owner-granted debit and non-object target checks to `llTransferLindenDollars`.
   - Adds an in-world guarded payout lab example for vendor, rental-refund and reward-console testing.
 
+- Script memory/profiler diagnostics
+  - Wires YEngine `llGetMemoryLimit`, `llSetMemoryLimit` and `llGetSPMaxMemory` to the actual per-script heap limit and configured heap maximum instead of static placeholder values.
+  - Keeps `llGetUsedMemory` and `llGetFreeMemory` on the real YEngine heap counters and enforces lowered memory limits on subsequent allocations.
+  - Adds `llScriptProfiler(PROFILE_SCRIPT_MEMORY/PROFILE_NONE)` compatibility state and an in-world memory/profiler lab example for stress testing heap growth, trimming and limit rejection.
+
 ## Missing Or Backend-Limited After This Pass
 
 - True Second Life navmesh/pathfinding character simulation.
@@ -136,6 +141,7 @@ so additions are deliberate and testable instead of guessed from individual scri
 - Full per-parameter EEP override persistence for `llSetEnvironment` and `llSetAgentEnvironment`.
 - Underlying material asset readback for unset `PRIM_GLTF_*` properties.
 - True client-visible sculpt-map animation for `llSetSculptAnim`.
+- Client-visible profiler reports beyond script-side profiler flag compatibility.
 
 ## Next High-Value Buckets
 

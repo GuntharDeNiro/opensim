@@ -495,6 +495,8 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         \**************************************************/
 
         protected int heapLimit;
+        protected int heapMax;
+        protected int scriptProfilerFlags;
         public int m_localsHeapUsed;
 
         public virtual int UpdateLocalsHeapUse(int olduse, int newuse)
@@ -522,9 +524,36 @@ namespace OpenSim.Region.ScriptEngine.Yengine
             return heapLimit - m_localsHeapUsed - glblVars.arraysHeapUse;
         }
 
+        public int xmrHeapLimit()
+        {
+            return heapLimit;
+        }
+
+        public int xmrHeapMax()
+        {
+            return heapMax > 0 ? heapMax : heapLimit;
+        }
+
+        public int xmrSetHeapLimit(int requestedLimit)
+        {
+            if(requestedLimit < 16384 || requestedLimit > xmrHeapMax())
+                return ScriptBaseClass.FALSE;
+
+            if(xmrHeapUsed() > requestedLimit)
+                return ScriptBaseClass.FALSE;
+
+            heapLimit = requestedLimit;
+            return ScriptBaseClass.TRUE;
+        }
+
         public int xmrHeapUsed()
         {
             return m_localsHeapUsed + glblVars.arraysHeapUse;
+        }
+
+        public void xmrScriptProfiler(int flags)
+        {
+            scriptProfilerFlags = flags;
         }
 
         /**
