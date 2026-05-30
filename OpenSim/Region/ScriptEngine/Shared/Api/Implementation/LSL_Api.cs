@@ -16788,6 +16788,163 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             return src;
         }
 
+        private static SceneObjectPart[] GetObjectDetailParts(SceneObjectGroup group)
+        {
+            if (group is null)
+                return Array.Empty<SceneObjectPart>();
+
+            SceneObjectPart[] parts = group.Parts;
+            return parts ?? Array.Empty<SceneObjectPart>();
+        }
+
+        private static bool HasComplexObjectDetailCost(SceneObjectPart[] parts)
+        {
+            for (int i = 0; i < parts.Length; ++i)
+            {
+                if (parts[i].UsesComplexCost)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static SceneObjectPart GetObjectDetailCostAnchor(SceneObjectGroup group, SceneObjectPart[] parts)
+        {
+            if (group?.RootPart is not null)
+                return group.RootPart;
+
+            return parts.Length > 0 ? parts[0] : null;
+        }
+
+        private static float GetObjectDetailServerCost(SceneObjectGroup group)
+        {
+            SceneObjectPart[] parts = GetObjectDetailParts(group);
+            int primCount = group is null ? 0 : Math.Max(1, group.PrimCount);
+
+            if (parts.Length == 0)
+                return primCount;
+
+            if (!HasComplexObjectDetailCost(parts))
+                return primCount;
+
+            float simulationCost = 0f;
+            for (int i = 0; i < parts.Length; ++i)
+                simulationCost += Math.Max(0f, parts[i].SimulationCost);
+
+            SceneObjectPart anchor = GetObjectDetailCostAnchor(group, parts);
+            group.GetResourcesCosts(anchor, out float linksetResourceCost, out _, out _, out _);
+
+            return Math.Max(primCount, Math.Max(simulationCost, linksetResourceCost));
+        }
+
+        private static float GetObjectDetailStreamingCost(SceneObjectGroup group)
+        {
+            SceneObjectPart[] parts = GetObjectDetailParts(group);
+            int primCount = group is null ? 0 : Math.Max(1, group.PrimCount);
+            float normalPrimCost = primCount * 0.06f;
+
+            if (parts.Length == 0)
+                return normalPrimCost;
+
+            if (!HasComplexObjectDetailCost(parts))
+                return normalPrimCost;
+
+            SceneObjectPart anchor = GetObjectDetailCostAnchor(group, parts);
+            group.GetResourcesCosts(anchor, out float linksetResourceCost, out _, out _, out _);
+
+            return Math.Max(normalPrimCost, linksetResourceCost);
+        }
+
+        private static float GetObjectDetailPhysicsCost(SceneObjectGroup group)
+        {
+            SceneObjectPart[] parts = GetObjectDetailParts(group);
+            int primCount = group is null ? 0 : Math.Max(1, group.PrimCount);
+
+            if (parts.Length == 0)
+                return primCount;
+
+            if (!HasComplexObjectDetailCost(parts))
+                return primCount;
+
+            SceneObjectPart anchor = GetObjectDetailCostAnchor(group, parts);
+            group.GetResourcesCosts(anchor, out _, out float linksetPhysicsCost, out _, out _);
+
+            return Math.Max(0f, linksetPhysicsCost);
+        }
+
+        private static int GetObjectDetailPrimEquivalence(SceneObjectGroup group)
+        {
+            if (group is null)
+                return 0;
+
+            int primCount = Math.Max(1, group.PrimCount);
+            float landImpact = Math.Max(GetObjectDetailServerCost(group),
+                Math.Max(GetObjectDetailStreamingCost(group), GetObjectDetailPhysicsCost(group)));
+
+            return Math.Max(primCount, (int)Math.Ceiling(landImpact));
+        }
+
+        private static int EstimateObjectDetailRenderWeight(SceneObjectGroup group)
+        {
+            SceneObjectPart[] parts = GetObjectDetailParts(group);
+            if (parts.Length == 0)
+                return 0;
+
+            long weight = 0;
+            for (int i = 0; i < parts.Length; ++i)
+            {
+                SceneObjectPart part = parts[i];
+                int sides = Math.Max(1, part.GetNumberOfSides());
+                long partWeight = 800 + sides * 120;
+
+                if (part.Shape.SculptEntry)
+                    partWeight += part.Shape.SculptType == (byte)SculptType.Mesh ? 3000 : 1500;
+
+                if (part.Shape.MeshFlagEntry)
+                    partWeight += 3000;
+
+                if (part.Shape.RenderMaterials?.entries is not null)
+                    partWeight += part.Shape.RenderMaterials.entries.Length * 300;
+
+                if (part.Shape.RenderMaterials?.overrides is not null)
+                    partWeight += part.Shape.RenderMaterials.overrides.Length * 150;
+
+                float scaleFactor = Math.Max(1f, part.Scale.LengthSquared() / 9f);
+                partWeight = (long)Math.Ceiling(partWeight * Math.Min(4f, scaleFactor));
+
+                weight += partWeight;
+            }
+
+            if (weight > int.MaxValue)
+                return int.MaxValue;
+
+            return Math.Max(parts.Length * 100, (int)weight);
+        }
+
+        private static void GetAttachmentObjectDetailCosts(List<SceneObjectGroup> attachments,
+            out float serverCost, out float streamingCost, out float physicsCost, out int renderWeight)
+        {
+            serverCost = 0f;
+            streamingCost = 0f;
+            physicsCost = 0f;
+            renderWeight = 0;
+
+            if (attachments is null)
+                return;
+
+            long totalRenderWeight = 1000;
+            for (int i = 0; i < attachments.Count; ++i)
+            {
+                SceneObjectGroup attachment = attachments[i];
+                serverCost += GetObjectDetailServerCost(attachment);
+                streamingCost += GetObjectDetailStreamingCost(attachment);
+                physicsCost += GetObjectDetailPhysicsCost(attachment);
+                totalRenderWeight += EstimateObjectDetailRenderWeight(attachment);
+            }
+
+            renderWeight = totalRenderWeight > int.MaxValue ? int.MaxValue : (int)totalRenderWeight;
+        }
+
         public LSL_List llGetObjectDetails(LSL_Key id, LSL_List args)
         {
             LSL_List ret = new();
@@ -16866,13 +17023,22 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             ret.Add(new LSL_Integer(1));
                             break;
                         case ScriptBaseClass.OBJECT_SERVER_COST:
-                            ret.Add(new LSL_Float(0));
+                            Attachments ??= av.GetAttachments();
+                            GetAttachmentObjectDetailCosts(Attachments,
+                                out float avatarServerCost, out _, out _, out _);
+                            ret.Add(new LSL_Float(avatarServerCost));
                             break;
                         case ScriptBaseClass.OBJECT_STREAMING_COST:
-                            ret.Add(new LSL_Float(0));
+                            Attachments ??= av.GetAttachments();
+                            GetAttachmentObjectDetailCosts(Attachments,
+                                out _, out float avatarStreamingCost, out _, out _);
+                            ret.Add(new LSL_Float(avatarStreamingCost));
                             break;
                         case ScriptBaseClass.OBJECT_PHYSICS_COST:
-                            ret.Add(new LSL_Float(0));
+                            Attachments ??= av.GetAttachments();
+                            GetAttachmentObjectDetailCosts(Attachments,
+                                out _, out _, out float avatarPhysicsCost, out _);
+                            ret.Add(new LSL_Float(avatarPhysicsCost));
                             break;
                         case ScriptBaseClass.OBJECT_CHARACTER_TIME: // Pathfinding
                             ret.Add(new LSL_Float(0));
@@ -16900,10 +17066,13 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             ret.Add(new LSL_Integer(0));
                             break;
                         case ScriptBaseClass.OBJECT_RENDER_WEIGHT:
-                            ret.Add(new LSL_Integer(-1));
+                            Attachments ??= av.GetAttachments();
+                            GetAttachmentObjectDetailCosts(Attachments,
+                                out _, out _, out _, out int avatarRenderWeight);
+                            ret.Add(new LSL_Integer(avatarRenderWeight));
                             break;
                         case ScriptBaseClass.OBJECT_HOVER_HEIGHT:
-                            ret.Add(new LSL_Float(0));
+                            ret.Add(new LSL_Float(av.Appearance.AvatarPreferencesHoverZ));
                             break;
                         case ScriptBaseClass.OBJECT_BODY_SHAPE_TYPE:
                             LSL_Float shapeType;
@@ -16963,7 +17132,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             ret.Add(new LSL_String(""));
                             break;
                         case ScriptBaseClass.OBJECT_SELECT_COUNT:
-                            ret.Add(new LSL_Integer(0));
+                            ret.Add(new LSL_Integer(obj.ParentGroup.IsSelected ? 1 : 0));
                             break;
                         case ScriptBaseClass.OBJECT_SIT_COUNT:
                             ret.Add(new LSL_Integer(0));
@@ -17140,7 +17309,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             // equivalent of the number of prims in a linkset if it does not
                             // contain a mesh anywhere in the link set or is not a normal prim
                             // The value returned in SL for normal prims is prim count
-                            ret.Add(new LSL_Integer(obj.ParentGroup.PrimCount));
+                            ret.Add(new LSL_Integer(GetObjectDetailPrimEquivalence(obj.ParentGroup)));
                             break;
 
                         // costs below may need to be diferent for root parts, need to check
@@ -17148,15 +17317,15 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             // The linden calculation is here
                             // http://wiki.secondlife.com/wiki/Mesh/Mesh_Server_Weight
                             // The value returned in SL for normal prims looks like the prim count
-                            ret.Add(new LSL_Float(0));
+                            ret.Add(new LSL_Float(GetObjectDetailServerCost(obj.ParentGroup)));
                             break;
                         case ScriptBaseClass.OBJECT_STREAMING_COST:
                             // The value returned in SL for normal prims is prim count * 0.06
-                            ret.Add(new LSL_Float(obj.StreamingCost));
+                            ret.Add(new LSL_Float(GetObjectDetailStreamingCost(obj.ParentGroup)));
                             break;
                         case ScriptBaseClass.OBJECT_PHYSICS_COST:
                             // The value returned in SL for normal prims is prim count
-                            ret.Add(new LSL_Float(obj.PhysicsCost));
+                            ret.Add(new LSL_Float(GetObjectDetailPhysicsCost(obj.ParentGroup)));
                             break;
                         case ScriptBaseClass.OBJECT_CHARACTER_TIME: // Pathfinding
                             ret.Add(new LSL_Float(0));
@@ -17197,7 +17366,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             ret.Add(new LSL_Integer(obj.ParentGroup.IsTemporary ? 1 : 0));
                             break;
                         case ScriptBaseClass.OBJECT_RENDER_WEIGHT:
-                            ret.Add(new LSL_Integer(0));
+                            ret.Add(new LSL_Integer(EstimateObjectDetailRenderWeight(obj.ParentGroup)));
                             break;
                         case ScriptBaseClass.OBJECT_HOVER_HEIGHT:
                             ret.Add(new LSL_Float(0));

@@ -105,6 +105,14 @@ so additions are deliberate and testable instead of guessed from individual scri
   - Adds `PRIM_PHYSICS_MATERIAL` readback.
   - Aligns `PRIM_PHYSICS_MATERIAL` set argument order with Second Life: bits, gravity, restitution, friction, density.
 
+- Object detail cost/readback compatibility
+  - Improves `llGetObjectDetails` for `OBJECT_SERVER_COST`, `OBJECT_STREAMING_COST`, `OBJECT_PHYSICS_COST`, `OBJECT_PRIM_EQUIVALENCE` and `OBJECT_RENDER_WEIGHT`.
+  - Returns linkset-level cost estimates for objects instead of placeholder zeroes.
+  - Returns attachment-derived cost and render-weight estimates when the target is an avatar.
+  - Returns avatar preference hover height for `OBJECT_HOVER_HEIGHT`.
+  - Returns object selection state for `OBJECT_SELECT_COUNT` when OpenSim exposes a selected linkset.
+  - Updates the RegionWeb script reference entry for `llGetObjectDetails` with the new object-detail fields.
+
 ## Missing Or Backend-Limited After This Pass
 
 - True Second Life navmesh/pathfinding character simulation.

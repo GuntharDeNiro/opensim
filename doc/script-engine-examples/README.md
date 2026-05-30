@@ -60,6 +60,14 @@ The scripts use:
 - `PRIM_PHYSICS_MATERIAL`
 - `llGiveAgentInventory`
 - `llTransferOwnership`
+- `llGetObjectDetails` cost and render-weight readback
+- `OBJECT_SERVER_COST`
+- `OBJECT_STREAMING_COST`
+- `OBJECT_PHYSICS_COST`
+- `OBJECT_PRIM_EQUIVALENCE`
+- `OBJECT_RENDER_WEIGHT`
+- `OBJECT_HOVER_HEIGHT`
+- `OBJECT_SELECT_COUNT`
 - `PARCEL_MEDIA_COMMAND_LOOP_SET`
 - `TRANSFER_DEST`
 - `TRANSFER_FLAGS`
@@ -86,6 +94,7 @@ The scripts use:
 - `16_inventory_transfer_and_ownership_lab.lsl`: complex inventory transfer lab using `llGiveAgentInventory`, destination roots, transfer result codes and ownership copy/take modes.
 - `17_parcel_media_loop_console.lsl`: parcel media console using loop-set command/query, media type, description, integer size and auto-align persistence.
 - `18_pbr_gltf_physics_param_lab.lsl`: render material, GLTF override readback and physics material primitive-param lab.
+- `19_object_details_diagnostics_console.lsl`: complex object/avatar diagnostics console using `llGetObjectDetails` cost, render-weight, hover-height, selection, provenance, hover-text and damage readback.
 
 Stock OpenSim may fail to compile or run these scripts because Experience events,
 KVP functions, scripted-only sit flags and newer Second Life LSL compatibility
