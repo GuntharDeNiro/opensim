@@ -6327,7 +6327,6 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public LSL_String llGetAnimation(LSL_Key id)
         {
-            // This should only return a value if the avatar is in the same region
             if(!UUID.TryParse(id, out UUID avatar) || avatar.IsZero())
                 return "";
 
@@ -6335,10 +6334,12 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             if (presence == null || presence.IsChildAgent || presence.Animator == null)
                 return string.Empty;
 
-            //if (presence.SitGround)
-            //    return "Sitting on Ground";
-            //if (presence.ParentID != 0 || presence.ParentUUID != UUID.Zero)
-            //    return "Sitting";
+            if (presence.SitGround)
+                return "Sitting on Ground";
+
+            if (presence.ParentID != 0 || presence.ParentUUID.IsNotZero() || presence.ParentPart is not null)
+                return "Sitting";
+
             string movementAnimation = presence.Animator.CurrentMovementAnimation;
             if (MovementAnimationsForLSL.TryGetValue(movementAnimation, out string lslMovementAnimation))
                 return lslMovementAnimation;
