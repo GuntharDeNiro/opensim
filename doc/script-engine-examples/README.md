@@ -77,6 +77,9 @@ The scripts use:
 - `llRequestUserKey`
 - `llGetAgentLanguage`
 - `llGetVisualParams`
+- `llGetEnvironment`
+- `llSetEnvironment`
+- `llSetAgentEnvironment`
 - `llGetAnimation`
 - `llGetAnimationList`
 - `llGetEnergy`
@@ -110,6 +113,20 @@ The scripts use:
 - `PARCEL_DETAILS_PRIM_CAPACITY`
 - `PARCEL_DETAILS_PRIM_USED`
 - `PARCEL_MEDIA_COMMAND_LOOP_SET`
+- `WATER_BLUR_MULTIPLIER`
+- `WATER_FOG`
+- `WATER_FRESNEL`
+- `WATER_NORMAL_SCALE`
+- `WATER_REFRACTION`
+- `WATER_WAVE_DIRECTION`
+- `WATER_NORMAL_TEXTURE`
+- `ENV_NO_PERMISSIONS`
+- `ENV_NO_ENVIRONMENT`
+- `ENV_INVALID_RULE`
+- `ENV_VALIDATION_FAIL`
+- `ENV_NOT_EXPERIENCE`
+- `ENV_NO_EXPERIENCE_PERMISSION`
+- `ENV_INVALID_AGENT`
 - `TRANSFER_DEST`
 - `TRANSFER_FLAGS`
 - `TRANSFER_FLAG_COPY`
@@ -144,6 +161,7 @@ The scripts use:
 - `25_animation_state_monitor.lsl`: avatar animation monitor demonstrating seated-state `llGetAnimation` reporting and active animation UUID inspection with `llGetAnimationList`.
 - `26_physics_energy_meter.lsl`: physics energy meter demonstrating dynamic `llGetEnergy` drain/recharge around force, torque, impulse, hover, buoyancy and push operations.
 - `27_avatar_visual_param_inspector.lsl`: avatar visual parameter inspector demonstrating `llGetVisualParams` ids, names, aliases, unsupported entries, owner/toucher scans and periodic watch mode.
+- `28_eep_water_environment_console.lsl`: EEP water console demonstrating `llGetEnvironment`, region/parcel `llSetEnvironment` and agent-local `llSetAgentEnvironment` water overrides.
 
 Stock OpenSim may fail to compile or run these scripts because Experience events,
 KVP functions, scripted-only sit flags and newer Second Life LSL compatibility

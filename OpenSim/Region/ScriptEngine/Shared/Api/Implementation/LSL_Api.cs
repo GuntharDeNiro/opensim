@@ -20820,9 +20820,132 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             return new LSL_Vector(v.X, v.Y, v.Z);
         }
 
+        private static Vector2 ToVector2(LSL_Vector v)
+        {
+            return new Vector2((float)v.x, (float)v.y);
+        }
+
         private static LSL_Rotation ToLSLRotation(Quaternion v)
         {
             return new LSL_Rotation(v.X, v.Y, v.Z, v.W);
+        }
+
+        private static bool InRange(float value, float min, float max)
+        {
+            return value >= min && value <= max;
+        }
+
+        private static bool InRange(LSL_Vector value, float min, float max)
+        {
+            return InRange((float)value.x, min, max)
+                && InRange((float)value.y, min, max)
+                && InRange((float)value.z, min, max);
+        }
+
+        private static bool InRangeXY(LSL_Vector value, float min, float max)
+        {
+            return InRange((float)value.x, min, max)
+                && InRange((float)value.y, min, max);
+        }
+
+        private LSL_Integer ApplyEnvironmentWaterParameters(ViewerEnvironment env, LSL_List parameters)
+        {
+            try
+            {
+                WaterData water = env.EnsureWater();
+                int i = 0;
+
+                while (i < parameters.Length)
+                {
+                    int rule = parameters.GetLSLIntegerItem(i++);
+                    switch (rule)
+                    {
+                        case ScriptBaseClass.WATER_BLUR_MULTIPLIER:
+                            if (i + 1 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            float blur = (float)parameters.GetLSLFloatItem(i++);
+                            if (!InRange(blur, -0.5f, 0.5f))
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            water.blurMultiplier = blur;
+                            break;
+
+                        case ScriptBaseClass.WATER_FOG:
+                            if (i + 3 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            LSL_Vector fogColor = parameters.GetVector3Item(i++);
+                            float fogDensity = (float)parameters.GetLSLFloatItem(i++);
+                            float underwaterMod = (float)parameters.GetLSLFloatItem(i++);
+                            if (!InRange(fogColor, 0.0f, 1.0f) || !InRange(fogDensity, -10.0f, 10.0f)
+                                || !InRange(underwaterMod, 0.0f, 20.0f))
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            water.waterFogColor = new Vector3((float)fogColor.x, (float)fogColor.y, (float)fogColor.z);
+                            water.waterFogDensity = fogDensity;
+                            water.underWaterFogMod = underwaterMod;
+                            break;
+
+                        case ScriptBaseClass.WATER_FRESNEL:
+                            if (i + 2 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            float fresnelOffset = (float)parameters.GetLSLFloatItem(i++);
+                            float fresnelScale = (float)parameters.GetLSLFloatItem(i++);
+                            if (!InRange(fresnelOffset, 0.0f, 1.0f) || !InRange(fresnelScale, 0.0f, 1.0f))
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            water.fresnelOffset = fresnelOffset;
+                            water.fresnelScale = fresnelScale;
+                            break;
+
+                        case ScriptBaseClass.WATER_NORMAL_SCALE:
+                            if (i + 1 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            LSL_Vector normalScale = parameters.GetVector3Item(i++);
+                            if (!InRange(normalScale, 0.0f, 10.0f))
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            water.normScale = new Vector3((float)normalScale.x, (float)normalScale.y, (float)normalScale.z);
+                            break;
+
+                        case ScriptBaseClass.WATER_REFRACTION:
+                            if (i + 2 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            float scaleAbove = (float)parameters.GetLSLFloatItem(i++);
+                            float scaleBelow = (float)parameters.GetLSLFloatItem(i++);
+                            if (!InRange(scaleAbove, 0.0f, 3.0f) || !InRange(scaleBelow, 0.0f, 3.0f))
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            water.scaleAbove = scaleAbove;
+                            water.scaleBelow = scaleBelow;
+                            break;
+
+                        case ScriptBaseClass.WATER_WAVE_DIRECTION:
+                            if (i + 2 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            LSL_Vector bigWave = parameters.GetVector3Item(i++);
+                            LSL_Vector littleWave = parameters.GetVector3Item(i++);
+                            if (!InRangeXY(bigWave, -20.0f, 20.0f) || !InRangeXY(littleWave, -20.0f, 20.0f))
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            water.wave2Dir = ToVector2(bigWave);
+                            water.wave1Dir = ToVector2(littleWave);
+                            break;
+
+                        case ScriptBaseClass.WATER_NORMAL_TEXTURE:
+                            if (i + 1 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            UUID normalMap = ScriptUtils.GetAssetIdFromKeyOrItemName(m_host, parameters.GetLSLStringItem(i++), AssetType.Texture);
+                            if (normalMap.IsZero())
+                                return ScriptBaseClass.ENV_NO_ENVIRONMENT;
+                            water.normalMap = normalMap;
+                            break;
+
+                        default:
+                            return ScriptBaseClass.ENV_INVALID_RULE;
+                    }
+                }
+
+                env.InvalidateCaches();
+                return 1;
+            }
+            catch
+            {
+                return ScriptBaseClass.ENV_INVALID_RULE;
+            }
         }
 
         public LSL_List llGetEnvironment(LSL_Vector position, LSL_List rules)
@@ -20833,6 +20956,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 return result;
 
             TryGetCurrentSky(env, (float)position.z, out SkyData sky, out double daySeconds);
+            WaterData water = env.GetWater();
+            WaterData defaultWater = null;
 
             for (int i = 0; i < rules.Length; ++i)
             {
@@ -20972,6 +21097,63 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                         if (sky is not null)
                             result.Add(new LSL_Float(sky.reflectionProbeAmbiance));
                         break;
+
+                    case ScriptBaseClass.WATER_BLUR_MULTIPLIER:
+                        if (water is not null)
+                            result.Add(new LSL_Float(water.blurMultiplier));
+                        break;
+
+                    case ScriptBaseClass.WATER_FOG:
+                        if (water is not null)
+                        {
+                            result.Add(ToLSLVector(water.waterFogColor));
+                            result.Add(new LSL_Float(water.waterFogDensity));
+                            result.Add(new LSL_Float(water.underWaterFogMod));
+                        }
+                        break;
+
+                    case ScriptBaseClass.WATER_FRESNEL:
+                        if (water is not null)
+                        {
+                            result.Add(new LSL_Float(water.fresnelOffset));
+                            result.Add(new LSL_Float(water.fresnelScale));
+                        }
+                        break;
+
+                    case ScriptBaseClass.WATER_TEXTURE_DEFAULTS:
+                        if (water is not null)
+                        {
+                            defaultWater ??= new WaterData();
+                            result.Add(new LSL_Integer(water.normalMap == defaultWater.normalMap ? 1 : 0));
+                            result.Add(new LSL_Integer(water.transpTexture == defaultWater.transpTexture ? 1 : 0));
+                        }
+                        break;
+
+                    case ScriptBaseClass.WATER_NORMAL_SCALE:
+                        if (water is not null)
+                            result.Add(ToLSLVector(water.normScale));
+                        break;
+
+                    case ScriptBaseClass.WATER_REFRACTION:
+                        if (water is not null)
+                        {
+                            result.Add(new LSL_Float(water.scaleAbove));
+                            result.Add(new LSL_Float(water.scaleBelow));
+                        }
+                        break;
+
+                    case ScriptBaseClass.WATER_WAVE_DIRECTION:
+                        if (water is not null)
+                        {
+                            result.Add(ToLSLVector(water.wave2Dir));
+                            result.Add(ToLSLVector(water.wave1Dir));
+                        }
+                        break;
+
+                    case ScriptBaseClass.WATER_NORMAL_TEXTURE:
+                        if (water is not null)
+                            result.Add(water.normalMap.ToString());
+                        break;
                 }
             }
 
@@ -21090,7 +21272,17 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 return 1;
             }
 
-            return ScriptBaseClass.ENV_INVALID_RULE;
+            if (m_envModule is null)
+                return ScriptBaseClass.ENV_NO_ENVIRONMENT;
+
+            ViewerEnvironment env = (sp.Environment ?? m_envModule.GetRegionEnvironment()).Clone();
+            LSL_Integer result = ApplyEnvironmentWaterParameters(env, parameters);
+            if (result.value != 1)
+                return result;
+
+            sp.Environment = env;
+            m_envModule.WindlightRefreshForced(sp, Math.Max(0, (int)Math.Round(transition.value)));
+            return 1;
         }
 
         public LSL_Integer llReplaceEnvironment(LSL_Vector position, LSL_String environment, LSL_Integer track_no,
@@ -21173,9 +21365,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public LSL_Integer llSetEnvironment(LSL_Vector position, LSL_List parameters)
         {
-            if (parameters is not null && parameters.Length > 0)
-                return ScriptBaseClass.ENV_INVALID_RULE;
-
+            bool hasParameters = parameters is not null && parameters.Length > 0;
             bool wholeRegion = position.x < 0 || position.y < 0;
             if (wholeRegion)
             {
@@ -21183,6 +21373,18 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     return ScriptBaseClass.ENV_NO_ENVIRONMENT;
                 if (!World.Permissions.CanIssueEstateCommand(m_host.OwnerID, true))
                     return ScriptBaseClass.ENV_NO_PERMISSIONS;
+
+                if (hasParameters)
+                {
+                    ViewerEnvironment env = m_envModule.GetRegionEnvironment().Clone();
+                    LSL_Integer result = ApplyEnvironmentWaterParameters(env, parameters);
+                    if (result.value != 1)
+                        return result;
+
+                    m_envModule.StoreOnRegion(env);
+                    m_envModule.WindlightRefresh(0);
+                    return 1;
+                }
 
                 m_envModule.StoreOnRegion(null);
                 m_envModule.WindlightRefresh(0);
@@ -21198,6 +21400,21 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
             if (!World.Permissions.CanEditParcelProperties(m_host.OwnerID, parcel, GroupPowers.AllowEnvironment, true))
                 return ScriptBaseClass.ENV_NO_PERMISSIONS;
+
+            if (hasParameters)
+            {
+                if (m_envModule is null)
+                    return ScriptBaseClass.ENV_NO_ENVIRONMENT;
+
+                ViewerEnvironment env = (parcel.LandData.Environment ?? m_envModule.GetRegionEnvironment()).Clone();
+                LSL_Integer result = ApplyEnvironmentWaterParameters(env, parameters);
+                if (result.value != 1)
+                    return result;
+
+                parcel.StoreEnvironment(env);
+                m_envModule?.WindlightRefresh(0, false);
+                return 1;
+            }
 
             parcel.StoreEnvironment(null);
             m_envModule?.WindlightRefresh(0, false);

@@ -64,8 +64,10 @@ so additions are deliberate and testable instead of guessed from individual scri
 
 - Environment helpers
   - Adds `llGetEnvironment` for day info, sky tracks and supported sky fields.
+  - Adds `llGetEnvironment` readback for supported water rules: fog, fresnel, normal scale, normal texture, refraction and wave directions.
   - Adds region/parcel/agent environment replacement and clearing through the existing EEP environment module.
-  - Per-parameter `llSetEnvironment`/`llSetAgentEnvironment` overrides return `ENV_INVALID_RULE` until OpenSim has matching persistent override storage.
+  - Adds per-parameter `llSetEnvironment` and `llSetAgentEnvironment` persistence for supported water rules.
+  - Unsupported sky and texture-default mutations still return `ENV_INVALID_RULE` until OpenSim has matching persistent override storage.
 
 - Estate and parcel management helpers
   - Adds `llReturnObjectsByID` and `llReturnObjectsByOwner` using the simulator's return permission checks.
@@ -133,6 +135,12 @@ so additions are deliberate and testable instead of guessed from individual scri
   - Replaces the static `llGetEnergy` placeholder with per-linkset energy readback that drains on supported physical-control calls and recharges over time.
   - Adds an in-world physics energy monitor example for impulse, force, torque, hover, buoyancy and push workflows.
 
+- Environment water compatibility
+  - Adds in-world water environment console coverage for parcel/region and agent-local EEP water overrides.
+  - Supports `WATER_BLUR_MULTIPLIER`, `WATER_FOG`, `WATER_FRESNEL`, `WATER_NORMAL_SCALE`, `WATER_REFRACTION`, `WATER_WAVE_DIRECTION` and `WATER_NORMAL_TEXTURE`.
+  - Applies Second Life validation ranges for supported water rules before persisting overrides.
+  - Extends RegionWeb documentation for the now-supported `llGetEnvironment`, `llSetEnvironment` and `llSetAgentEnvironment` water parameter workflows.
+
 - Parcel prim count compatibility
   - Completes `llGetParcelPrimCount` for same-owner simulator-wide `PARCEL_COUNT_OWNER`, `PARCEL_COUNT_GROUP`, `PARCEL_COUNT_OTHER` and `PARCEL_COUNT_SELECTED`.
   - Adds `PARCEL_COUNT_TEMP` support by counting temporary-on-rez non-mesh linksets on the target parcel or same-owner parcels.
@@ -153,7 +161,7 @@ so additions are deliberate and testable instead of guessed from individual scri
 
 - True Second Life navmesh/pathfinding character simulation.
 - Combat2 `on_damage` event state and mutable per-hit damage adjustment.
-- Full per-parameter EEP override persistence for `llSetEnvironment` and `llSetAgentEnvironment`.
+- Full per-parameter EEP sky/day override persistence for `llSetEnvironment` and `llSetAgentEnvironment`.
 - Underlying material asset readback for unset `PRIM_GLTF_*` properties.
 - True client-visible sculpt-map animation for `llSetSculptAnim`.
 - Client-visible profiler reports beyond script-side profiler flag compatibility.
@@ -161,7 +169,7 @@ so additions are deliberate and testable instead of guessed from individual scri
 ## Next High-Value Buckets
 
 - Pathfinding backend work if OpenSim gains a region navmesh provider.
-- Environment functions: full per-parameter EEP override storage for `llSetEnvironment` and `llSetAgentEnvironment`.
+- Environment functions: full per-parameter EEP sky/day override storage for `llSetEnvironment` and `llSetAgentEnvironment`.
 - Render material functions: optional material asset inspection if OpenSim exposes it safely.
 - Damage/combat functions: `on_damage` event metadata and adjustment.
 - Sculpt animation: simulator/viewer protocol support if OpenSim gains a real backend for it.

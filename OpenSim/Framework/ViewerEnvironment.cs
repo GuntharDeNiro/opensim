@@ -647,6 +647,43 @@ namespace OpenSim.Framework
             return true;
         }
 
+        public WaterData GetWater()
+        {
+            if (Cycle is null)
+                return null;
+
+            if (Cycle.waterTrack.Count > 0)
+            {
+                DayCycle.TrackEntry entry = Cycle.waterTrack[0];
+                if (Cycle.waterframes.TryGetValue(entry.frameName, out WaterData water) && water is not null)
+                    return water;
+            }
+
+            foreach (WaterData water in Cycle.waterframes.Values)
+            {
+                if (water is not null)
+                    return water;
+            }
+
+            return null;
+        }
+
+        public WaterData EnsureWater()
+        {
+            Cycle ??= new DayCycle { Name = "ScriptEnvironment" };
+
+            WaterData water = GetWater();
+            if (water is not null)
+                return water;
+
+            const string frameName = "ScriptWater";
+            water = new WaterData { Name = frameName };
+            Cycle.waterframes[frameName] = water;
+            Cycle.waterTrack.Clear();
+            Cycle.waterTrack.Add(new DayCycle.TrackEntry(-1f, frameName));
+            return water;
+        }
+
         public bool getPositions(float altitude, float dayfrac, out Vector3 sundir, out Vector3 moondir,
                 out Quaternion sunrot, out Quaternion moonrot)
         {
