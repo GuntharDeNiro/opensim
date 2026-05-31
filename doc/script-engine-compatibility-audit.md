@@ -123,6 +123,12 @@ so additions are deliberate and testable instead of guessed from individual scri
   - Aligns `llGetAnimation` seated-state reporting with Second Life by returning `Sitting` and `Sitting on Ground` directly from simulator sit state.
   - Adds an in-world animation monitor example covering `llGetAnimation` and `llGetAnimationList`.
 
+- Avatar visual parameter compatibility
+  - Hardens `llGetVisualParams` so supported Second Life visual parameter ids and names are matched case-insensitively with common aliases.
+  - Returns normalized float values for available avatar appearance parameters and empty entries for unsupported or unavailable values.
+  - Bounds-checks legacy appearance arrays so older viewer data cannot throw script-engine exceptions when extended parameters such as hover are absent.
+  - Adds an in-world avatar visual parameter inspector example for owner, toucher and nearby-avatar diagnostics.
+
 - Physics energy compatibility
   - Replaces the static `llGetEnergy` placeholder with per-linkset energy readback that drains on supported physical-control calls and recharges over time.
   - Adds an in-world physics energy monitor example for impulse, force, torque, hover, buoyancy and push workflows.

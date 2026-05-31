@@ -76,6 +76,7 @@ The scripts use:
 - `llRequestDisplayName`
 - `llRequestUserKey`
 - `llGetAgentLanguage`
+- `llGetVisualParams`
 - `llGetAnimation`
 - `llGetAnimationList`
 - `llGetEnergy`
@@ -142,6 +143,7 @@ The scripts use:
 - `24_agent_language_privacy_panel.lsl`: avatar language scanner demonstrating SL-style in-region and public-language checks for `llGetAgentLanguage`.
 - `25_animation_state_monitor.lsl`: avatar animation monitor demonstrating seated-state `llGetAnimation` reporting and active animation UUID inspection with `llGetAnimationList`.
 - `26_physics_energy_meter.lsl`: physics energy meter demonstrating dynamic `llGetEnergy` drain/recharge around force, torque, impulse, hover, buoyancy and push operations.
+- `27_avatar_visual_param_inspector.lsl`: avatar visual parameter inspector demonstrating `llGetVisualParams` ids, names, aliases, unsupported entries, owner/toucher scans and periodic watch mode.
 
 Stock OpenSim may fail to compile or run these scripts because Experience events,
 KVP functions, scripted-only sit flags and newer Second Life LSL compatibility
