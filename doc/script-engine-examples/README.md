@@ -78,6 +78,14 @@ The scripts use:
 - `llGetAgentLanguage`
 - `llGetAnimation`
 - `llGetAnimationList`
+- `llGetEnergy`
+- `llApplyImpulse`
+- `llApplyRotationalImpulse`
+- `llSetForce`
+- `llSetTorque`
+- `llSetHoverHeight`
+- `llSetBuoyancy`
+- `llPushObject`
 - `llGetParcelPrimCount`
 - `llGetParcelDetails`
 - `llGetParcelPrimOwners`
@@ -133,6 +141,7 @@ The scripts use:
 - `23_script_memory_profiler_lab.lsl`: memory/profiler console demonstrating real YEngine heap used/free/limit/max reporting and active memory-limit enforcement.
 - `24_agent_language_privacy_panel.lsl`: avatar language scanner demonstrating SL-style in-region and public-language checks for `llGetAgentLanguage`.
 - `25_animation_state_monitor.lsl`: avatar animation monitor demonstrating seated-state `llGetAnimation` reporting and active animation UUID inspection with `llGetAnimationList`.
+- `26_physics_energy_meter.lsl`: physics energy meter demonstrating dynamic `llGetEnergy` drain/recharge around force, torque, impulse, hover, buoyancy and push operations.
 
 Stock OpenSim may fail to compile or run these scripts because Experience events,
 KVP functions, scripted-only sit flags and newer Second Life LSL compatibility

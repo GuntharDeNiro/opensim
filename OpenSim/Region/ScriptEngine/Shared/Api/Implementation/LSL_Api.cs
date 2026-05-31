@@ -140,9 +140,18 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         protected string m_scriptExperienceKvpPath = "ScriptExperienceKVP";
         protected readonly HashSet<UUID> m_scriptExperienceTrustedOwners = new();
         protected readonly HashSet<UUID> m_scriptExperienceTrustedObjects = new();
+        private const double ScriptEnergyRechargePerSecond = 0.20;
+        private static readonly object m_scriptEnergyLock = new();
+        private static readonly Dictionary<UUID, ScriptEnergyState> m_scriptEnergy = new();
         private static readonly object m_scriptExperienceKvpLock = new();
         private static readonly Dictionary<string, Dictionary<string, string>> m_scriptExperienceKvpStores = new();
         private static readonly HashSet<string> m_scriptExperienceKvpLoadedScopes = new();
+
+        private sealed class ScriptEnergyState
+        {
+            public double Energy = 1.0;
+            public double LastUpdate = Util.GetTimeStamp();
+        }
 
         protected AsyncCommandManager m_AsyncCommands = null;
         protected IUrlModule m_UrlModule = null;
@@ -852,6 +861,77 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
             error = ScriptBaseClass.XP_ERROR_NONE;
             return true;
+        }
+
+        private UUID ScriptEnergyScopeID()
+        {
+            SceneObjectGroup group = m_host?.ParentGroup;
+            if (group is not null && group.UUID.IsNotZero())
+                return group.UUID;
+
+            if (m_host is not null && m_host.UUID.IsNotZero())
+                return m_host.UUID;
+
+            return UUID.Zero;
+        }
+
+        private static void RechargeScriptEnergy(ScriptEnergyState state, double now)
+        {
+            double elapsed = Math.Max(0.0, now - state.LastUpdate);
+            if (elapsed > 0.0)
+                state.Energy = Math.Min(1.0, state.Energy + elapsed * ScriptEnergyRechargePerSecond);
+
+            state.LastUpdate = now;
+        }
+
+        private double ReadScriptEnergy()
+        {
+            UUID scope = ScriptEnergyScopeID();
+            if (scope.IsZero())
+                return 1.0;
+
+            lock (m_scriptEnergyLock)
+            {
+                if (!m_scriptEnergy.TryGetValue(scope, out ScriptEnergyState state))
+                {
+                    state = new ScriptEnergyState();
+                    m_scriptEnergy[scope] = state;
+                }
+
+                RechargeScriptEnergy(state, Util.GetTimeStamp());
+                return state.Energy;
+            }
+        }
+
+        private void ConsumeScriptEnergy(double amount)
+        {
+            if (amount <= 0.0)
+                return;
+
+            UUID scope = ScriptEnergyScopeID();
+            if (scope.IsZero())
+                return;
+
+            lock (m_scriptEnergyLock)
+            {
+                if (!m_scriptEnergy.TryGetValue(scope, out ScriptEnergyState state))
+                {
+                    state = new ScriptEnergyState();
+                    m_scriptEnergy[scope] = state;
+                }
+
+                RechargeScriptEnergy(state, Util.GetTimeStamp());
+                state.Energy = Math.Max(0.0, state.Energy - Math.Min(1.0, amount));
+            }
+        }
+
+        private void ConsumeScriptEnergyForVector(Vector3 value, double divisor, double maxCost)
+        {
+            if (divisor <= 0.0 || maxCost <= 0.0)
+                return;
+
+            double cost = Math.Min(maxCost, value.Length() / divisor);
+            ConsumeScriptEnergy(cost);
         }
 
         protected SceneObjectPart MonitoringObject()
@@ -3003,6 +3083,13 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 if (local != 0)
                     force *= llGetRot();
 
+                Vector3 appliedForce = force;
+                if (appliedForce.LengthSquared() > 0.0f)
+                {
+                    ConsumeScriptEnergy(0.01);
+                    ConsumeScriptEnergyForVector(appliedForce, 50000.0, 0.12);
+                }
+
                 m_host.ParentGroup.RootPart.SetForce(force);
             }
         }
@@ -3046,6 +3133,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public void llMoveToTarget(LSL_Vector target, double tau)
         {
+            Vector3 delta = target - llGetPos();
+            ConsumeScriptEnergy(0.02 + Math.Min(0.15, delta.Length() / 512.0));
             m_host.ParentGroup.MoveToTarget(target, (float)tau);
         }
 
@@ -3056,24 +3145,36 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public void llApplyImpulse(LSL_Vector force, LSL_Integer local)
         {
-            //No energy force yet
             Vector3 v = force;
             if (v.Length() > 20000.0f)
             {
                 v.Normalize();
                 v *= 20000.0f;
             }
+
+            ConsumeScriptEnergy(0.02);
+            ConsumeScriptEnergyForVector(v, 60000.0, 0.35);
             m_host.ApplyImpulse(v, local != 0);
         }
 
 
         public void llApplyRotationalImpulse(LSL_Vector force, int local)
         {
+            Vector3 v = force;
+            ConsumeScriptEnergy(0.01);
+            ConsumeScriptEnergyForVector(v, 80000.0, 0.20);
             m_host.ParentGroup.RootPart.ApplyAngularImpulse(force, local != 0);
         }
 
         public void llSetTorque(LSL_Vector torque, int local)
         {
+            Vector3 v = torque;
+            if (v.LengthSquared() > 0.0f)
+            {
+                ConsumeScriptEnergy(0.01);
+                ConsumeScriptEnergyForVector(v, 80000.0, 0.18);
+            }
+
             m_host.ParentGroup.RootPart.SetAngularImpulse(torque, local != 0);
         }
 
@@ -4266,6 +4367,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     return;
                 }
 
+                ConsumeScriptEnergy(0.02 + Math.Min(0.08, strength / 20.0));
                 sog.StartLookAt(rot, (float)strength, (float)damping);
             }
         }
@@ -4654,6 +4756,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         {
             if (!m_host.ParentGroup.IsDeleted)
             {
+                if (Math.Abs(buoyancy) > 0.0)
+                    ConsumeScriptEnergy(0.02 + Math.Min(0.08, Math.Abs(buoyancy) * 0.02));
+
                 m_host.ParentGroup.SetBuoyancy((float)buoyancy);
             }
         }
@@ -4672,6 +4777,10 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             {
                 hoverType = PIDHoverType.GroundAndWater;
             }
+
+            if (height != 0.0)
+                ConsumeScriptEnergy(0.02 + Math.Min(0.08, Math.Abs(height) / 512.0));
+
             m_host.SetHoverHeight((float)height, hoverType, (float)tau);
         }
 
@@ -4706,6 +4815,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             SceneObjectGroup sog = m_host.ParentGroup;
             if(sog == null || sog.IsDeleted)
                 return;
+
+            if (strength > 0.0 && sog.UsesPhysics && !sog.IsAttachment)
+                ConsumeScriptEnergy(0.02 + Math.Min(0.08, strength / 20.0));
 
             if (strength == 0 || !sog.UsesPhysics || sog.IsAttachment)
             {
@@ -5779,8 +5891,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public LSL_Float llGetEnergy()
         {
-            // TODO: figure out real energy value
-            return 1.0f;
+            return ReadScriptEnergy();
         }
 
         public void llGiveInventory(LSL_Key destination, LSL_String inventory)
@@ -6506,6 +6617,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     scaling_factor *= distance_attenuation;
                     applied_linear_impulse *= scaling_factor;
                 }
+
+                ConsumeScriptEnergy(0.03);
+                ConsumeScriptEnergyForVector(applied_linear_impulse, 70000.0, 0.45);
+                Vector3 appliedAngularImpulse = ang_impulse;
+                ConsumeScriptEnergyForVector(appliedAngularImpulse, 90000.0, 0.20);
 
                 if (pusheeIsAvatar)
                 {
@@ -9003,6 +9119,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         {
             if (m_host.PhysActor != null)
             {
+                ConsumeScriptEnergy(0.02 + Math.Min(0.08, Math.Abs(height) / 512.0));
+
                 float ground = (float)llGround(new LSL_Types.Vector3(0, 0, 0));
                 float waterLevel = (float)llWater(new LSL_Types.Vector3(0, 0, 0));
                 PIDHoverType hoverType = PIDHoverType.Ground;

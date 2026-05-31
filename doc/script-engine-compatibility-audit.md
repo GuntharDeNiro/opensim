@@ -123,6 +123,10 @@ so additions are deliberate and testable instead of guessed from individual scri
   - Aligns `llGetAnimation` seated-state reporting with Second Life by returning `Sitting` and `Sitting on Ground` directly from simulator sit state.
   - Adds an in-world animation monitor example covering `llGetAnimation` and `llGetAnimationList`.
 
+- Physics energy compatibility
+  - Replaces the static `llGetEnergy` placeholder with per-linkset energy readback that drains on supported physical-control calls and recharges over time.
+  - Adds an in-world physics energy monitor example for impulse, force, torque, hover, buoyancy and push workflows.
+
 - Parcel prim count compatibility
   - Completes `llGetParcelPrimCount` for same-owner simulator-wide `PARCEL_COUNT_OWNER`, `PARCEL_COUNT_GROUP`, `PARCEL_COUNT_OTHER` and `PARCEL_COUNT_SELECTED`.
   - Adds `PARCEL_COUNT_TEMP` support by counting temporary-on-rez non-mesh linksets on the target parcel or same-owner parcels.
