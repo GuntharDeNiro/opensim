@@ -1234,9 +1234,9 @@
     ; economy = https://the.currency.machine.fdqn:port/folder/folder...
 
     ;# {SellEnabled} {} {Enable selling for 0?} {true false} true
-    ; The default economy module only implements just enough to allow free actions (transfer of objects, etc).
-    ; There is no intention to implement anything further in core OpenSimulator.
-    ; This functionality has to be provided by third party modules.
+    ; The default economy module provides a lightweight local balance ledger,
+    ; viewer-visible MoneyBalanceReply updates and simple in-region transfers.
+    ; Use a dedicated third-party/grid currency service for production payment processing.
 
     ;; Enables selling things for $0.  Default is true.
     ; SellEnabled = true
@@ -1248,6 +1248,16 @@
     ;# {PriceGroupCreate} {} {Fee for group creation} {} 0
     ;; Money Unit fee to create groups.  Default is 0.
     ; PriceGroupCreate = 0
+
+    ;; Starting balance assigned the first time an avatar appears in the local
+    ;; currency ledger.  This balance is sent to the viewer with MoneyBalanceReply.
+    ; InitialBalance = 1000
+
+    ;; Relative paths are stored under the OpenSim bin folder.
+    ; BalanceStorage = Currency/balances.tsv
+
+    ;; Keep false for normal simulator currency behavior.
+    ; AllowNegativeBalances = false
 
 [YEngine]
     ;; implements non preemptive microthreading, so fixing problems like llSleep or long events handlers

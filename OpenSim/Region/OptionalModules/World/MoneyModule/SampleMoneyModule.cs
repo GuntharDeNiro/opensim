@@ -46,9 +46,9 @@ using OpenSim.Services.Interfaces;
 namespace OpenSim.Region.OptionalModules.World.MoneyModule
 {
     /// <summary>
-    /// This is only the functionality required to make the functionality associated with money work
-    /// (such as land transfers).  There is no money code here!  Use FORGE as an example for money code.
-    /// Demo Economy/Money Module.  This is a purposely crippled module!
+    /// This module provides a small local economy implementation for standalone
+    /// and lightweight grid deployments. It stores avatar balances locally,
+    /// answers viewer balance requests and supports simple in-region transfers.
     ///  // To land transfer you need to add:
     /// -helperuri http://serveraddress:port/
     /// to the command line parameters you use to start up your client
@@ -68,6 +68,12 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
 
         private Dictionary<string, XmlRpcMethod> m_rpcHandlers;
         private string m_localEconomyURL;
+        private readonly object m_balanceLock = new object();
+        private readonly Dictionary<UUID, int> m_balances = new Dictionary<UUID, int>();
+        private string m_balanceStoragePath = "Currency/balances.tsv";
+        private bool m_balancesLoaded;
+        private bool m_allowNegativeBalances;
+        private int m_initialBalance = 1000;
 
         private float EnergyEfficiency = 1f;
         // private ObjectPaid handerOnObjectPaid;
@@ -113,12 +119,12 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
 
         public int UploadCharge
         {
-            get { return 0; }
+            get { return PriceUpload; }
         }
 
         public int GroupCreationCharge
         {
-            get { return 0; }
+            get { return Math.Max(0, PriceGroupCreate); }
         }
 
         /// <summary>
@@ -203,14 +209,37 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
         //
         public void ApplyCharge(UUID agentID, int amount, MoneyTransactionType type, string extraData)
         {
+            if (amount <= 0)
+                return;
+
+            string description = string.IsNullOrWhiteSpace(extraData) ? type.ToString() : extraData;
+            bool result = Debit(agentID, amount, out string reason);
+            SendBalanceUpdateTo(agentID, agentID, UUID.Zero, result, result ? description : reason, (int)type, amount);
+            if (!result && !string.IsNullOrWhiteSpace(reason))
+            {
+                IClientAPI client = LocateClientObject(agentID);
+                client?.SendAgentAlertMessage(reason, false);
+            }
         }
 
         public void ApplyCharge(UUID agentID, int amount, MoneyTransactionType type)
         {
+            ApplyCharge(agentID, amount, type, String.Empty);
         }
 
         public void ApplyUploadCharge(UUID agentID, int amount, string text)
         {
+            if (amount <= 0)
+                return;
+
+            string description = string.IsNullOrWhiteSpace(text) ? "Asset upload" : text;
+            bool result = Debit(agentID, amount, out string reason);
+            SendBalanceUpdateTo(agentID, agentID, UUID.Zero, result, result ? description : reason, 0, amount);
+            if (!result && !string.IsNullOrWhiteSpace(reason))
+            {
+                IClientAPI client = LocateClientObject(agentID);
+                client?.SendAgentAlertMessage(reason, false);
+            }
         }
 
         public bool ObjectGiveMoney(UUID objectID, UUID fromID, UUID toID, int amount, UUID txn, out string result)
@@ -218,10 +247,10 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
             result = String.Empty;
             string description = String.Format("Object {0} pays {1}", resolveObjectName(objectID), resolveAgentName(toID));
 
-            bool give_result = doMoneyTransfer(fromID, toID, amount, 2, description);
+            bool give_result = doMoneyTransfer(fromID, toID, amount, (int)TransactionType.Gift, description, out result);
 
 
-            BalanceUpdate(fromID, toID, give_result, description);
+            BalanceUpdate(fromID, toID, give_result, description, (int)TransactionType.Gift, amount);
 
             return give_result;
         }
@@ -280,7 +309,11 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
             }
 
             if(economyConfig == null)
+            {
+                if (!Path.IsPathRooted(m_balanceStoragePath))
+                    m_balanceStoragePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, m_balanceStoragePath);
                 return;
+            }
 
             PriceEnergyUnit = economyConfig.GetInt("PriceEnergyUnit", 0);
             PriceObjectClaim = economyConfig.GetInt("PriceObjectClaim", 0);
@@ -298,6 +331,13 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
             PriceParcelRent = economyConfig.GetInt("PriceParcelRent", 0);
             PriceGroupCreate = economyConfig.GetInt("PriceGroupCreate", -1);
             m_sellEnabled = economyConfig.GetBoolean("SellEnabled", true);
+            m_initialBalance = Math.Max(0, economyConfig.GetInt("InitialBalance", m_initialBalance));
+            m_allowNegativeBalances = economyConfig.GetBoolean("AllowNegativeBalances", false);
+            m_balanceStoragePath = economyConfig.GetString("BalanceStorage", m_balanceStoragePath).Trim();
+            if (string.IsNullOrWhiteSpace(m_balanceStoragePath))
+                m_balanceStoragePath = "Currency/balances.tsv";
+            if (!Path.IsPathRooted(m_balanceStoragePath))
+                m_balanceStoragePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, m_balanceStoragePath);
         }
 
         private void GetClientFunds(IClientAPI client)
@@ -319,6 +359,8 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
             client.OnRequestPayPrice += requestPayPrice;
             client.OnObjectBuy += ObjectBuy;
             client.OnLogout += ClientLoggedOut;
+
+            SendMoneyBalance(client, client.AgentId, client.SessionId, UUID.Random());
         }
 
         /// <summary>
@@ -328,9 +370,9 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
         /// <param name="Receiver"></param>
         /// <param name="amount"></param>
         /// <returns></returns>
-        private bool doMoneyTransfer(UUID Sender, UUID Receiver, int amount, int transactiontype, string description)
+        private bool doMoneyTransfer(UUID Sender, UUID Receiver, int amount, int transactiontype, string description, out string reason)
         {
-            return true;
+            return TransferMoney(Sender, Receiver, amount, transactiontype, description, out reason);
         }
 
 
@@ -412,21 +454,30 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
 
         private void BalanceUpdate(UUID senderID, UUID receiverID, bool transactionresult, string description)
         {
-            IClientAPI sender = LocateClientObject(senderID);
-            IClientAPI receiver = LocateClientObject(receiverID);
+            BalanceUpdate(senderID, receiverID, transactionresult, description, 0, 0);
+        }
 
-            if (senderID != receiverID)
-            {
-                if (sender != null)
-                {
-                    sender.SendMoneyBalance(UUID.Random(), transactionresult, Utils.StringToBytes(description), GetFundsForAgentID(senderID), 0, UUID.Zero, false, UUID.Zero, false, 0, String.Empty);
-                }
+        private void BalanceUpdate(UUID senderID, UUID receiverID, bool transactionresult, string description, int transactionType, int amount)
+        {
+            SendBalanceUpdateTo(senderID, senderID, receiverID, transactionresult, description, transactionType, amount);
+            if (receiverID != senderID)
+                SendBalanceUpdateTo(receiverID, senderID, receiverID, transactionresult, description, transactionType, amount);
+        }
 
-                if (receiver != null)
-                {
-                    receiver.SendMoneyBalance(UUID.Random(), transactionresult, Utils.StringToBytes(description), GetFundsForAgentID(receiverID), 0, UUID.Zero, false, UUID.Zero, false, 0, String.Empty);
-                }
-            }
+        private void SendBalanceUpdateTo(UUID agentID, UUID sourceID, UUID destID, bool transactionresult, string description, int transactionType, int amount)
+        {
+            if (agentID.IsZero())
+                return;
+
+            IClientAPI client = LocateClientObject(agentID);
+            if (client == null)
+                return;
+
+            byte[] message = string.IsNullOrEmpty(description)
+                ? Array.Empty<byte>()
+                : Utils.StringToBytes(description);
+            client.SendMoneyBalance(UUID.Random(), transactionresult, message, GetFundsForAgentID(agentID),
+                    transactionType, sourceID, false, destID, false, amount, description ?? String.Empty);
         }
 
         /// <summary>
@@ -514,9 +565,25 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
 
         public XmlRpcResponse buy_func(XmlRpcRequest request, IPEndPoint remoteClient)
         {
-            // Hashtable requestData = (Hashtable) request.Params[0];
-            // UUID agentId = UUID.Zero;
-            // int amount = 0;
+            UUID agentId = UUID.Zero;
+            int amount = 0;
+            try
+            {
+                Hashtable requestData = (Hashtable) request.Params[0];
+                if (requestData.ContainsKey("agentId"))
+                    UUID.TryParse((string)requestData["agentId"], out agentId);
+                if (requestData.ContainsKey("currencyBuy"))
+                    amount = Convert.ToInt32(requestData["currencyBuy"]);
+            }
+            catch
+            {
+            }
+
+            if (agentId.IsNotZero() && amount > 0)
+            {
+                Credit(agentId, amount);
+                BalanceUpdate(UUID.Zero, agentId, true, "Currency purchase", (int)TransactionType.SystemGenerated, amount);
+            }
 
             XmlRpcResponse returnval = new XmlRpcResponse();
             Hashtable returnresp = new Hashtable();
@@ -585,7 +652,18 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
         /// <param name="agentID"></param>
         private void CheckExistAndRefreshFunds(UUID agentID)
         {
+            if (agentID.IsZero())
+                return;
 
+            lock (m_balanceLock)
+            {
+                EnsureBalancesLoaded();
+                if (!m_balances.ContainsKey(agentID))
+                {
+                    m_balances[agentID] = m_initialBalance;
+                    SaveBalancesLocked();
+                }
+            }
         }
 
         /// <summary>
@@ -595,15 +673,163 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
         /// <returns></returns>
         private int GetFundsForAgentID(UUID AgentID)
         {
-            int returnfunds = 0;
+            if (AgentID.IsZero())
+                return 0;
 
-            return returnfunds;
+            lock (m_balanceLock)
+            {
+                EnsureBalancesLoaded();
+                if (!m_balances.TryGetValue(AgentID, out int returnfunds))
+                {
+                    returnfunds = m_initialBalance;
+                    m_balances[AgentID] = returnfunds;
+                    SaveBalancesLocked();
+                }
+
+                return returnfunds;
+            }
         }
 
-        // private void SetLocalFundsForAgentID(UUID AgentID, int amount)
-        // {
+        private bool Debit(UUID agentID, int amount, out string reason)
+        {
+            reason = String.Empty;
+            if (amount <= 0)
+                return true;
+            if (agentID.IsZero())
+            {
+                reason = "Invalid money source.";
+                return false;
+            }
 
-        // }
+            lock (m_balanceLock)
+            {
+                EnsureBalancesLoaded();
+                if (!m_balances.TryGetValue(agentID, out int balance))
+                    balance = m_initialBalance;
+                if (!m_allowNegativeBalances && balance < amount)
+                {
+                    reason = "Insufficient funds.";
+                    return false;
+                }
+
+                m_balances[agentID] = balance - amount;
+                SaveBalancesLocked();
+                return true;
+            }
+        }
+
+        private void Credit(UUID agentID, int amount)
+        {
+            if (amount <= 0 || agentID.IsZero())
+                return;
+
+            lock (m_balanceLock)
+            {
+                EnsureBalancesLoaded();
+                if (!m_balances.TryGetValue(agentID, out int balance))
+                    balance = m_initialBalance;
+                m_balances[agentID] = balance + amount;
+                SaveBalancesLocked();
+            }
+        }
+
+        private bool TransferMoney(UUID fromUser, UUID toUser, int amount, int transactionType, string text, out string reason)
+        {
+            reason = String.Empty;
+            if (amount <= 0)
+            {
+                reason = "Amount must be greater than zero.";
+                return false;
+            }
+            if (fromUser.IsZero())
+            {
+                reason = "Invalid money source.";
+                return false;
+            }
+            if (fromUser == toUser)
+                return true;
+
+            lock (m_balanceLock)
+            {
+                EnsureBalancesLoaded();
+                if (!m_balances.TryGetValue(fromUser, out int fromBalance))
+                    fromBalance = m_initialBalance;
+                if (!m_allowNegativeBalances && fromBalance < amount)
+                {
+                    reason = "Insufficient funds.";
+                    return false;
+                }
+
+                if (!m_balances.TryGetValue(toUser, out int toBalance))
+                    toBalance = m_initialBalance;
+
+                m_balances[fromUser] = fromBalance - amount;
+                if (!toUser.IsZero() && toUser != fromUser)
+                    m_balances[toUser] = toBalance + amount;
+                SaveBalancesLocked();
+                return true;
+            }
+        }
+
+        private void EnsureBalancesLoaded()
+        {
+            if (m_balancesLoaded)
+                return;
+
+            m_balancesLoaded = true;
+            try
+            {
+                string directory = Path.GetDirectoryName(m_balanceStoragePath);
+                if (!string.IsNullOrEmpty(directory))
+                    Directory.CreateDirectory(directory);
+
+                if (!File.Exists(m_balanceStoragePath))
+                    return;
+
+                foreach (string rawLine in File.ReadAllLines(m_balanceStoragePath))
+                {
+                    string line = rawLine.Trim();
+                    if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal))
+                        continue;
+
+                    string[] parts = line.Split('\t');
+                    if (parts.Length < 2)
+                        continue;
+                    if (UUID.TryParse(parts[0], out UUID agentID) && int.TryParse(parts[1], out int balance))
+                        m_balances[agentID] = balance;
+                }
+            }
+            catch (Exception e)
+            {
+                m_log.ErrorFormat("[MONEY]: Failed loading currency balances from {0}: {1}", m_balanceStoragePath, e.Message);
+            }
+        }
+
+        private void SaveBalancesLocked()
+        {
+            try
+            {
+                string directory = Path.GetDirectoryName(m_balanceStoragePath);
+                if (!string.IsNullOrEmpty(directory))
+                    Directory.CreateDirectory(directory);
+
+                List<string> lines = new List<string>();
+                lines.Add("# agent_id\tbalance");
+                foreach (KeyValuePair<UUID, int> entry in m_balances)
+                    lines.Add(entry.Key + "\t" + entry.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+                string tmp = m_balanceStoragePath + ".tmp";
+                File.WriteAllLines(tmp, lines);
+                if (File.Exists(m_balanceStoragePath))
+                    File.Delete(m_balanceStoragePath);
+                File.Move(tmp, m_balanceStoragePath);
+            }
+            catch (Exception e)
+            {
+                m_log.ErrorFormat("[MONEY]: Failed saving currency balances to {0}: {1}", m_balanceStoragePath, e.Message);
+            }
+        }
+
 
         #endregion
 
@@ -724,19 +950,65 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
 
         private void ValidateLandBuy(Object osender, EventManager.LandBuyArgs e)
         {
-
-
             lock (e)
             {
+                if (e.parcelPrice <= 0)
+                {
+                    e.economyValidated = true;
+                    return;
+                }
+
+                if (!AmountCovered(e.agentId, e.parcelPrice))
+                {
+                    IClientAPI client = LocateClientObject(e.agentId);
+                    client?.SendAgentAlertMessage("Insufficient funds to buy land.", false);
+                    e.economyValidated = false;
+                    return;
+                }
+
+                if (e.final && e.landValidated && e.amountDebited <= 0)
+                {
+                    if (Debit(e.agentId, e.parcelPrice, out string reason))
+                    {
+                        e.amountDebited = e.parcelPrice;
+                        e.transactionID = UUID.Random().GetHashCode() & Int32.MaxValue;
+                        e.economyValidated = true;
+                        BalanceUpdate(e.agentId, e.parcelOwnerID, true, "Land purchase", (int)TransactionType.Purchase, e.parcelPrice);
+                    }
+                    else
+                    {
+                        IClientAPI client = LocateClientObject(e.agentId);
+                        client?.SendAgentAlertMessage(reason, false);
+                        e.economyValidated = false;
+                    }
+                    return;
+                }
+
                 e.economyValidated = true;
             }
-
-
         }
 
         private void processLandBuy(Object osender, EventManager.LandBuyArgs e)
         {
+            lock (e)
+            {
+                if (!e.final || !e.landValidated || !e.economyValidated || e.parcelPrice <= 0 || e.amountDebited > 0)
+                    return;
 
+                if (Debit(e.agentId, e.parcelPrice, out string reason))
+                {
+                    e.amountDebited = e.parcelPrice;
+                    e.transactionID = UUID.Random().GetHashCode() & Int32.MaxValue;
+                    BalanceUpdate(e.agentId, e.parcelOwnerID, true, "Land purchase", (int)TransactionType.Purchase, e.parcelPrice);
+                }
+                else
+                {
+                    e.economyValidated = false;
+                    IClientAPI client = LocateClientObject(e.agentId);
+                    client?.SendAgentAlertMessage(reason, false);
+                    BalanceUpdate(e.agentId, e.parcelOwnerID, false, reason, (int)TransactionType.Purchase, e.parcelPrice);
+                }
+            }
         }
 
         /// <summary>
@@ -746,7 +1018,23 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
         /// <param name="e"></param>
         private void MoneyTransferAction(Object osender, EventManager.MoneyTransferArgs e)
         {
+            UUID payee = e.receiver;
+            UUID paidObject = UUID.Zero;
+            SceneObjectPart paidPart = findPrim(e.receiver);
+            if (paidPart != null)
+            {
+                paidObject = paidPart.UUID;
+                payee = paidPart.OwnerID;
+            }
 
+            bool result = TransferMoney(e.sender, payee, e.amount, e.transactiontype, e.description, out string reason);
+            string description = string.IsNullOrWhiteSpace(e.description) ? "Money transfer" : e.description;
+            if (!result && !string.IsNullOrWhiteSpace(reason))
+                description = reason;
+
+            BalanceUpdate(e.sender, payee, result, description, e.transactiontype, e.amount);
+            if (result && paidObject.IsNotZero())
+                OnObjectPaid?.Invoke(paidObject, e.sender, e.amount);
         }
 
         /// <summary>
@@ -790,7 +1078,7 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
 
         public int GetBalance(UUID agentID)
         {
-            return 0;
+            return GetFundsForAgentID(agentID);
         }
 
         // Please do not refactor these to be just one method
@@ -798,11 +1086,11 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
         //
         public bool UploadCovered(UUID agentID, int amount)
         {
-            return true;
+            return AmountCovered(agentID, amount);
         }
         public bool AmountCovered(UUID agentID, int amount)
         {
-            return true;
+            return m_allowNegativeBalances || amount <= 0 || GetFundsForAgentID(agentID) >= amount;
         }
 
         #endregion
@@ -817,13 +1105,9 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
                 return;
             }
 
-            if (salePrice != 0)
-            {
-                remoteClient.SendBlueBoxMessage(UUID.Zero, "", "Buying anything for a price other than zero is not implemented");
-                return;
-            }
-
             Scene s = LocateSceneClientIn(remoteClient.AgentId);
+            if (s == null)
+                return;
 
             // Implmenting base sale data checking here so the default OpenSimulator implementation isn't useless
             // combined with other implementations.  We're actually validating that the client is sending the data
@@ -835,14 +1119,13 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
 
             // Validate that the object exists in the scene the user is in
             SceneObjectPart part = s.GetSceneObjectPart(localID);
-            if(!part.IsRoot) // silent ignore non root parts
-                return;
-
             if (part == null || part.ParentGroup == null || part.ParentGroup.IsDeleted)
             {
                 remoteClient.SendAgentAlertMessage("Unable to buy now. The object was not found.", false);
                 return;
             }
+            if(!part.IsRoot) // silent ignore non root parts
+                return;
 
             if (part.ObjectSaleType == (byte)SaleType.Not)
             {
@@ -868,17 +1151,34 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
             }
 
             IBuySellModule module = s.RequestModuleInterface<IBuySellModule>();
-            if (module != null)
-                module.BuyObject(remoteClient, categoryID, localID, saleType, salePrice);
+            if (module == null)
+                return;
+
+            UUID sellerID = part.OwnerID;
+            if (salePrice > 0 && !AmountCovered(remoteClient.AgentId, salePrice))
+            {
+                remoteClient.SendAgentAlertMessage("Insufficient funds.", false);
+                BalanceUpdate(remoteClient.AgentId, sellerID, false, "Insufficient funds.", (int)TransactionType.Purchase, salePrice);
+                return;
+            }
+
+            if (module.BuyObject(remoteClient, categoryID, localID, saleType, salePrice) && salePrice > 0)
+            {
+                bool result = TransferMoney(remoteClient.AgentId, sellerID, salePrice, (int)TransactionType.Purchase, "Object purchase", out string reason);
+                BalanceUpdate(remoteClient.AgentId, sellerID, result, result ? "Object purchase" : reason, (int)TransactionType.Purchase, salePrice);
+            }
         }
 
         public void MoveMoney(UUID fromUser, UUID toUser, int amount, string text)
         {
+            MoveMoney(fromUser, toUser, amount, (MoneyTransactionType)0, text);
         }
 
         public bool MoveMoney(UUID fromUser, UUID toUser, int amount, MoneyTransactionType type, string text)
         {
-            return true;
+            bool result = TransferMoney(fromUser, toUser, amount, (int)type, text, out string reason);
+            BalanceUpdate(fromUser, toUser, result, result ? text : reason, (int)type, amount);
+            return result;
         }
     }
 
