@@ -1,0 +1,102 @@
+{
+  "suite": "lsl-second-life-compatibility",
+  "version": 1,
+  "runner": "doc/script-engine-examples/31_lsl_compatibility_lab_controller.lsl",
+  "regionWeb": "/regionweb/scripts",
+  "requiredConfig": [
+    "[ScriptExperiences] Enabled = true",
+    "[ScriptExperiences] AllowEstateManagers = true",
+    "[ScriptExperiences] KeyValueStoreEnabled = true"
+  ],
+  "cases": [
+    {
+      "id": "linkset-data",
+      "requiredPass": "PASS linkset data write/read",
+      "functions": [
+        "llLinksetDataWrite",
+        "llLinksetDataWriteProtected",
+        "llLinksetDataRead",
+        "llLinksetDataReadProtected",
+        "llLinksetDataFindKeys",
+        "llLinksetDataDelete",
+        "llLinksetDataDeleteProtected"
+      ]
+    },
+    {
+      "id": "json-hash-hmac",
+      "requiredPass": "PASS json/hash/hmac",
+      "functions": [
+        "llList2Json",
+        "llJsonSetValue",
+        "llJsonGetValue",
+        "llComputeHash",
+        "llHMAC"
+      ]
+    },
+    {
+      "id": "memory-profiler",
+      "requiredPass": "PASS memory/profiler",
+      "functions": [
+        "llGetUsedMemory",
+        "llGetFreeMemory",
+        "llGetMemoryLimit",
+        "llSetMemoryLimit",
+        "llGetSPMaxMemory",
+        "llScriptProfiler"
+      ]
+    },
+    {
+      "id": "object-details-costs",
+      "requiredPass": "PASS object details costs",
+      "functions": [
+        "llGetObjectDetails",
+        "OBJECT_SERVER_COST",
+        "OBJECT_STREAMING_COST",
+        "OBJECT_PHYSICS_COST",
+        "OBJECT_PRIM_EQUIVALENCE",
+        "OBJECT_RENDER_WEIGHT",
+        "OBJECT_DAMAGE_TYPE"
+      ]
+    },
+    {
+      "id": "pbr-gltf-overrides",
+      "requiredPass": "PASS PBR/GLTF override storage",
+      "functions": [
+        "llSetLinkGLTFOverrides",
+        "llGetLinkPrimitiveParams",
+        "PRIM_GLTF_BASE_COLOR",
+        "PRIM_GLTF_METALLIC_ROUGHNESS",
+        "OVERRIDE_GLTF_EXTENSION_JSON"
+      ]
+    },
+    {
+      "id": "combat2-quiet-window",
+      "requiredPass": "PASS Combat2 final_damage after quiet window",
+      "functions": [
+        "llDamage",
+        "llDetectedDamage",
+        "llAdjustDamage",
+        "llGetHealth",
+        "PRIM_HEALTH",
+        "PRIM_DAMAGE",
+        "on_damage",
+        "final_damage",
+        "on_death"
+      ]
+    },
+    {
+      "id": "pathfinding-local-backend",
+      "requiredPass": "PASS path_update after completed motion",
+      "functions": [
+        "llCreateCharacter",
+        "llGetClosestNavPoint",
+        "llGetStaticPath",
+        "llNavigateTo",
+        "path_update",
+        "PU_GOAL_REACHED",
+        "REQUIRE_LINE_OF_SIGHT",
+        "AVOID_CHARACTERS"
+      ]
+    }
+  ]
+}

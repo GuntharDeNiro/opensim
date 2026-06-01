@@ -164,6 +164,12 @@ The scripts use:
 - `llGetClosestNavPoint`
 - `llExecCharacterCmd`
 - `llSetSculptAnim`
+- `llLinksetDataWriteProtected`
+- `llLinksetDataReadProtected`
+- `llComputeHash`
+- `llHMAC`
+- `llSetLinkGLTFOverrides`
+- `llGetLinkPrimitiveParams`
 - `ANIM_ON`
 - `LOOP`
 - `DAMAGE_TYPE_*`
@@ -202,6 +208,15 @@ The scripts use:
 - `28_eep_water_environment_console.lsl`: EEP water console demonstrating `llGetEnvironment`, region/parcel `llSetEnvironment` and agent-local `llSetAgentEnvironment` water overrides.
 - `29_eep_sky_environment_console.lsl`: EEP sky console demonstrating persistent `SKY_*` plus `WATER_*` parameter overrides for region, parcel and agent-local environments.
 - `30_combat2_direct_path_sentry.lsl`: Combat2/pathfinding sentry demonstrating `on_damage`, `final_damage`, `on_death`, quiet-window pre-health damage transactions, damage metadata, persistent character options, completion-timed `path_update`, obstacle/avatar-aware terrain pathfinding and visible sculpt texture animation fallback.
+- `31_lsl_compatibility_lab_controller.lsl`: owner-run regression lab demonstrating pass/fail coverage for linkset data, JSON/hash/HMAC, memory/profiler, object details, PBR/GLTF override storage, Combat2 quiet-window damage and pathfinding callbacks.
+
+## Regression suite
+
+The repeatable test manifest lives in `doc/script-engine-regression/manifest.json`.
+Rez a prim, drop `31_lsl_compatibility_lab_controller.lsl` into it and touch the
+prim after each build. The script reports `PASS`/`FAIL` lines in owner chat and
+is the in-world companion to RegionWeb's `/regionweb/scripts` compatibility
+center.
 
 Stock OpenSim may fail to compile or run these scripts because Experience events,
 KVP functions, scripted-only sit flags and newer Second Life LSL compatibility

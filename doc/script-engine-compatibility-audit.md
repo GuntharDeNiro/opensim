@@ -178,6 +178,11 @@ so additions are deliberate and testable instead of guessed from individual scri
   - `llSetSculptAnim` now stores the requested sculpt animation mode, frame grid, frame range, rate and texture-sync flag in prim dynamic attributes.
   - The requested state is mirrored through the normal texture-animation update path to provide viewer-visible sculpt texture playback where a viewer honors texture animation.
 
+- Regression and RegionWeb compatibility center
+  - Converts RegionWeb `/regionweb/scripts` into an LSL Compatibility Center with documented signatures, return values, permissions, usage notes and implementation status for every locally tracked compatibility function.
+  - Adds `doc/script-engine-regression/manifest.json` as the repeatable checklist for post-build in-world compatibility verification.
+  - Adds `31_lsl_compatibility_lab_controller.lsl`, an owner-run in-world regression controller covering linkset data, JSON/hash/HMAC, script memory/profiler, object details, PBR/GLTF override storage, Combat2 quiet-window damage and pathfinding callback behavior.
+
 ## Missing Or Backend-Limited After This Pass
 
 - Linden Lab's proprietary baked navmesh service is still not present; this branch supplies terrain/object/avatar-clearance A* routing and persistent character state inside the simulator.

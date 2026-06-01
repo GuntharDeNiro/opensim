@@ -53,9 +53,9 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
         private const string ScriptEngineFeatureTitle = "Second Life-style script engine";
         private const string ScriptEngineFeatureBody =
-            "The script engine is moving closer to Second Life behavior with Experience-Lite permissions, scripted sit controls, key-value stores, linkset data, environment, estate-return, parcel media, parcel prim counts/details, guarded money transfer, inventory transfer, damage, RSA, attachment filter, identity lookup, privacy-aware agent language lookup, animation-state introspection, physics energy readback, object-detail cost readback, script memory/profiler diagnostics, GLTF material and physics primitive-param helpers.";
+            "The script engine is moving closer to Second Life behavior with Experience-Lite permissions, scripted sit controls, key-value stores, linkset data, environment, estate-return, parcel media, parcel prim counts/details, guarded money transfer, inventory transfer, damage, RSA, attachment filter, identity lookup, privacy-aware agent language lookup, animation-state introspection, physics energy readback, object-detail cost readback, script memory/profiler diagnostics, GLTF material and physics primitive-param helpers, plus a RegionWeb compatibility center and in-world regression lab.";
         private const string ScriptEngineFeatureOverview =
-            "The script engine now includes a wider Second Life-style scripting surface for modern estate systems. Trusted estate scripts can use Experience-Lite permissions, persistent experience key-value storage, linkset data with linkset_data events, scripted sit controls, linked sound controls, region and parcel environment helpers, estate return and terrain helpers, parcel media controls, same-owner simulator-wide parcel prim counts/details, guarded debit-permission money transfer, direct inventory and ownership transfer, direct damage helpers with Combat2-style pre-application damage transactions, cached identity lookup, privacy-aware agent language lookup, animation-state introspection, physics energy readback, object-detail cost/render/selection readback, script memory limit/profiler diagnostics, GLTF/render material primitive params with stored override readback, physics material primitive params, secure hashing/HMAC/RSA helpers, parameterized rez/derez workflows, filtered attachment inspection and HUD coordinate helpers without relying on brittle scripted workarounds. Second Life pathfinding character calls now provide persistent character option state, terrain-aware A* routing, parcel-stay handling and obstacle avoidance where OpenSim does not expose the proprietary SL navmesh service.";
+            "The script engine now includes a wider Second Life-style scripting surface for modern estate systems. Trusted estate scripts can use Experience-Lite permissions, persistent experience key-value storage, linkset data with linkset_data events, scripted sit controls, linked sound controls, region and parcel environment helpers, estate return and terrain helpers, parcel media controls, same-owner simulator-wide parcel prim counts/details, guarded debit-permission money transfer, direct inventory and ownership transfer, direct damage helpers with Combat2-style pre-application damage transactions, cached identity lookup, privacy-aware agent language lookup, animation-state introspection, physics energy readback, object-detail cost/render/selection readback, script memory limit/profiler diagnostics, GLTF/render material primitive params with stored override readback, physics material primitive params, secure hashing/HMAC/RSA helpers, parameterized rez/derez workflows, filtered attachment inspection and HUD coordinate helpers without relying on brittle scripted workarounds. Second Life pathfinding character calls now provide persistent character option state, terrain-aware A* routing, parcel-stay handling and obstacle avoidance where OpenSim does not expose the proprietary SL navmesh service. RegionWeb exposes a script compatibility center, and the example suite includes an in-world regression controller for post-build checks.";
 
         private readonly object m_sync = new object();
         private readonly Dictionary<UUID, Scene> m_scenesByID = new Dictionary<UUID, Scene>();
@@ -434,12 +434,14 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 }
             }
 
-            StringBuilder html = BeginPage("LSL Script Function Reference - " + estate.Title);
+            StringBuilder html = BeginPage("LSL Compatibility Center - " + estate.Title);
             html.Append("<main class=\"wrap script-reference\"><a class=\"back\" href=\"")
                 .Append(Html(m_basePath)).Append("/#features\">Back to estate</a>")
-                .Append("<p class=\"feature-kicker\">Script reference</p><h1>LSL Function Reference</h1>")
-                .Append("<p class=\"lead\">Expanded Second Life-style LSL functions implemented or corrected in this OpenSim build, with signatures, return values, permissions and exact in-world usage notes.</p>")
-                .Append("<p class=\"script-source\">Modeled after the public Second Life LSL function index, but scoped to the functions exposed by this simulator branch.</p>");
+                .Append("<p class=\"feature-kicker\">Script compatibility</p><h1>LSL Compatibility Center</h1>")
+                .Append("<p class=\"lead\">Expanded Second Life-style LSL functions implemented or corrected in this OpenSim build, with signatures, return values, permissions, compatibility status and exact in-world usage notes.</p>")
+                .Append("<p class=\"script-source\">Modeled after the public Second Life LSL function index, but scoped to the functions exposed by this simulator branch and backed by the in-world regression lab in <code>doc/script-engine-examples</code>.</p>");
+
+            AppendScriptCompatibilitySummary(html);
 
             if (focus != null)
             {
@@ -450,7 +452,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 return;
             }
 
-            html.Append("<section class=\"script-toc\"><h2>Functions</h2><div>");
+            html.Append("<section class=\"script-toc\" id=\"functions\"><h2>Functions</h2><div>");
             foreach (IGrouping<string, ScriptFunctionDoc> group in ScriptFunctionDocs.GroupBy(doc => doc.Category))
             {
                 html.Append("<a href=\"#").Append(Html(MakeSlug(group.Key))).Append("\">")
@@ -474,6 +476,31 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             SendHtml(response, html.ToString());
         }
 
+        private static void AppendScriptCompatibilitySummary(StringBuilder html)
+        {
+            Dictionary<string, int> statusCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (ScriptFunctionDoc doc in ScriptFunctionDocs)
+            {
+                string status = GetScriptFunctionStatus(doc);
+                int count;
+                statusCounts.TryGetValue(status, out count);
+                statusCounts[status] = count + 1;
+            }
+
+            html.Append("<section class=\"script-toc\"><h2>Coverage</h2><div>")
+                .Append("<a href=\"#functions\">Total documented <span>")
+                .Append(ScriptFunctionDocs.Length.ToString(CultureInfo.InvariantCulture))
+                .Append("</span></a>");
+
+            foreach (KeyValuePair<string, int> item in statusCounts.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                html.Append("<a href=\"#functions\">").Append(Html(item.Key)).Append(" <span>")
+                    .Append(item.Value.ToString(CultureInfo.InvariantCulture)).Append("</span></a>");
+            }
+
+            html.Append("</div><p class=\"script-source\">Use <code>31_lsl_compatibility_lab_controller.lsl</code> and <code>doc/script-engine-regression/manifest.json</code> as the repeatable regression checklist after each simulator build.</p></section>");
+        }
+
         private static void AppendScriptFunctionCard(StringBuilder html, ScriptFunctionDoc doc, string basePath, bool focused)
         {
             string slug = MakeSlug(doc.Name);
@@ -483,9 +510,11 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             else
                 html.Append("<a href=\"").Append(Html(basePath)).Append("/scripts/").Append(Html(slug)).Append("\">").Append(Html(doc.Name)).Append("</a>");
 
-            html.Append("</h3><span>").Append(Html(doc.Category)).Append("</span></div>")
+            html.Append("</h3><span>").Append(Html(doc.Category)).Append("<br>")
+                .Append(Html(GetScriptFunctionStatus(doc))).Append("</span></div>")
                 .Append("<p class=\"signature\"><code>").Append(Html(doc.Signature)).Append("</code></p>");
 
+            AppendScriptDetail(html, "Compatibility", GetScriptFunctionCoverage(doc));
             AppendScriptDetail(html, "Returns", doc.ReturnValue);
             AppendScriptDetail(html, "Use", doc.Usage);
             AppendScriptDetail(html, "Permissions", doc.Permissions);
@@ -507,6 +536,47 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             html.Append("<p class=\"script-detail\"><strong>").Append(Html(label)).Append(":</strong> ")
                 .Append(Html(value)).Append("</p>");
+        }
+
+        private static string GetScriptFunctionStatus(ScriptFunctionDoc doc)
+        {
+            string name = doc.Name ?? string.Empty;
+            string text = ((doc.Permissions ?? string.Empty) + " " + (doc.Notes ?? string.Empty) + " " + (doc.Usage ?? string.Empty)).ToLowerInvariant();
+
+            if (name == "llOpenFloater")
+                return "Protocol stub";
+            if (name == "llSetSculptAnim")
+                return "Viewer-visible fallback";
+            if (name == "llScriptProfiler")
+                return "Runtime telemetry";
+            if (text.Contains("linden's proprietary navmesh"))
+                return "OpenSim-local backend";
+            if (text.Contains("future"))
+                return "Forward-compatible storage";
+            if (text.Contains("trusted experience") || text.Contains("experience-lite"))
+                return "Experience trust";
+
+            return "Implemented";
+        }
+
+        private static string GetScriptFunctionCoverage(ScriptFunctionDoc doc)
+        {
+            string status = GetScriptFunctionStatus(doc);
+
+            if (status == "Protocol stub")
+                return "The SL signature is exposed and returns explicit simulator status, but viewer-side Linden floater services are not part of OpenSim.";
+            if (status == "Viewer-visible fallback")
+                return "The script API stores the requested SL state and mirrors it through viewer-visible compatibility packets available to OpenSim viewers.";
+            if (status == "Runtime telemetry")
+                return "The runtime records profiler state and measurements for simulator/RegionWeb inspection; a Linden viewer profiler panel is not part of the OpenSim protocol.";
+            if (status == "OpenSim-local backend")
+                return "The function is implemented on the local terrain/object/avatar backend because Linden's hosted pathfinding service is unavailable to OpenSim.";
+            if (status == "Forward-compatible storage")
+                return "The function accepts and persists current values plus future/extension payloads so scripts can be ported without losing data.";
+            if (status == "Experience trust")
+                return "The function follows SL Experience semantics through this build's local Experience-Lite trust and key-value backend.";
+
+            return "Implemented directly in the simulator script API with Second Life-style arguments, return values and event behavior where applicable.";
         }
 
         private void SendRegionPage(Scene scene, IOSHttpResponse response)
