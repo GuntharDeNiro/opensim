@@ -56,7 +56,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private const string ScriptEngineFeatureBody =
             "The script engine is moving closer to Second Life behavior with Experience-Lite permissions, scripted sit controls, key-value stores, linkset data, environment, estate-return, parcel media, parcel prim counts/details, guarded money transfer, inventory transfer, damage, RSA, attachment filter, identity lookup, privacy-aware agent language lookup, animation-state introspection, physics energy readback, object-detail cost readback, script memory/profiler diagnostics, GLTF material and physics primitive-param helpers, plus a RegionWeb compatibility center and in-world regression lab.";
         private const string ScriptEngineFeatureOverview =
-            "The script engine now includes a wider Second Life-style scripting surface for modern estate systems. Trusted estate scripts can use Experience-Lite permissions, persistent experience key-value storage, linkset data with linkset_data events, scripted sit controls, linked sound controls, region and parcel environment helpers, estate return and terrain helpers, parcel media controls, same-owner simulator-wide parcel prim counts/details, guarded debit-permission money transfer, direct inventory and ownership transfer, direct damage helpers with Combat2-style pre-application damage transactions, cached identity lookup, privacy-aware agent language lookup, animation-state introspection, physics energy readback, object-detail cost/render/selection readback, script memory limit/profiler diagnostics, GLTF/render material primitive params with stored override readback, physics material primitive params, secure hashing/HMAC/RSA helpers, parameterized rez/derez workflows, filtered attachment inspection and HUD coordinate helpers without relying on brittle scripted workarounds. Second Life pathfinding character calls now provide persistent character option state, terrain-aware A* routing, parcel-stay handling and obstacle avoidance where OpenSim does not expose the proprietary SL navmesh service. RegionWeb exposes a script compatibility center, and the example suite includes an in-world regression controller for post-build checks.";
+            "The script engine now includes a wider Second Life-style scripting surface for modern estate systems. Trusted estate scripts can use Experience-Lite permissions, persistent experience key-value storage, linkset data with linkset_data events, scripted sit controls, linked sound controls, region and parcel environment helpers, estate return and terrain helpers, parcel media controls, same-owner simulator-wide parcel prim counts/details, guarded debit-permission money transfer, direct inventory and ownership transfer, direct damage helpers with Combat2-style pre-application damage transactions, cached identity lookup, privacy-aware agent language lookup, animation-state introspection, physics energy readback, object-detail cost/render/selection readback, script memory limit/profiler diagnostics, GLTF/render material primitive params with stored override readback, physics material primitive params, secure hashing/HMAC/RSA helpers, parameterized rez/derez workflows, filtered attachment inspection and HUD coordinate helpers without relying on brittle scripted workarounds. Second Life pathfinding character calls now provide persistent character option state, baked terrain navmesh caching, terrain-aware A* routing, parcel-stay handling and dynamic object/avatar obstacle avoidance where OpenSim does not expose the proprietary SL navmesh service. RegionWeb exposes a script compatibility center, and the example suite includes an in-world regression controller for post-build checks.";
 
         private readonly object m_sync = new object();
         private readonly Dictionary<UUID, Scene> m_scenesByID = new Dictionary<UUID, Scene>();
@@ -987,7 +987,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Usage.Add("Use PRIM_PHYSICS_MATERIAL through llSetPrimitiveParams(), llGetPrimitiveParams(), llSetLinkPrimitiveParams() and llGetLinkPrimitiveParams() for SL-order gravity, restitution, friction and density workflows.");
                     content.Usage.Add("Use llMatchGroup(agent, group_keys) for same-region active-group checks without scripted llSameGroup relay objects.");
                     content.Usage.Add("Use llSetDamage(), llDamage(), llGetHealth(), PRIM_DAMAGE, PRIM_HEALTH, OBJECT_HEALTH, OBJECT_DAMAGE, OBJECT_DAMAGE_TYPE and DAMAGE_TYPE_* constants for supported health/damage workflows; on_damage scripts can call llAdjustDamage() before the transaction applies health.");
-                    content.Usage.Add("Pathfinding scripts can compile against llCreateCharacter(), llNavigateTo(), llGetStaticPath() and related CHARACTER_* APIs; OpenSim now persists character options, routes over terrain with A*, avoids scene-object and optional avatar bounds, honors parcel-stay settings and posts path_update when movement completes where the proprietary SL navmesh service is unavailable.");
+                    content.Usage.Add("Pathfinding scripts can compile against llCreateCharacter(), llNavigateTo(), llGetStaticPath() and related CHARACTER_* APIs; OpenSim now persists character options, routes over a baked terrain navmesh cache with A*, avoids scene-object and optional avatar bounds, honors parcel-stay settings and posts path_update when movement completes where the proprietary SL navmesh service is unavailable.");
                     content.Usage.Add("Use llHMAC(), llComputeHash(), llSignRSA() and llVerifyRSA() for signature checks, web callbacks and secure scripted handshakes.");
                     content.Usage.Add("Use llGetAttachedListFiltered(), ATTACH_ANY_HUD, FILTER_INCLUDE and FILTER_FLAG_HUDS for filtered attachment queries.");
                     content.Usage.Add("Use llDetectedRezzer() from sensor/collision/touch-style detected data when scripts need to identify object provenance.");
@@ -1005,7 +1005,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Notes.Add("The store is scoped per region/owner and persisted under KeyValueStorePath, making it useful for estate tools, games, rides and AI build workflows.");
                     content.Notes.Add("Use KeyValueStoreMaxKeys, KeyValueStoreMaxKeyBytes, KeyValueStoreMaxValueBytes, KeyValueStoreMaxStoreBytes and KeyValueStorePath to tune storage.");
                     content.Notes.Add("New constants documented by the script runtime include XP_ERROR_*, SIT_*, SIT_FLAG_*, LINKSETDATA_*, SOUND_*, REZ_*, REZ_FLAG_*, PARCEL_SALE_*, PARCEL_MEDIA_COMMAND_*, OBJECT_RETURN_*, OBJECT_* detail constants, ENV_*, SKY_*, WATER_*, TERRAIN_*, TRANSFER_*, FILTER_*, DAMAGE_TYPE_*, CHARACTER_*, PU_*, PRIM_SCRIPTED_SIT_ONLY, PRIM_ALLOW_UNSIT, PRIM_SIT_TARGET, PRIM_RENDER_MATERIAL, PRIM_GLTF_*, OVERRIDE_GLTF_* including OVERRIDE_GLTF_EXTENSION_JSON, PRIM_PHYSICS_MATERIAL and CHANGED_RENDER_MATERIAL.");
-                    content.Notes.Add("The pathfinding backend is simulator-side A* over terrain/object/avatar clearance bounds, not Linden Lab's proprietary baked navmesh generator. Combat2 damage adjustment is applied before health through a quiet-window transaction capped by a server-side timeout. Sculpt animation uses viewer-visible texture animation as the compatible transport. Profiler mode and counters are stored on prim dynamic attributes for local tooling/RegionWeb rather than a Linden viewer-only profiler capability.");
+                    content.Notes.Add("The pathfinding backend is simulator-side A* over a region-local baked terrain cache plus dynamic object/avatar clearance bounds, not Linden Lab's proprietary baked navmesh generator. Combat2 damage adjustment is applied before health through a quiet-window transaction capped by a server-side timeout. Sculpt animation uses viewer-visible texture animation as the compatible transport. Profiler mode and counters are stored on prim dynamic attributes for local tooling/RegionWeb rather than a Linden viewer-only profiler capability.");
                     content.Notes.Add("Existing RegionWeb feature files are merged with these built-in defaults at render time, so older auto-generated pages pick up the newer LSL surface without deleting local notes.");
                     break;
             }
@@ -1906,16 +1906,16 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             Doc("Text, JSON and color", "llReplaceSubString", "string llReplaceSubString(string src, string pattern, string replacement, integer count)", "Updated string.", "Replace regex pattern matches in a string.", "None.", "The regex is time-limited to protect the script thread."),
             Doc("Text, JSON and color", "llLinear2sRGB", "vector llLinear2sRGB(vector color)", "sRGB color vector.", "Convert linear color values to sRGB.", "None.", "Useful for PBR color workflows."),
             Doc("Text, JSON and color", "llsRGB2Linear", "vector llsRGB2Linear(vector color)", "Linear color vector.", "Convert sRGB color values to linear space.", "None.", "Useful before GLTF factor math."),
-            Doc("Pathfinding compatibility", "llCreateCharacter", "void llCreateCharacter(list options)", "No return value; posts path_update success.", "Initialize the local pathfinding character backend and persist CHARACTER_* options.", "Linden's proprietary navmesh service is not present.", "Stores speed, radius, length, avoidance mode and parcel-stay settings for subsequent route calls."),
-            Doc("Pathfinding compatibility", "llUpdateCharacter", "void llUpdateCharacter(list options)", "No return value; posts path_update success.", "Update persisted character options for SL-script compatibility.", "Linden's proprietary navmesh service is not present.", "Updated options are consumed by subsequent obstacle-aware movement calls."),
+            Doc("Pathfinding compatibility", "llCreateCharacter", "void llCreateCharacter(list options)", "No return value; posts path_update success.", "Initialize the local pathfinding character backend and persist CHARACTER_* options.", "Linden's proprietary navmesh service is not present.", "Stores speed, radius, length, avoidance mode and parcel-stay settings for subsequent route calls; route generation uses the cached terrain navmesh plus dynamic obstacle overlays."),
+            Doc("Pathfinding compatibility", "llUpdateCharacter", "void llUpdateCharacter(list options)", "No return value; posts path_update success.", "Update persisted character options for SL-script compatibility.", "Linden's proprietary navmesh service is not present.", "Updated options are consumed by subsequent cached-navmesh obstacle-aware movement calls."),
             Doc("Pathfinding compatibility", "llDeleteCharacter", "void llDeleteCharacter()", "No return value.", "Stop character motion and remove persisted local character state.", "None.", "Invalidates pending path completion events for the old movement."),
             Doc("Pathfinding compatibility", "llExecCharacterCmd", "void llExecCharacterCmd(integer command, list options)", "No return value; posts path_update.", "Stop, smooth-stop or jump a local pathfinding character.", "Object must not be an attachment or physical object.", "Stop commands invalidate pending completion events; CHARACTER_CMD_JUMP moves the object up locally when supported."),
-            Doc("Pathfinding compatibility", "llNavigateTo", "void llNavigateTo(vector goal, list options)", "No return value; posts path_update.", "Move the scripted object along an A* route over terrain while avoiding scene-object bounds and optional avatar clearance.", "Object must not be an attachment or physical object.", "Honors FORCE_DIRECT_PATH, REQUIRE_LINE_OF_SIGHT, CHARACTER_STAY_WITHIN_PARCEL and posts PU_GOAL_REACHED only after keyframed movement finishes."),
+            Doc("Pathfinding compatibility", "llNavigateTo", "void llNavigateTo(vector goal, list options)", "No return value; posts path_update.", "Move the scripted object along an A* route over cached terrain while avoiding scene-object bounds and optional avatar clearance.", "Object must not be an attachment or physical object.", "Honors FORCE_DIRECT_PATH, REQUIRE_LINE_OF_SIGHT, CHARACTER_STAY_WITHIN_PARCEL and posts PU_GOAL_REACHED only after keyframed movement finishes."),
             Doc("Pathfinding compatibility", "llWanderWithin", "void llWanderWithin(vector origin, vector distance, list options)", "No return value; posts path_update.", "Pick a random target inside the requested rectangle and route to it.", "Object must not be an attachment or physical object.", "Uses the same terrain/object/avatar obstacle backend as llNavigateTo."),
             Doc("Pathfinding compatibility", "llPursue", "void llPursue(key target, list options)", "No return value; posts path_update.", "Route toward an avatar/object target.", "Target must be known in the region.", "PURSUIT_OFFSET is honored before route generation."),
             Doc("Pathfinding compatibility", "llEvade", "void llEvade(key target, list options)", "No return value; posts path_update.", "Route away from an avatar/object target.", "Target must be known in the region.", "Uses the same local backend as llFleeFrom."),
             Doc("Pathfinding compatibility", "llFleeFrom", "void llFleeFrom(vector source, float distance, list options)", "No return value; posts path_update.", "Route away from a source point.", "Object must not be an attachment or physical object.", "The generated route is clamped inside the current region and remains terrain-aware and obstacle-aware."),
-            Doc("Pathfinding compatibility", "llGetStaticPath", "list llGetStaticPath(vector start, vector end, float radius, list parameters)", "A list [PU_GOAL_REACHED, waypoint...] or a PU_FAILURE_* code.", "Query the local terrain/static-obstacle path between two points.", "Linden's proprietary navmesh service is not present.", "Returns invalid-start/goal/unreachable failures and includes simplified waypoints on success; persisted character parcel/avoidance options influence the route."),
+            Doc("Pathfinding compatibility", "llGetStaticPath", "list llGetStaticPath(vector start, vector end, float radius, list parameters)", "A list [PU_GOAL_REACHED, waypoint...] or a PU_FAILURE_* code.", "Query the local cached terrain/static-obstacle path between two points.", "Linden's proprietary navmesh service is not present.", "Returns invalid-start/goal/unreachable failures and includes simplified waypoints on success; persisted character parcel/avoidance options influence the route."),
             Doc("Pathfinding compatibility", "llGetClosestNavPoint", "vector llGetClosestNavPoint(vector point, list options)", "The nearest terrain/object-clear point in the current region or ZERO_VECTOR.", "Conform a point to region bounds, terrain height and static obstacle clearance.", "None.", "Uses GCNP_RADIUS/CHARACTER_RADIUS as the minimum clearance above terrain/objects."),
             Doc("Misc compatibility", "llGenerateKey", "key llGenerateKey()", "A generated UUID.", "Generate a random UUID from script.", "None.", "Useful for local correlation ids."),
             Doc("Misc compatibility", "llGetAgentList", "list llGetAgentList(integer scope, list options)", "Agent keys.", "List agents matching scope/options.", "None.", "Use for region HUDs and access panels."),
@@ -1940,6 +1940,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         {
             List<ScriptFunctionDoc> docs = new List<ScriptFunctionDoc>(ScriptFunctionDocs);
             HashSet<string> documented = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            ApiInterfaceDocSet apiDocs = LoadApiInterfaceDocs();
 
             foreach (ScriptFunctionDoc doc in ScriptFunctionDocs)
                 documented.Add(doc.Name);
@@ -1950,14 +1951,30 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 if (!method.Name.StartsWith("ll", StringComparison.Ordinal) || documented.Contains(method.Name))
                     continue;
 
+                string apiDescription;
+                bool hasApiDescription = apiDocs.Descriptions.TryGetValue(method.Name, out apiDescription)
+                    && !string.IsNullOrWhiteSpace(apiDescription);
+                string signature;
+                if (!apiDocs.Signatures.TryGetValue(method.Name, out signature))
+                    signature = FormatScriptFunctionSignature(method);
+                string returnValue;
+                if (!apiDocs.ReturnValues.TryGetValue(method.Name, out returnValue))
+                    returnValue = FormatScriptFunctionReturn(method);
+                string usage = hasApiDescription
+                    ? apiDescription
+                    : "Auto-discovered from the public ILSL_Api surface so the RegionWeb reference stays complete when new LSL functions are exposed.";
+                string notes = hasApiDescription
+                    ? "Description imported from the //ApiDesc comment beside the ILSL_Api declaration; add a hand-written RegionWeb entry when this function receives compatibility-specific behavior, examples or caveats."
+                    : "Add a hand-written RegionWeb entry when this function receives compatibility-specific behavior, examples or caveats.";
+
                 docs.Add(Doc(
                     AutoScriptFunctionCategory,
                     method.Name,
-                    FormatScriptFunctionSignature(method),
-                    FormatScriptFunctionReturn(method),
-                    "Auto-discovered from the public ILSL_Api surface so the RegionWeb reference stays complete when new LSL functions are exposed.",
+                    signature,
+                    returnValue,
+                    usage,
                     "See the simulator implementation and normal LSL permission rules for runtime restrictions.",
-                    "Add a hand-written RegionWeb entry when this function receives compatibility-specific behavior, examples or caveats."));
+                    notes));
                 documented.Add(method.Name);
             }
 
@@ -1966,6 +1983,186 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 .ThenBy(doc => doc.Category, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(doc => doc.Name, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
+        }
+
+        private static ApiInterfaceDocSet LoadApiInterfaceDocs()
+        {
+            ApiInterfaceDocSet docs = new ApiInterfaceDocSet();
+            string sourcePath = FindApiInterfaceSourcePath();
+            if (string.IsNullOrEmpty(sourcePath))
+                return docs;
+
+            try
+            {
+                string pendingDescription = null;
+                foreach (string rawLine in File.ReadAllLines(sourcePath))
+                {
+                    string line = rawLine.Trim();
+                    if (line.StartsWith("//ApiDesc", StringComparison.Ordinal))
+                    {
+                        pendingDescription = line.Substring("//ApiDesc".Length).Trim();
+                        continue;
+                    }
+
+                    string methodName = ExtractInterfaceMethodName(line);
+                    if (methodName == null)
+                        continue;
+
+                    if (!string.IsNullOrWhiteSpace(pendingDescription))
+                        docs.Descriptions[methodName] = pendingDescription;
+                    docs.Signatures[methodName] = FormatSourceSignature(line);
+                    docs.ReturnValues[methodName] = FormatSourceReturnValue(line);
+                    pendingDescription = null;
+                }
+            }
+            catch (Exception)
+            {
+                return new ApiInterfaceDocSet();
+            }
+
+            return docs;
+        }
+
+        private static string FindApiInterfaceSourcePath()
+        {
+            string relativePath = Path.Combine("OpenSim", "Region", "ScriptEngine", "Shared", "Api", "Interface", "ILSL_Api.cs");
+            HashSet<string> roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            AddSearchRoots(roots, AppDomain.CurrentDomain.BaseDirectory);
+            AddSearchRoots(roots, Environment.CurrentDirectory);
+
+            foreach (string root in roots)
+            {
+                string candidate = Path.Combine(root, relativePath);
+                if (File.Exists(candidate))
+                    return candidate;
+            }
+
+            return string.Empty;
+        }
+
+        private static void AddSearchRoots(HashSet<string> roots, string start)
+        {
+            if (string.IsNullOrWhiteSpace(start))
+                return;
+
+            DirectoryInfo directory = new DirectoryInfo(start);
+            while (directory != null)
+            {
+                roots.Add(directory.FullName);
+                directory = directory.Parent;
+            }
+        }
+
+        private static string ExtractInterfaceMethodName(string line)
+        {
+            if (string.IsNullOrWhiteSpace(line) || !line.EndsWith(";", StringComparison.Ordinal))
+                return null;
+
+            int paren = line.IndexOf('(');
+            if (paren < 0)
+                return null;
+
+            string beforeParen = line.Substring(0, paren).Trim();
+            int lastSpace = beforeParen.LastIndexOf(' ');
+            if (lastSpace < 0 || lastSpace >= beforeParen.Length - 1)
+                return null;
+
+            string name = beforeParen.Substring(lastSpace + 1);
+            return name.StartsWith("ll", StringComparison.Ordinal) ? name : null;
+        }
+
+        private static string FormatSourceSignature(string line)
+        {
+            string declaration = line.Trim().TrimEnd(';').Trim();
+            int paren = declaration.IndexOf('(');
+            int close = declaration.LastIndexOf(')');
+            if (paren < 0 || close < paren)
+                return declaration;
+
+            string beforeParen = declaration.Substring(0, paren).Trim();
+            string[] beforeParts = beforeParen.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (beforeParts.Length < 2)
+                return declaration;
+
+            string returnType = FormatSourceLslType(beforeParts[beforeParts.Length - 2]);
+            string methodName = beforeParts[beforeParts.Length - 1];
+            string parameters = declaration.Substring(paren + 1, close - paren - 1).Trim();
+            StringBuilder signature = new StringBuilder();
+            signature.Append(returnType).Append(' ').Append(methodName).Append('(');
+
+            if (!string.IsNullOrWhiteSpace(parameters))
+            {
+                string[] parameterParts = parameters.Split(',');
+                for (int i = 0; i < parameterParts.Length; ++i)
+                {
+                    if (i > 0)
+                        signature.Append(", ");
+
+                    string parameter = parameterParts[i].Trim();
+                    string[] tokens = parameter.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (tokens.Length >= 2)
+                        signature.Append(FormatSourceLslType(tokens[0])).Append(' ').Append(tokens[1]);
+                    else
+                        signature.Append(parameter);
+                }
+            }
+
+            signature.Append(')');
+            return signature.ToString();
+        }
+
+        private static string FormatSourceReturnValue(string line)
+        {
+            string declaration = line.Trim();
+            int paren = declaration.IndexOf('(');
+            if (paren < 0)
+                return "Return value follows the ILSL_Api declaration.";
+
+            string beforeParen = declaration.Substring(0, paren).Trim();
+            string[] beforeParts = beforeParen.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (beforeParts.Length < 2)
+                return "Return value follows the ILSL_Api declaration.";
+
+            string returnType = FormatSourceLslType(beforeParts[beforeParts.Length - 2]);
+            if (returnType == "void")
+                return "No return value.";
+
+            return "Returns " + returnType + ".";
+        }
+
+        private static string FormatSourceLslType(string type)
+        {
+            switch (type)
+            {
+                case "void":
+                    return "void";
+                case "int":
+                case "uint":
+                case "short":
+                case "ushort":
+                case "byte":
+                case "sbyte":
+                case "bool":
+                case "LSL_Integer":
+                    return "integer";
+                case "double":
+                case "float":
+                case "LSL_Float":
+                    return "float";
+                case "string":
+                case "LSL_String":
+                    return "string";
+                case "LSL_Key":
+                    return "key";
+                case "LSL_List":
+                    return "list";
+                case "LSL_Vector":
+                    return "vector";
+                case "LSL_Rotation":
+                    return "rotation";
+                default:
+                    return type;
+            }
         }
 
         private static string FormatScriptFunctionSignature(MethodInfo method)
@@ -2043,6 +2240,13 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 || lower.StartsWith("llrequest", StringComparison.Ordinal)
                 || lower.StartsWith("llgetkey", StringComparison.Ordinal)
                 || lower.StartsWith("llgeneratekey", StringComparison.Ordinal);
+        }
+
+        private sealed class ApiInterfaceDocSet
+        {
+            public readonly Dictionary<string, string> Descriptions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            public readonly Dictionary<string, string> Signatures = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            public readonly Dictionary<string, string> ReturnValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
 
         private static ScriptFunctionDoc Doc(string category, string name, string signature, string returnValue, string usage, string permissions, string notes)

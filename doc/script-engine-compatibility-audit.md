@@ -102,6 +102,8 @@ so additions are deliberate and testable instead of guessed from individual scri
   - `llNavigateTo`, `llWanderWithin`, `llPatrolPoints`, `llPursue`, `llEvade`, `llFleeFrom` and stop/jump character commands use keyframed movement over A* routes that avoid scene-object bounds, optional avatar bounds and steep terrain steps.
   - Path completion events are now invalidated by stop/delete/new movement and `PU_GOAL_REACHED` is posted after keyframed movement completes instead of at route start.
   - `FORCE_DIRECT_PATH`, `REQUIRE_LINE_OF_SIGHT` and `CHARACTER_STAY_WITHIN_PARCEL` are honored by the local route backend where applicable.
+  - Route generation now bakes a per-region terrain navmesh cache with a terrain signature, slope-derived traversal costs and automatic invalidation when terrain changes.
+  - Dynamic scene-object and optional avatar bounds are applied as overlays on top of the baked terrain cache so moving obstacles do not require rebaking the whole region.
 
 - GLTF override helpers
   - Adds `llSetLinkGLTFOverrides` for material factor overrides backed by OpenSim render material override storage.
@@ -181,13 +183,15 @@ so additions are deliberate and testable instead of guessed from individual scri
 - Regression and RegionWeb compatibility center
   - Converts RegionWeb `/regionweb/scripts` into an LSL Compatibility Center with documented signatures, return values, permissions, usage notes and implementation status for every locally tracked compatibility function.
   - Auto-discovers any public `ll*` method exposed by `ILSL_Api` that does not yet have a hand-written RegionWeb entry, so newly added functions remain visible instead of silently falling out of the web reference.
+  - Imports `//ApiDesc` comments, source signatures and source return types from `ILSL_Api.cs` when the source tree is available, so the web reference keeps precise LSL-facing types instead of relying only on reflection aliases.
   - Adds `doc/script-engine-regression/manifest.json` as the repeatable checklist for post-build in-world compatibility verification.
   - Adds `31_lsl_compatibility_lab_controller.lsl`, an owner-run in-world regression controller covering linkset data, JSON/hash/HMAC, script memory/profiler, object details, PBR/GLTF override storage, Combat2 quiet-window damage and pathfinding callback behavior.
   - Adds `doc/script-engine-regression/report.py` to summarize OpenSim logs from the lab and fail when required manifest passes are missing.
+  - Adds `doc/script-engine-regression/sl_coverage.py` to compare the local `ILSL_Api` surface against the official Second Life Wiki LSL function category and emit missing/local-only function reports.
 
 ## Missing Or Backend-Limited After This Pass
 
-- Linden Lab's proprietary baked navmesh service is still not present; this branch supplies terrain/object/avatar-clearance A* routing and persistent character state inside the simulator.
+- Linden Lab's proprietary baked navmesh service is still not present; this branch supplies a per-region baked terrain cache, terrain/object/avatar-clearance A* routing and persistent character state inside the simulator.
 - Combat2 damage adjustment is pre-health through a server-side transaction/quiet window; it still does not expose a Linden-owned external Combat2 service contract.
 - Full arbitrary EEP day-cycle frame/track asset editing beyond supported day info, sky tracks and persistent sky/water parameter subsets.
 - Unsupported or future GLTF extensions outside the supported SL PBR material fields.
@@ -197,7 +201,7 @@ so additions are deliberate and testable instead of guessed from individual scri
 
 ## Next High-Value Buckets
 
-- Pathfinding backend work if OpenSim gains a baked region navmesh provider beyond the current local A* grid and object/avatar clearance model.
+- Pathfinding backend work if OpenSim gains a Linden-compatible region navmesh provider beyond the current local baked terrain cache and dynamic object/avatar clearance model.
 - Environment functions: advanced day-cycle/track editing if OpenSim exposes more SL-compatible EEP storage primitives.
 - Render material functions: additional GLTF extension inspection if OpenSim exposes those asset fields safely.
 - Damage/combat functions: protocol-level Combat2 service parity if OpenSim gains Linden-compatible simulator/viewer contracts beyond the current local pre-health transaction model.

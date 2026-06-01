@@ -147,12 +147,15 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         private const float NavCellSize = 2.0f;
         private const float NavMaxStepHeight = 1.75f;
         private const int NavMaxVisitedCells = 18000;
+        private const double NavBakeMaxAgeSeconds = 30.0;
         private static readonly object m_scriptEnergyLock = new();
         private static readonly Dictionary<UUID, ScriptEnergyState> m_scriptEnergy = new();
         private static readonly object m_combatDamageLock = new();
         private static readonly Dictionary<DetectParams, CombatDamageTransaction> m_combatDamageTransactions = new();
         private static readonly object m_characterNavLock = new();
         private static readonly Dictionary<UUID, CharacterNavState> m_characterNavStates = new();
+        private static readonly object m_bakedNavMeshLock = new();
+        private static readonly Dictionary<UUID, BakedNavMesh> m_bakedNavMeshes = new();
         private static readonly object m_scriptExperienceKvpLock = new();
         private static readonly Dictionary<string, Dictionary<string, string>> m_scriptExperienceKvpStores = new();
         private static readonly HashSet<string> m_scriptExperienceKvpLoadedScopes = new();
@@ -175,6 +178,72 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         {
             public bool ForceDirectPath;
             public bool RequireLineOfSight;
+        }
+
+        private sealed class BakedNavMesh
+        {
+            public UUID RegionID;
+            public float RegionSizeX;
+            public float RegionSizeY;
+            public float CellSize;
+            public int Width;
+            public int Height;
+            public float MaxX;
+            public float MaxY;
+            public long TerrainSignature;
+            public double BakeTime;
+            public float[] Ground;
+            public bool[] Walkable;
+            public float[] Cost;
+
+            public int TotalCells => Width * Height;
+
+            public int CellX(float x)
+            {
+                return Math.Clamp((int)(Math.Clamp(x, 0f, MaxX) / CellSize), 0, Width - 1);
+            }
+
+            public int CellY(float y)
+            {
+                return Math.Clamp((int)(Math.Clamp(y, 0f, MaxY) / CellSize), 0, Height - 1);
+            }
+
+            public int CellIndex(int cx, int cy)
+            {
+                return cy * Width + cx;
+            }
+
+            public int IndexX(int index)
+            {
+                return index % Width;
+            }
+
+            public int IndexY(int index)
+            {
+                return index / Width;
+            }
+
+            public float CellWorldX(int cx)
+            {
+                return Math.Clamp(cx * CellSize + CellSize * 0.5f, 0f, MaxX);
+            }
+
+            public float CellWorldY(int cy)
+            {
+                return Math.Clamp(cy * CellSize + CellSize * 0.5f, 0f, MaxY);
+            }
+
+            public Vector3 CellPoint(int index, float radius)
+            {
+                float x = CellWorldX(IndexX(index));
+                float y = CellWorldY(IndexY(index));
+                return new Vector3(x, y, Ground[index] + Math.Max(radius, 0.05f));
+            }
+
+            public bool IsWalkable(int cx, int cy)
+            {
+                return cx >= 0 && cy >= 0 && cx < Width && cy < Height && Walkable[CellIndex(cx, cy)];
+            }
         }
 
         private sealed class CharacterNavState
@@ -11655,9 +11724,135 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             return TryBuildNavPath(start, goal, radius, GetCharacterState(false), new NavRequestOptions(), out path);
         }
 
+        private long ComputeNavTerrainSignature()
+        {
+            unchecked
+            {
+                long hash = 1469598103934665603L;
+                float sizeX = Math.Max(1f, World.RegionInfo.RegionSizeX);
+                float sizeY = Math.Max(1f, World.RegionInfo.RegionSizeY);
+                int samples = 16;
+
+                hash = (hash * 1099511628211L) ^ World.RegionInfo.RegionID.GetHashCode();
+                hash = (hash * 1099511628211L) ^ (int)Math.Round(sizeX * 10f);
+                hash = (hash * 1099511628211L) ^ (int)Math.Round(sizeY * 10f);
+
+                for (int sy = 0; sy <= samples; ++sy)
+                {
+                    float y = Math.Clamp(sizeY * sy / samples, 0f, sizeY - 0.001f);
+                    for (int sx = 0; sx <= samples; ++sx)
+                    {
+                        float x = Math.Clamp(sizeX * sx / samples, 0f, sizeX - 0.001f);
+                        int quantizedHeight = (int)Math.Round(World.GetGroundHeight(x, y) * 100f);
+                        hash = (hash * 1099511628211L) ^ quantizedHeight;
+                    }
+                }
+
+                return hash;
+            }
+        }
+
+        private BakedNavMesh GetBakedNavMesh()
+        {
+            UUID regionID = World.RegionInfo.RegionID;
+            float regionSizeX = World.RegionInfo.RegionSizeX;
+            float regionSizeY = World.RegionInfo.RegionSizeY;
+            long terrainSignature = ComputeNavTerrainSignature();
+            double now = Util.GetTimeStamp();
+
+            lock (m_bakedNavMeshLock)
+            {
+                if (m_bakedNavMeshes.TryGetValue(regionID, out BakedNavMesh cached)
+                    && cached.RegionSizeX == regionSizeX
+                    && cached.RegionSizeY == regionSizeY
+                    && cached.CellSize == NavCellSize
+                    && cached.TerrainSignature == terrainSignature
+                    && now - cached.BakeTime <= NavBakeMaxAgeSeconds)
+                {
+                    return cached;
+                }
+            }
+
+            BakedNavMesh baked = BakeNavMesh(regionID, regionSizeX, regionSizeY, terrainSignature);
+
+            lock (m_bakedNavMeshLock)
+                m_bakedNavMeshes[regionID] = baked;
+
+            return baked;
+        }
+
+        private BakedNavMesh BakeNavMesh(UUID regionID, float regionSizeX, float regionSizeY, long terrainSignature)
+        {
+            BakedNavMesh mesh = new BakedNavMesh
+            {
+                RegionID = regionID,
+                RegionSizeX = regionSizeX,
+                RegionSizeY = regionSizeY,
+                CellSize = NavCellSize,
+                Width = Math.Max(1, (int)Math.Ceiling(regionSizeX / NavCellSize)),
+                Height = Math.Max(1, (int)Math.Ceiling(regionSizeY / NavCellSize)),
+                MaxX = Math.Max(0f, regionSizeX - 0.001f),
+                MaxY = Math.Max(0f, regionSizeY - 0.001f),
+                TerrainSignature = terrainSignature,
+                BakeTime = Util.GetTimeStamp()
+            };
+
+            int total = mesh.TotalCells;
+            mesh.Ground = new float[total];
+            mesh.Walkable = new bool[total];
+            mesh.Cost = new float[total];
+
+            for (int cy = 0; cy < mesh.Height; ++cy)
+            {
+                for (int cx = 0; cx < mesh.Width; ++cx)
+                {
+                    int index = mesh.CellIndex(cx, cy);
+                    mesh.Ground[index] = World.GetGroundHeight(mesh.CellWorldX(cx), mesh.CellWorldY(cy));
+                    mesh.Walkable[index] = !float.IsNaN(mesh.Ground[index]) && !float.IsInfinity(mesh.Ground[index]);
+                    mesh.Cost[index] = 1f;
+                }
+            }
+
+            for (int cy = 0; cy < mesh.Height; ++cy)
+            {
+                for (int cx = 0; cx < mesh.Width; ++cx)
+                {
+                    int index = mesh.CellIndex(cx, cy);
+                    if (!mesh.Walkable[index])
+                        continue;
+
+                    float maxDelta = 0f;
+                    for (int oy = -1; oy <= 1; ++oy)
+                    {
+                        for (int ox = -1; ox <= 1; ++ox)
+                        {
+                            if (ox == 0 && oy == 0)
+                                continue;
+
+                            int nx = cx + ox;
+                            int ny = cy + oy;
+                            if (nx < 0 || ny < 0 || nx >= mesh.Width || ny >= mesh.Height)
+                                continue;
+
+                            int neighbor = mesh.CellIndex(nx, ny);
+                            if (!mesh.Walkable[neighbor])
+                                continue;
+
+                            maxDelta = Math.Max(maxDelta, Math.Abs(mesh.Ground[index] - mesh.Ground[neighbor]));
+                        }
+                    }
+
+                    mesh.Cost[index] = 1f + Math.Min(6f, maxDelta / Math.Max(0.1f, NavMaxStepHeight));
+                }
+            }
+
+            return mesh;
+        }
+
         private bool TryBuildNavPath(Vector3 start, Vector3 goal, float radius, CharacterNavState state, NavRequestOptions request, out List<Vector3> path)
         {
             path = new List<Vector3>();
+            BakedNavMesh navMesh = GetBakedNavMesh();
             List<NavObstacle> obstacles = BuildNavObstacles(m_host.ParentGroup, radius, state);
             float maxStepHeight = NavMaxStepHeight;
             bool stayWithinParcel = false;
@@ -11672,20 +11867,6 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     sourceParcel = World.LandChannel?.GetLandObject(start.X, start.Y);
             }
 
-            float maxX = Math.Max(0f, World.RegionInfo.RegionSizeX - 0.001f);
-            float maxY = Math.Max(0f, World.RegionInfo.RegionSizeY - 0.001f);
-            int width = Math.Max(1, (int)Math.Ceiling(World.RegionInfo.RegionSizeX / NavCellSize));
-            int height = Math.Max(1, (int)Math.Ceiling(World.RegionInfo.RegionSizeY / NavCellSize));
-            int total = width * height;
-
-            int CellX(float x) => Math.Clamp((int)(Math.Clamp(x, 0f, maxX) / NavCellSize), 0, width - 1);
-            int CellY(float y) => Math.Clamp((int)(Math.Clamp(y, 0f, maxY) / NavCellSize), 0, height - 1);
-            int CellIndex(int cx, int cy) => cy * width + cx;
-            int IndexX(int index) => index % width;
-            int IndexY(int index) => index / width;
-            float CellWorldX(int cx) => Math.Clamp(cx * NavCellSize + NavCellSize * 0.5f, 0f, maxX);
-            float CellWorldY(int cy) => Math.Clamp(cy * NavCellSize + NavCellSize * 0.5f, 0f, maxY);
-
             bool IsAllowedParcel(float x, float y)
             {
                 if (!stayWithinParcel || sourceParcel == null)
@@ -11697,11 +11878,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
             bool IsWalkable(int cx, int cy)
             {
-                if (cx < 0 || cy < 0 || cx >= width || cy >= height)
+                if (!navMesh.IsWalkable(cx, cy))
                     return false;
 
-                float x = CellWorldX(cx);
-                float y = CellWorldY(cy);
+                float x = navMesh.CellWorldX(cx);
+                float y = navMesh.CellWorldY(cy);
                 return IsAllowedParcel(x, y) && !IsNavPointBlocked(x, y, obstacles);
             }
 
@@ -11729,7 +11910,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             {
                 if (IsWalkable(cx, cy))
                 {
-                    index = CellIndex(cx, cy);
+                    index = navMesh.CellIndex(cx, cy);
                     return true;
                 }
 
@@ -11744,7 +11925,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
                             if (IsWalkable(x, y))
                             {
-                                index = CellIndex(x, y);
+                                index = navMesh.CellIndex(x, y);
                                 return true;
                             }
                         }
@@ -11757,15 +11938,13 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
             Vector3 CellPoint(int index)
             {
-                float x = CellWorldX(IndexX(index));
-                float y = CellWorldY(IndexY(index));
-                return new Vector3(x, y, World.GetGroundHeight(x, y) + Math.Max(radius, 0.05f));
+                return navMesh.CellPoint(index, radius);
             }
 
-            int startCx = CellX(start.X);
-            int startCy = CellY(start.Y);
-            int goalCx = CellX(goal.X);
-            int goalCy = CellY(goal.Y);
+            int startCx = navMesh.CellX(start.X);
+            int startCy = navMesh.CellY(start.Y);
+            int goalCx = navMesh.CellX(goal.X);
+            int goalCy = navMesh.CellY(goal.Y);
 
             if (!TryFindNearestWalkableCell(startCx, startCy, 2, out int startIndex))
                 return false;
@@ -11773,9 +11952,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             if (!TryFindNearestWalkableCell(goalCx, goalCy, 12, out int goalIndex))
                 return false;
 
-            if (startIndex != CellIndex(startCx, startCy))
+            if (startIndex != navMesh.CellIndex(startCx, startCy))
                 start = CellPoint(startIndex);
-            if (goalIndex != CellIndex(goalCx, goalCy))
+            if (goalIndex != navMesh.CellIndex(goalCx, goalCy))
                 goal = CellPoint(goalIndex);
 
             bool directLineOfSight = HasAllowedLineOfSight(start, goal);
@@ -11789,6 +11968,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 return true;
             }
 
+            int total = navMesh.TotalCells;
             float[] gScore = new float[total];
             float[] fScore = new float[total];
             int[] cameFrom = new int[total];
@@ -11805,8 +11985,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
             float Heuristic(int index)
             {
-                int dx = IndexX(index) - IndexX(goalIndex);
-                int dy = IndexY(index) - IndexY(goalIndex);
+                int dx = navMesh.IndexX(index) - navMesh.IndexX(goalIndex);
+                int dy = navMesh.IndexY(index) - navMesh.IndexY(goalIndex);
                 return MathF.Sqrt(dx * dx + dy * dy) * NavCellSize;
             }
 
@@ -11858,9 +12038,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 }
 
                 closed[current] = true;
-                int currentX = IndexX(current);
-                int currentY = IndexY(current);
-                float currentGround = World.GetGroundHeight(CellWorldX(currentX), CellWorldY(currentY));
+                int currentX = navMesh.IndexX(current);
+                int currentY = navMesh.IndexY(current);
+                float currentGround = navMesh.Ground[current];
 
                 for (int i = 0; i < offsets.Length; i += 2)
                 {
@@ -11869,17 +12049,18 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     if (!IsWalkable(nx, ny))
                         continue;
 
-                    int neighbor = CellIndex(nx, ny);
+                    int neighbor = navMesh.CellIndex(nx, ny);
                     if (closed[neighbor])
                         continue;
 
-                    float neighborGround = World.GetGroundHeight(CellWorldX(nx), CellWorldY(ny));
+                    float neighborGround = navMesh.Ground[neighbor];
                     float heightDelta = Math.Abs(neighborGround - currentGround);
                     if (heightDelta > maxStepHeight)
                         continue;
 
                     bool diagonal = offsets[i] != 0 && offsets[i + 1] != 0;
                     float stepCost = diagonal ? NavCellSize * 1.41421356f : NavCellSize;
+                    stepCost *= navMesh.Cost[neighbor];
                     float tentative = gScore[current] + stepCost + heightDelta * 0.35f;
                     if (tentative >= gScore[neighbor])
                         continue;
@@ -11903,27 +12084,30 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             if (!TryGetDirectNavPoint(point, radius, clamp, out result))
                 return false;
 
+            BakedNavMesh navMesh = GetBakedNavMesh();
             List<NavObstacle> obstacles = BuildNavObstacles(m_host.ParentGroup, radius, GetCharacterState(false));
-            if (!IsNavPointBlocked(result.X, result.Y, obstacles))
+            int centerX = navMesh.CellX(result.X);
+            int centerY = navMesh.CellY(result.Y);
+            if (navMesh.IsWalkable(centerX, centerY) && !IsNavPointBlocked(result.X, result.Y, obstacles))
                 return true;
 
-            float maxX = Math.Max(0f, World.RegionInfo.RegionSizeX - 0.001f);
-            float maxY = Math.Max(0f, World.RegionInfo.RegionSizeY - 0.001f);
-            for (float ring = NavCellSize; ring <= NavCellSize * 12f; ring += NavCellSize)
+            for (int ring = 1; ring <= 12; ++ring)
             {
-                for (float y = result.Y - ring; y <= result.Y + ring; y += NavCellSize)
+                for (int cy = centerY - ring; cy <= centerY + ring; ++cy)
                 {
-                    for (float x = result.X - ring; x <= result.X + ring; x += NavCellSize)
+                    for (int cx = centerX - ring; cx <= centerX + ring; ++cx)
                     {
-                        if (Math.Abs(x - result.X) < ring && Math.Abs(y - result.Y) < ring)
+                        if (Math.Abs(cx - centerX) < ring && Math.Abs(cy - centerY) < ring)
+                            continue;
+                        if (!navMesh.IsWalkable(cx, cy))
                             continue;
 
-                        float sx = Math.Clamp(x, 0f, maxX);
-                        float sy = Math.Clamp(y, 0f, maxY);
+                        float sx = navMesh.CellWorldX(cx);
+                        float sy = navMesh.CellWorldY(cy);
                         if (IsNavPointBlocked(sx, sy, obstacles))
                             continue;
 
-                        result = new Vector3(sx, sy, World.GetGroundHeight(sx, sy) + Math.Max(radius, 0.05f));
+                        result = navMesh.CellPoint(navMesh.CellIndex(cx, cy), radius);
                         return true;
                     }
                 }

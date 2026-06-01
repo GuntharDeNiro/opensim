@@ -35,6 +35,25 @@ The reporter compares observed `PASS`/`FAIL` lines with `manifest.json` and
 returns a non-zero exit code when a required compatibility case is missing or
 failed.
 
+## Second Life coverage diff
+
+To compare the local `ILSL_Api` surface with the official Second Life Wiki LSL
+function index:
+
+```bash
+python3 doc/script-engine-regression/sl_coverage.py
+```
+
+On a machine without internet access, save the wiki category HTML or provide a
+plain text file containing one `llFunction` per line:
+
+```bash
+python3 doc/script-engine-regression/sl_coverage.py --source Category_LSL_Functions.html
+```
+
+Use `--json-out coverage.json` to write a machine-readable report with
+implemented, missing and local-only functions.
+
 ## Pass criteria
 
 - The script compiles without missing constants, missing functions or event
