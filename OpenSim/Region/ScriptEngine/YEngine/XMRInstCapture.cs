@@ -26,6 +26,7 @@
  */
 
 using System;
+using System.Globalization;
 using System.IO;
 using System.Xml;
 using OpenSim.Framework;
@@ -296,6 +297,18 @@ namespace OpenSim.Region.ScriptEngine.Yengine
             XmlAttribute d_velocity = doc.CreateAttribute("", "velocity", "");
             d_velocity.Value = d.Velocity.ToString();
             detectParamsN.Attributes.Append(d_velocity);
+
+            XmlAttribute d_damage = doc.CreateAttribute("", "damage", "");
+            d_damage.Value = d.Damage.ToString(CultureInfo.InvariantCulture);
+            detectParamsN.Attributes.Append(d_damage);
+
+            XmlAttribute d_originalDamage = doc.CreateAttribute("", "originalDamage", "");
+            d_originalDamage.Value = d.OriginalDamage.ToString(CultureInfo.InvariantCulture);
+            detectParamsN.Attributes.Append(d_originalDamage);
+
+            XmlAttribute d_damageType = doc.CreateAttribute("", "damageType", "");
+            d_damageType.Value = d.DamageType.ToString(CultureInfo.InvariantCulture);
+            detectParamsN.Attributes.Append(d_damageType);
 
             return detectParamsN;
         }

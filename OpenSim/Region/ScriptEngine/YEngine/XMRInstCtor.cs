@@ -30,6 +30,7 @@ using System.Threading;
 using System.Reflection;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Security.Policy;
 using System.IO;
 using System.Xml;
@@ -1068,6 +1069,18 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                     detprm.Velocity = new LSL_Types.Vector3(detxml.Attributes.GetNamedItem("velocity").Value);
 
                     detprm.Rotation = new LSL_Types.Quaternion(detxml.Attributes.GetNamedItem("rotation").Value);
+
+                    XmlNode damageNode = detxml.Attributes.GetNamedItem("damage");
+                    if (damageNode != null)
+                        detprm.Damage = double.Parse(damageNode.Value, CultureInfo.InvariantCulture);
+
+                    XmlNode originalDamageNode = detxml.Attributes.GetNamedItem("originalDamage");
+                    if (originalDamageNode != null)
+                        detprm.OriginalDamage = double.Parse(originalDamageNode.Value, CultureInfo.InvariantCulture);
+
+                    XmlNode damageTypeNode = detxml.Attributes.GetNamedItem("damageType");
+                    if (damageTypeNode != null)
+                        detprm.DamageType = Int32.Parse(damageTypeNode.Value, CultureInfo.InvariantCulture);
 
                     detected.Add(detprm);
                     detprm = new DetectParams();

@@ -94,6 +94,7 @@ The scripts use:
 - `SKY_REFLECTION_PROBE_AMBIANCE`
 - `SKY_STAR_BRIGHTNESS`
 - `SKY_SUN`
+- `SKY_TRACKS`
 - `SKY_CLOUD_TEXTURE`
 - `SKY_MOON_TEXTURE`
 - `SKY_SUN_TEXTURE`
@@ -144,10 +145,30 @@ The scripts use:
 - `ENV_NOT_EXPERIENCE`
 - `ENV_NO_EXPERIENCE_PERMISSION`
 - `ENV_INVALID_AGENT`
+- `ENVIRONMENT_DAYINFO`
 - `TRANSFER_DEST`
 - `TRANSFER_FLAGS`
 - `TRANSFER_FLAG_COPY`
 - `TRANSFER_FLAG_TAKE`
+- `on_damage`
+- `final_damage`
+- `on_death`
+- `llDetectedDamage`
+- `llAdjustDamage`
+- `llDamage`
+- `llGetHealth`
+- `llCreateCharacter`
+- `llNavigateTo`
+- `llWanderWithin`
+- `llGetStaticPath`
+- `llGetClosestNavPoint`
+- `llExecCharacterCmd`
+- `llSetSculptAnim`
+- `ANIM_ON`
+- `LOOP`
+- `DAMAGE_TYPE_*`
+- `CHARACTER_*`
+- `PU_*`
 
 ## Files
 
@@ -180,6 +201,7 @@ The scripts use:
 - `27_avatar_visual_param_inspector.lsl`: avatar visual parameter inspector demonstrating `llGetVisualParams` ids, names, aliases, unsupported entries, owner/toucher scans and periodic watch mode.
 - `28_eep_water_environment_console.lsl`: EEP water console demonstrating `llGetEnvironment`, region/parcel `llSetEnvironment` and agent-local `llSetAgentEnvironment` water overrides.
 - `29_eep_sky_environment_console.lsl`: EEP sky console demonstrating persistent `SKY_*` plus `WATER_*` parameter overrides for region, parcel and agent-local environments.
+- `30_combat2_direct_path_sentry.lsl`: Combat2/direct-path sentry demonstrating `on_damage`, `final_damage`, `on_death`, damage metadata, damage adjustment metadata and terrain-aware pathfinding fallback movement.
 
 Stock OpenSim may fail to compile or run these scripts because Experience events,
 KVP functions, scripted-only sit flags and newer Second Life LSL compatibility

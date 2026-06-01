@@ -408,6 +408,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
               void llSetContentType(LSL_Key id, LSL_Integer type);
               void llSetDamage(double damage);
               void llDamage(LSL_Key target, LSL_Float damage, LSL_Integer damage_type);
+              void llAdjustDamage(LSL_Integer number, LSL_Float damage);
               void llAdjustDamage(LSL_Float damage);
           LSL_List llDetectedDamage(LSL_Integer number);
         LSL_Float llGetHealth(LSL_String key);

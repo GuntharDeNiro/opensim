@@ -6299,15 +6299,62 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             return land is not null && (land.Flags & (uint)ParcelFlags.AllowDamage) != 0;
         }
 
-        private void ApplyDamageToPresence(ScenePresence presence, float damage)
+        private DetectParams[] CreateDamageDetectParams(float damage, int damageType)
         {
+            DetectParams detect = new()
+            {
+                Key = m_host.UUID,
+                Damage = damage,
+                OriginalDamage = damage,
+                DamageType = damageType
+            };
+            detect.Populate(World);
+            return new[] { detect };
+        }
+
+        private void PostCombatEventToObject(uint localID, string eventName, DetectParams[] detects)
+        {
+            object[] args = eventName == "on_death"
+                ? Array.Empty<object>()
+                : new object[] { detects?.Length ?? 0 };
+
+            m_ScriptEngine.PostObjectEvent(localID, new EventParams(
+                eventName,
+                args,
+                detects ?? Array.Empty<DetectParams>()));
+        }
+
+        private void PostCombatEventToPresence(ScenePresence presence, string eventName, DetectParams[] detects)
+        {
+            if (presence is null || !presence.HasAttachments())
+                return;
+
+            foreach (SceneObjectGroup attachment in presence.GetAttachments())
+            {
+                SceneObjectPart root = attachment?.RootPart;
+                if (root != null)
+                    PostCombatEventToObject(root.LocalId, eventName, detects);
+            }
+        }
+
+        private void ApplyDamageToPresence(ScenePresence presence, float damage, int damageType)
+        {
+            DetectParams[] detects = CreateDamageDetectParams(damage, damageType);
+            PostCombatEventToPresence(presence, "on_damage", detects);
+
             float health = presence.Health - damage;
             if (health > 100f)
                 health = 100f;
 
             presence.setHealthWithUpdate(health);
+
+            detects[0].Damage = damage;
+            PostCombatEventToPresence(presence, "final_damage", detects);
+
             if (health > 0)
                 return;
+
+            PostCombatEventToPresence(presence, "on_death", Array.Empty<DetectParams>());
 
             if (presence.IsNPC)
             {
@@ -6321,6 +6368,30 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             presence.Scene.TeleportClientHome(presence.UUID, presence.ControllingClient);
         }
 
+        private void ApplyDamageToObject(SceneObjectPart target, float damage, int damageType)
+        {
+            SceneObjectPart root = target.ParentGroup?.RootPart ?? target;
+            DetectParams[] detects = CreateDamageDetectParams(damage, damageType);
+
+            PostCombatEventToObject(root.LocalId, "on_damage", detects);
+
+            float health = root.GetLslHealth();
+            bool hadHealth = health > 0f;
+            if (hadHealth)
+            {
+                health -= damage;
+                if (health < 0f)
+                    health = 0f;
+                root.SetLslHealth(health);
+            }
+
+            detects[0].Damage = damage;
+            PostCombatEventToObject(root.LocalId, "final_damage", detects);
+
+            if (hadHealth && health <= 0f)
+                PostCombatEventToObject(root.LocalId, "on_death", Array.Empty<DetectParams>());
+        }
+
         public void llDamage(LSL_Key target, LSL_Float damage, LSL_Integer damage_type)
         {
             if (!UUID.TryParse(target, out UUID targetID) || targetID.IsZero())
@@ -6328,22 +6399,46 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
             ScenePresence presence = World.GetScenePresence(targetID);
             if (presence is null || presence.IsDeleted || presence.IsChildAgent || presence.IsInTransit)
+            {
+                SceneObjectPart targetPart = World.GetSceneObjectPart(targetID);
+                if (targetPart != null && !targetPart.ParentGroup.IsDeleted)
+                    ApplyDamageToObject(targetPart, (float)damage, damage_type.value);
                 return;
+            }
 
             if (!AllowsDamageAt(presence.AbsolutePosition))
                 return;
 
-            ApplyDamageToPresence(presence, (float)damage);
+            ApplyDamageToPresence(presence, (float)damage, damage_type.value);
+        }
+
+        public void llAdjustDamage(LSL_Integer number, LSL_Float damage)
+        {
+            DetectParams detectedParams = m_ScriptEngine.GetDetectParams(m_item.ItemID, number);
+            if (detectedParams != null)
+                detectedParams.Damage = damage;
         }
 
         public void llAdjustDamage(LSL_Float damage)
         {
-            NotImplemented("llAdjustDamage", "OpenSim does not yet provide Combat2 on_damage adjustment state");
+            llAdjustDamage(0, damage);
         }
 
         public LSL_List llDetectedDamage(LSL_Integer number)
         {
-            return new LSL_List();
+            DetectParams detectedParams = m_ScriptEngine.GetDetectParams(m_item.ItemID, number);
+            if (detectedParams is null)
+                return new LSL_List();
+
+            return new LSL_List(new object[]
+            {
+                new LSL_Float(detectedParams.Damage),
+                new LSL_Integer(detectedParams.DamageType),
+                new LSL_Float(detectedParams.OriginalDamage),
+                new LSL_Key(detectedParams.Key.ToString()),
+                detectedParams.Position,
+                new LSL_Key(detectedParams.Owner.ToString())
+            });
         }
 
         public LSL_Float llGetHealth(LSL_String key)
@@ -6353,6 +6448,10 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 ScenePresence user = World.GetScenePresence(agent);
                 if (user is not null)
                     return user.Health;
+
+                SceneObjectPart part = World.GetSceneObjectPart(agent);
+                if (part is not null)
+                    return part.ParentGroup?.RootPart?.GetLslHealth() ?? part.GetLslHealth();
             }
             return new LSL_Float(-1.0);
         }
@@ -8333,9 +8432,29 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         public void llSetSculptAnim(LSL_Integer mode, LSL_Integer sizex, LSL_Integer sizey,
                 LSL_Integer start_frame, LSL_Integer end_frame, LSL_Float rate, LSL_Integer texture_sync)
         {
-            // OpenSim has no sculpt-map animation field to send to viewers.
             if (m_host?.ParentGroup is null || m_host.ParentGroup.IsDeleted)
                 return;
+
+            m_host.DynAttrs ??= new DAMap();
+            lock (m_host.DynAttrs)
+            {
+                if (!m_host.DynAttrs.TryGetStore("lsl", "sculpt_anim", out OSDMap store) || store == null)
+                    store = new OSDMap();
+
+                store["mode"] = OSD.FromInteger(mode.value);
+                store["size_x"] = OSD.FromInteger(sizex.value);
+                store["size_y"] = OSD.FromInteger(sizey.value);
+                store["start_frame"] = OSD.FromInteger(start_frame.value);
+                store["end_frame"] = OSD.FromInteger(end_frame.value);
+                store["rate"] = OSD.FromReal(rate.value);
+                store["texture_sync"] = OSD.FromBoolean(texture_sync.value != 0);
+                m_host.DynAttrs.SetStore("lsl", "sculpt_anim", store);
+            }
+
+            // OpenSim does not yet have a viewer protocol field for live sculpt-map animation,
+            // but preserving the state lets scripts and future modules observe the requested mode.
+            m_host.SendFullUpdateToAllClients();
+            m_host.ParentGroup.HasGroupChanged = true;
         }
 
         public void llTriggerSoundLimited(string sound, double volume, LSL_Vector top_north_east,
@@ -10857,76 +10976,438 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             }
         }
 
-        private void PathfindingNotAvailable(string command)
+        private bool TryGetDirectNavPoint(LSL_Vector point, float radius, bool clamp, out Vector3 result)
+        {
+            result = Vector3.Zero;
+
+            if (double.IsNaN(point.x) || double.IsNaN(point.y) || double.IsNaN(point.z)
+                || double.IsInfinity(point.x) || double.IsInfinity(point.y) || double.IsInfinity(point.z))
+            {
+                return false;
+            }
+
+            float maxX = Math.Max(0f, World.RegionInfo.RegionSizeX - 0.001f);
+            float maxY = Math.Max(0f, World.RegionInfo.RegionSizeY - 0.001f);
+            float x = (float)point.x;
+            float y = (float)point.y;
+
+            if (!clamp && (x < 0f || y < 0f || x > maxX || y > maxY))
+                return false;
+
+            x = Math.Clamp(x, 0f, maxX);
+            y = Math.Clamp(y, 0f, maxY);
+
+            float terrain = World.GetGroundHeight(x, y);
+            float z = (float)point.z;
+            float groundZ = terrain + Math.Max(radius, 0.05f);
+            if (z < groundZ)
+                z = groundZ;
+
+            result = new Vector3(x, y, z);
+            return true;
+        }
+
+        private LSL_Vector ToLSLVector(Vector3 vector)
+        {
+            return new LSL_Vector(vector.X, vector.Y, vector.Z);
+        }
+
+        private static bool IsIntegerBooleanOptionValue(object value)
+        {
+            if (value is LSL_Integer lslInteger)
+                return lslInteger.value == 0 || lslInteger.value == 1;
+            if (value is int integer)
+                return integer == 0 || integer == 1;
+            return false;
+        }
+
+        private static bool TryGetOptionFloatValue(object value, out float result)
+        {
+            switch (value)
+            {
+                case LSL_Float lslFloat:
+                    result = (float)lslFloat.value;
+                    return true;
+                case LSL_Integer lslInteger:
+                    result = lslInteger.value;
+                    return true;
+                case int integer:
+                    result = integer;
+                    return true;
+                case float single:
+                    result = single;
+                    return true;
+                case double dbl:
+                    result = (float)dbl;
+                    return true;
+                case LSL_String lslString when float.TryParse(lslString.m_string, NumberStyles.Float, CultureInfo.InvariantCulture, out result):
+                    return true;
+                case string str when float.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out result):
+                    return true;
+                default:
+                    result = 0f;
+                    return false;
+            }
+        }
+
+        private float GetCharacterSpeed(LSL_List options)
+        {
+            float speed = 3f;
+            int idx = 0;
+
+            while (idx < options.Length)
+            {
+                int option = options.GetIntegerItem(idx++);
+                if (idx >= options.Length)
+                    break;
+
+                switch (option)
+                {
+                    case ScriptBaseClass.CHARACTER_DESIRED_SPEED:
+                    case ScriptBaseClass.CHARACTER_MAX_SPEED:
+                        object speedValue = options.Data[idx++];
+                        if (!IsIntegerBooleanOptionValue(speedValue)
+                            && TryGetOptionFloatValue(speedValue, out float parsedSpeed))
+                        {
+                            speed = Math.Max(0.1f, parsedSpeed);
+                        }
+                        break;
+
+                    default:
+                        idx++;
+                        break;
+                }
+            }
+
+            return speed;
+        }
+
+        private float GetCharacterRadius(LSL_List options)
+        {
+            float radius = 0.5f;
+            int idx = 0;
+
+            while (idx < options.Length)
+            {
+                int option = options.GetIntegerItem(idx++);
+                if (idx >= options.Length)
+                    break;
+
+                switch (option)
+                {
+                    case ScriptBaseClass.CHARACTER_RADIUS:
+                    case ScriptBaseClass.GCNP_RADIUS:
+                        object radiusValue = options.Data[idx++];
+                        if (!IsIntegerBooleanOptionValue(radiusValue)
+                            && TryGetOptionFloatValue(radiusValue, out float parsedRadius))
+                        {
+                            radius = Math.Max(0.05f, parsedRadius);
+                        }
+                        break;
+
+                    default:
+                        idx++;
+                        break;
+                }
+            }
+
+            return radius;
+        }
+
+        private void PostPathUpdate(LSL_Integer status, LSL_List data)
         {
             m_ScriptEngine.PostObjectEvent(m_host.LocalId, new EventParams(
                 "path_update",
                 new object[]
                 {
-                    new LSL_Integer(ScriptBaseClass.PU_FAILURE_NO_NAVMESH),
-                    new LSL_List()
+                    status,
+                    data ?? new LSL_List()
                 },
                 Array.Empty<DetectParams>()));
         }
 
+        private void PostPathFailure(int status)
+        {
+            PostPathUpdate(new LSL_Integer(status), new LSL_List());
+        }
+
+        private bool StartDirectPathMotion(Vector3 goal, LSL_List options)
+        {
+            SceneObjectGroup group = m_host.ParentGroup;
+
+            if (group.IsAttachment)
+            {
+                PostPathFailure(ScriptBaseClass.PU_FAILURE_NO_VALID_DESTINATION);
+                return false;
+            }
+
+            if (group.RootPart.PhysActor != null && group.RootPart.PhysActor.IsPhysical)
+            {
+                PostPathFailure(ScriptBaseClass.PU_FAILURE_DYNAMIC_PATHFINDING_DISABLED);
+                return false;
+            }
+
+            Vector3 current = group.AbsolutePosition;
+            Vector3 delta = goal - current;
+            float distance = delta.Length();
+            if (distance <= 0.05f)
+            {
+                PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), new LSL_List(ToLSLVector(goal)));
+                return true;
+            }
+
+            float duration = Math.Max(0.2f, distance / GetCharacterSpeed(options));
+
+            group.RootPart.KeyframeMotion?.Delete();
+            group.RootPart.KeyframeMotion = new KeyframeMotion(group, KeyframeMotion.PlayMode.Forward, KeyframeMotion.DataFormat.Translation);
+            group.RootPart.KeyframeMotion.SetKeyframes(new[]
+            {
+                new KeyframeMotion.Keyframe
+                {
+                    Position = delta,
+                    Rotation = null,
+                    TimeMS = (int)(duration * 1000f)
+                }
+            });
+            group.RootPart.KeyframeMotion.Start();
+
+            PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), new LSL_List(ToLSLVector(goal)));
+            return true;
+        }
+
         public void llCreateCharacter(LSL_List options)
         {
-            PathfindingNotAvailable("llCreateCharacter");
+            PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), new LSL_List());
         }
 
         public void llUpdateCharacter(LSL_List options)
         {
-            PathfindingNotAvailable("llUpdateCharacter");
+            PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), new LSL_List());
         }
 
         public void llDeleteCharacter()
         {
-            PathfindingNotAvailable("llDeleteCharacter");
+            m_host.ParentGroup.RootPart.KeyframeMotion?.Stop();
+            PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), new LSL_List());
         }
 
         public void llExecCharacterCmd(LSL_Integer command, LSL_List options)
         {
-            PathfindingNotAvailable("llExecCharacterCmd");
+            SceneObjectGroup group = m_host.ParentGroup;
+            switch (command.value)
+            {
+                case ScriptBaseClass.CHARACTER_CMD_STOP:
+                case ScriptBaseClass.CHARACTER_CMD_SMOOTH_STOP:
+                    group.RootPart.KeyframeMotion?.Stop();
+                    PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), new LSL_List());
+                    break;
+
+                case ScriptBaseClass.CHARACTER_CMD_JUMP:
+                    if (!group.IsAttachment && (group.RootPart.PhysActor == null || !group.RootPart.PhysActor.IsPhysical))
+                    {
+                        Vector3 pos = group.AbsolutePosition + new Vector3(0f, 0f, 2f);
+                        group.UpdateGroupPosition(pos);
+                        PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), new LSL_List(ToLSLVector(pos)));
+                    }
+                    else
+                    {
+                        PostPathFailure(ScriptBaseClass.PU_FAILURE_DYNAMIC_PATHFINDING_DISABLED);
+                    }
+                    break;
+
+                default:
+                    PostPathFailure(ScriptBaseClass.PU_FAILURE_OTHER);
+                    break;
+            }
         }
 
         public void llNavigateTo(LSL_Vector goal, LSL_List options)
         {
-            PathfindingNotAvailable("llNavigateTo");
+            if (!TryGetDirectNavPoint(goal, GetCharacterRadius(options), false, out Vector3 navPoint))
+            {
+                PostPathFailure(ScriptBaseClass.PU_FAILURE_INVALID_GOAL);
+                return;
+            }
+
+            StartDirectPathMotion(navPoint, options);
         }
 
         public void llWanderWithin(LSL_Vector origin, LSL_Vector distance, LSL_List options)
         {
-            PathfindingNotAvailable("llWanderWithin");
+            double rx = (Util.RandomClass.NextDouble() * 2.0 - 1.0) * Math.Abs(distance.x);
+            double ry = (Util.RandomClass.NextDouble() * 2.0 - 1.0) * Math.Abs(distance.y);
+            LSL_Vector goal = new(origin.x + rx, origin.y + ry, origin.z);
+            llNavigateTo(goal, options);
         }
 
         public void llPatrolPoints(LSL_List patrol_points, LSL_List options)
         {
-            PathfindingNotAvailable("llPatrolPoints");
+            SceneObjectGroup group = m_host.ParentGroup;
+            if (group.IsAttachment || (group.RootPart.PhysActor != null && group.RootPart.PhysActor.IsPhysical))
+            {
+                PostPathFailure(ScriptBaseClass.PU_FAILURE_DYNAMIC_PATHFINDING_DISABLED);
+                return;
+            }
+
+            List<KeyframeMotion.Keyframe> frames = new();
+            Vector3 current = group.AbsolutePosition;
+            Vector3 finalGoal = current;
+            float radius = GetCharacterRadius(options);
+            float speed = GetCharacterSpeed(options);
+
+            for (int i = 0; i < patrol_points.Length; ++i)
+            {
+                object item = patrol_points.Data[i];
+                LSL_Vector point;
+                try
+                {
+                    point = item is LSL_Vector v ? v : patrol_points.GetVector3Item(i);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (!TryGetDirectNavPoint(point, radius, false, out Vector3 goal))
+                    continue;
+
+                Vector3 delta = goal - current;
+                float distance = delta.Length();
+                if (distance <= 0.05f)
+                    continue;
+
+                frames.Add(new KeyframeMotion.Keyframe
+                {
+                    Position = delta,
+                    Rotation = null,
+                    TimeMS = (int)(Math.Max(0.2f, distance / speed) * 1000f)
+                });
+                current = goal;
+                finalGoal = goal;
+            }
+
+            if (frames.Count == 0)
+            {
+                PostPathFailure(ScriptBaseClass.PU_FAILURE_NO_VALID_DESTINATION);
+                return;
+            }
+
+            group.RootPart.KeyframeMotion?.Delete();
+            group.RootPart.KeyframeMotion = new KeyframeMotion(group, KeyframeMotion.PlayMode.Forward, KeyframeMotion.DataFormat.Translation);
+            group.RootPart.KeyframeMotion.SetKeyframes(frames.ToArray());
+            group.RootPart.KeyframeMotion.Start();
+
+            PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), new LSL_List(ToLSLVector(finalGoal)));
         }
 
         public void llPursue(LSL_Key target, LSL_List options)
         {
-            PathfindingNotAvailable("llPursue");
+            if (!UUID.TryParse(target, out UUID targetID))
+            {
+                PostPathFailure(ScriptBaseClass.PU_FAILURE_TARGET_GONE);
+                return;
+            }
+
+            Vector3 targetPos;
+            ScenePresence presence = World.GetScenePresence(targetID);
+            if (presence != null && !presence.IsDeleted)
+            {
+                targetPos = presence.AbsolutePosition;
+            }
+            else
+            {
+                SceneObjectPart part = World.GetSceneObjectPart(targetID);
+                if (part == null || part.ParentGroup.IsDeleted)
+                {
+                    PostPathFailure(ScriptBaseClass.PU_FAILURE_TARGET_GONE);
+                    return;
+                }
+                targetPos = part.AbsolutePosition;
+            }
+
+            int idx = 0;
+            while (idx < options.Length)
+            {
+                int option = options.GetIntegerItem(idx++);
+                if (idx >= options.Length)
+                    break;
+
+                if (option == ScriptBaseClass.PURSUIT_OFFSET)
+                {
+                    LSL_Vector offset = options.GetVector3Item(idx++);
+                    targetPos += new Vector3((float)offset.x, (float)offset.y, (float)offset.z);
+                }
+                else
+                {
+                    idx++;
+                }
+            }
+
+            llNavigateTo(ToLSLVector(targetPos), options);
         }
 
         public void llEvade(LSL_Key target, LSL_List options)
         {
-            PathfindingNotAvailable("llEvade");
+            if (!UUID.TryParse(target, out UUID targetID))
+            {
+                PostPathFailure(ScriptBaseClass.PU_FAILURE_TARGET_GONE);
+                return;
+            }
+
+            ScenePresence presence = World.GetScenePresence(targetID);
+            Vector3 source;
+            if (presence != null && !presence.IsDeleted)
+            {
+                source = presence.AbsolutePosition;
+            }
+            else
+            {
+                SceneObjectPart part = World.GetSceneObjectPart(targetID);
+                if (part == null || part.ParentGroup.IsDeleted)
+                {
+                    PostPathFailure(ScriptBaseClass.PU_FAILURE_TARGET_GONE);
+                    return;
+                }
+                source = part.AbsolutePosition;
+            }
+
+            llFleeFrom(ToLSLVector(source), 10.0, options);
         }
 
         public void llFleeFrom(LSL_Vector source, LSL_Float distance, LSL_List options)
         {
-            PathfindingNotAvailable("llFleeFrom");
+            Vector3 current = m_host.ParentGroup.AbsolutePosition;
+            Vector3 sourceVec = new((float)source.x, (float)source.y, (float)source.z);
+            Vector3 away = current - sourceVec;
+            if (away.LengthSquared() < 0.001f)
+                away = new Vector3(1f, 0f, 0f);
+            away.Normalize();
+
+            Vector3 goal = current + away * (float)Math.Max(0.1, distance);
+            llNavigateTo(ToLSLVector(goal), options);
         }
 
         public LSL_List llGetStaticPath(LSL_Vector start, LSL_Vector end, LSL_Float radius, LSL_List parameters)
         {
-            return new LSL_List(new LSL_Integer(ScriptBaseClass.PU_FAILURE_NO_NAVMESH));
+            if (!TryGetDirectNavPoint(start, radius, false, out Vector3 startPoint))
+                return new LSL_List(new LSL_Integer(ScriptBaseClass.PU_FAILURE_INVALID_START));
+
+            if (!TryGetDirectNavPoint(end, radius, false, out Vector3 endPoint))
+                return new LSL_List(new LSL_Integer(ScriptBaseClass.PU_FAILURE_INVALID_GOAL));
+
+            return new LSL_List(new object[]
+            {
+                new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED),
+                ToLSLVector(startPoint),
+                ToLSLVector(endPoint)
+            });
         }
 
         public LSL_Vector llGetClosestNavPoint(LSL_Vector point, LSL_List options)
         {
-            return LSL_Vector.Zero;
+            return TryGetDirectNavPoint(point, GetCharacterRadius(options), true, out Vector3 navPoint)
+                ? ToLSLVector(navPoint)
+                : LSL_Vector.Zero;
         }
 
         public LSL_List llGetPhysicsMaterial()
@@ -21543,9 +22024,34 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             break;
 
                         case ScriptBaseClass.ENVIRONMENT_DAYINFO:
+                            if (i + 2 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            int dayLength = parameters.GetLSLIntegerItem(i++);
+                            int dayOffset = parameters.GetLSLIntegerItem(i++);
+                            if (dayLength <= 0)
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            env.DayLength = dayLength;
+                            env.DayOffset = dayOffset;
+                            break;
+
+                        case ScriptBaseClass.SKY_TRACKS:
+                            if (i + 3 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            float altitude0 = (float)parameters.GetLSLFloatItem(i++);
+                            float altitude1 = (float)parameters.GetLSLFloatItem(i++);
+                            float altitude2 = (float)parameters.GetLSLFloatItem(i++);
+                            if (!InRange(altitude0, -10000.0f, 10000.0f)
+                                || !InRange(altitude1, -10000.0f, 10000.0f)
+                                || !InRange(altitude2, -10000.0f, 10000.0f))
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            env.Altitudes[0] = altitude0;
+                            env.Altitudes[1] = altitude1;
+                            env.Altitudes[2] = altitude2;
+                            env.SortAltitudes();
+                            break;
+
                         case ScriptBaseClass.SKY_TEXTURE_DEFAULTS:
                         case ScriptBaseClass.SKY_LIGHT:
-                        case ScriptBaseClass.SKY_TRACKS:
                         case ScriptBaseClass.WATER_TEXTURE_DEFAULTS:
                             return ScriptBaseClass.ENV_INVALID_RULE;
 

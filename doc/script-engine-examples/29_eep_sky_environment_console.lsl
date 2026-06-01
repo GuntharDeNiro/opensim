@@ -12,6 +12,8 @@ list RegionSunset()
     rotation moon = llEuler2Rot(<0.0, -1.80, 0.55>);
 
     return [
+        ENVIRONMENT_DAYINFO, 14400, 61200,
+        SKY_TRACKS, 800.0, 1600.0, 2600.0,
         SKY_AMBIENT, <0.44, 0.28, 0.20>,
         SKY_BLUE, <0.18, 0.28, 0.58>, <0.68, 0.44, 0.24>,
         SKY_HAZE, 0.62, 0.38, 0.0012, 7.5,
@@ -117,6 +119,8 @@ default
         else if (message == "Report")
         {
             list data = llGetEnvironment(llGetPos(), [
+                ENVIRONMENT_DAYINFO,
+                SKY_TRACKS,
                 SKY_AMBIENT,
                 SKY_BLUE,
                 SKY_HAZE,
@@ -133,7 +137,7 @@ default
         }
         else if (message == "Help")
         {
-            llOwnerSay("Region Sunset writes SKY_* and WATER_* to the whole region. Parcel Dawn writes the current parcel. Agent Aurora uses llSetAgentEnvironment after Experience permissions.");
+            llOwnerSay("Region Sunset writes ENVIRONMENT_DAYINFO, SKY_TRACKS, SKY_* and WATER_* to the whole region. Parcel Dawn writes the current parcel. Agent Aurora uses llSetAgentEnvironment after Experience permissions.");
         }
     }
 

@@ -430,6 +430,16 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         }
 
         /**
+         * @brief Extract a float from an element of an LSL_List.
+         */
+        public static double ListFloat(object element)
+        {
+            if (element is LSL_Float lfloat)
+                return lfloat.value;
+            return Convert.ToDouble(element);
+        }
+
+        /**
          * @brief Extract a string from an element of an LSL_List.
          */
         public static string ListStr(object element)

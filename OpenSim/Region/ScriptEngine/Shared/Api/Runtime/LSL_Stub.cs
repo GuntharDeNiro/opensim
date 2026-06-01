@@ -2157,6 +2157,12 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void llAdjustDamage(LSL_Integer number, LSL_Float damage)
+        {
+            m_LSL_Functions.llAdjustDamage(number, damage);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void llAdjustDamage(LSL_Float damage)
         {
             m_LSL_Functions.llAdjustDamage(damage);

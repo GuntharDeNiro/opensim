@@ -135,6 +135,9 @@ namespace OpenSim.Region.ScriptEngine.Shared
         public LSL_Types.Quaternion Rotation;
         public int Type;
         public LSL_Types.Vector3 Velocity;
+        public double Damage;
+        public double OriginalDamage;
+        public int DamageType;
 
         private LSL_Types.Vector3 touchST;
         public LSL_Types.Vector3 TouchST { get { return touchST; } }

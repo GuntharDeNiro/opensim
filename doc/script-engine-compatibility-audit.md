@@ -66,8 +66,8 @@ so additions are deliberate and testable instead of guessed from individual scri
   - Adds `llGetEnvironment` for day info, sky tracks and supported sky fields.
   - Adds `llGetEnvironment` readback for supported water rules: fog, fresnel, normal scale, normal texture, refraction and wave directions.
   - Adds region/parcel/agent environment replacement and clearing through the existing EEP environment module.
-  - Adds per-parameter `llSetEnvironment` and `llSetAgentEnvironment` persistence for supported water rules.
-  - Unsupported sky and texture-default mutations still return `ENV_INVALID_RULE` until OpenSim has matching persistent override storage.
+  - Adds per-parameter `llSetEnvironment` and `llSetAgentEnvironment` persistence for supported water rules, sky rules, `ENVIRONMENT_DAYINFO` and `SKY_TRACKS`.
+  - Unsupported texture-default mutations still return `ENV_INVALID_RULE` until OpenSim has matching persistent override storage.
 
 - Estate and parcel management helpers
   - Adds `llReturnObjectsByID` and `llReturnObjectsByOwner` using the simulator's return permission checks.
@@ -88,13 +88,16 @@ so additions are deliberate and testable instead of guessed from individual scri
   - Adds `llDamage` using OpenSim's existing avatar health and death/teleport-home path.
   - Adds `PRIM_DAMAGE` and `PRIM_HEALTH` support in primitive params.
   - Adds `OBJECT_HEALTH`, `OBJECT_DAMAGE` and `OBJECT_DAMAGE_TYPE` details.
-  - Exposes `llDetectedDamage` as an empty result outside missing Combat2 event metadata.
-  - Exposes `llAdjustDamage` with an explicit unsupported status because OpenSim does not yet carry `on_damage` adjustment state.
+  - Adds Combat2-style `on_damage`, `final_damage` and `on_death` YEngine events for damage-aware object and attachment scripts.
+  - `llDetectedDamage` now returns `[damage, damage_type, original_damage, source_key, source_position, source_owner]` during damage events.
+  - `llAdjustDamage(integer number, float damage)` updates the current event's damage metadata, with a one-argument compatibility overload for row zero.
+  - Extends `llGetHealth` to report PRIM_HEALTH-compatible object health as well as avatar health.
 
 - Pathfinding compatibility surface
-  - Exposes the Second Life pathfinding/character function names and constants so scripts compile.
-  - `llGetStaticPath` returns `PU_FAILURE_NO_NAVMESH`.
-  - Character movement commands post `path_update(PU_FAILURE_NO_NAVMESH, [])` instead of faking movement.
+  - Exposes the Second Life pathfinding/character function names and constants so scripts compile and can exercise direct-route fallback behavior.
+  - `llGetClosestNavPoint` returns a terrain-aware in-region point with radius clearance above terrain.
+  - `llGetStaticPath` returns `[PU_GOAL_REACHED, start_nav_point, end_nav_point]` for valid in-region direct paths or a `PU_FAILURE_*` code.
+  - `llNavigateTo`, `llWanderWithin`, `llPatrolPoints`, `llPursue`, `llEvade`, `llFleeFrom` and stop/jump character commands use keyframed, terrain-aware direct movement and post explicit `path_update` results.
 
 - GLTF override helpers
   - Adds `llSetLinkGLTFOverrides` for material factor overrides backed by OpenSim render material override storage.
@@ -147,6 +150,7 @@ so additions are deliberate and testable instead of guessed from individual scri
   - Supports `SKY_AMBIENT`, `SKY_BLUE`, `SKY_CLOUDS`, `SKY_DOME`, `SKY_GAMMA`, `SKY_GLOW`, `SKY_HAZE`, `SKY_MOON`, `SKY_PLANET`, `SKY_REFRACTION`, `SKY_REFLECTION_PROBE_AMBIANCE`, `SKY_STAR_BRIGHTNESS`, `SKY_SUN`, `SKY_CLOUD_TEXTURE`, `SKY_MOON_TEXTURE` and `SKY_SUN_TEXTURE`.
   - Adds `llGetEnvironment` readback for sky texture UUIDs and `SKY_TEXTURE_DEFAULTS`.
   - Preserves existing sky tracks when present, creates script-owned static sky frames when missing, and applies whole-region negative-Z updates across all sky tracks.
+  - Adds writable `ENVIRONMENT_DAYINFO` and `SKY_TRACKS` coverage for scripted day length/offset and sky altitude bands.
   - Adds an in-world EEP sky environment console example for region, parcel and agent-local sky/water presets.
 
 - Parcel prim count compatibility
@@ -165,13 +169,17 @@ so additions are deliberate and testable instead of guessed from individual scri
   - Keeps `llGetUsedMemory` and `llGetFreeMemory` on the real YEngine heap counters and enforces lowered memory limits on subsequent allocations.
   - Adds `llScriptProfiler(PROFILE_SCRIPT_MEMORY/PROFILE_NONE)` compatibility state and an in-world memory/profiler lab example for stress testing heap growth, trimming and limit rejection.
 
+- Sculpt animation compatibility
+  - `llSetSculptAnim` now stores the requested sculpt animation mode, frame grid, frame range, rate and texture-sync flag in prim dynamic attributes.
+  - The stored state is available for future modules while OpenSim still lacks a client-visible sculpt animation protocol field.
+
 ## Missing Or Backend-Limited After This Pass
 
 - True Second Life navmesh/pathfinding character simulation.
-- Combat2 `on_damage` event state and mutable per-hit damage adjustment.
-- Advanced EEP day-cycle editing beyond the supported persistent sky/water parameter subset.
+- Synchronous Combat2 damage adjustment before health application; current events expose and adjust metadata, but OpenSim still lacks a pre-application Combat2 damage pipeline.
+- Full arbitrary EEP day-cycle frame/track asset editing beyond supported day info, sky tracks and persistent sky/water parameter subsets.
 - Unsupported or future GLTF extensions outside the supported SL PBR material fields.
-- True client-visible sculpt-map animation for `llSetSculptAnim`.
+- True client-visible sculpt-map animation playback for stored `llSetSculptAnim` state.
 - Client-visible profiler reports beyond script-side profiler flag compatibility.
 - Full Linden Lab external service parity, where behavior depends on SL-only grid services rather than script-engine functions alone.
 

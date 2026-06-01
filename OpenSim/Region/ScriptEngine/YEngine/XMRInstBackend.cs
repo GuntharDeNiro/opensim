@@ -507,7 +507,7 @@ namespace OpenSim.Region.ScriptEngine.Yengine
          * @brief Save current detect params into a list
          * @returns a list containing current detect param values
          */
-        private const int saveDPVer = 2;
+        private const int saveDPVer = 3;
 
         public override LSL_List xmrEventSaveDets()
         {
@@ -518,7 +518,7 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         private static object[] DetPrmsToObjArr(DetectParams[] dps)
         {
             int len = dps.Length;
-            object[] obs = new object[len * 17 + 1];
+            object[] obs = new object[len * 20 + 1];
             int j = 0;
             obs[j++] = (LSL_Integer)saveDPVer;
             for(int i = 0; i < len; i++)
@@ -541,6 +541,9 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                 obs[j++] = dp.TouchPos;                      // vector
                 obs[j++] = dp.TouchUV;                       // vector
                 obs[j++] = (LSL_Integer)dp.TouchFace;        // integer
+                obs[j++] = (LSL_Float)dp.Damage;             // float
+                obs[j++] = (LSL_Float)dp.OriginalDamage;     // float
+                obs[j++] = (LSL_Integer)dp.DamageType;       // integer
             }
             return obs;
         }
@@ -558,8 +561,8 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         {
             int j = 0;
             int version = ListInt(objs[j++]);
-            int stride = version == 1 ? 16 : 17;
-            if((version != 1 && version != saveDPVer) || (objs.Length % stride != 1))
+            int stride = version == 1 ? 16 : version == 2 ? 17 : 20;
+            if((version != 1 && version != 2 && version != saveDPVer) || (objs.Length % stride != 1))
                 throw new Exception("invalid detect param format");
 
             int len = objs.Length / stride;
@@ -592,6 +595,13 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                 stea.FaceIndex = ListInt(objs[j++]);
 
                 dp.SurfaceTouchArgs = stea;
+
+                if (version >= 3)
+                {
+                    dp.Damage = ListFloat(objs[j++]);
+                    dp.OriginalDamage = ListFloat(objs[j++]);
+                    dp.DamageType = ListInt(objs[j++]);
+                }
 
                 dps[i] = dp;
             }
