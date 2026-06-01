@@ -17,6 +17,24 @@ The lab is intentionally in-world because many SL-compatible behaviors depend
 on live simulator state: permissions, object inventory, scene presence,
 pathfinding, damage events, linkset storage and viewer-visible PBR state.
 
+## Offline log report
+
+After running the lab, save or copy the simulator log and run:
+
+```bash
+python3 doc/script-engine-regression/report.py OpenSim.log
+```
+
+On Windows:
+
+```powershell
+py -3 doc\script-engine-regression\report.py OpenSim.log
+```
+
+The reporter compares observed `PASS`/`FAIL` lines with `manifest.json` and
+returns a non-zero exit code when a required compatibility case is missing or
+failed.
+
 ## Pass criteria
 
 - The script compiles without missing constants, missing functions or event

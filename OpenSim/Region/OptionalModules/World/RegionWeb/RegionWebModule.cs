@@ -43,6 +43,7 @@ using OpenSim.Framework.Servers;
 using OpenSim.Framework.Servers.HttpServer;
 using OpenSim.Region.Framework.Interfaces;
 using OpenSim.Region.Framework.Scenes;
+using OpenSim.Region.ScriptEngine.Shared.Api.Interfaces;
 using OpenSim.Server.Base;
 
 namespace OpenSim.Region.OptionalModules.World.RegionWeb
@@ -414,11 +415,12 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private void SendScriptReference(string slug, IOSHttpResponse response)
         {
             EstatePageContent estate = LoadEstateContent();
+            ScriptFunctionDoc[] docs = GetScriptFunctionDocs();
             ScriptFunctionDoc focus = null;
 
             if (!string.IsNullOrEmpty(slug))
             {
-                foreach (ScriptFunctionDoc doc in ScriptFunctionDocs)
+                foreach (ScriptFunctionDoc doc in docs)
                 {
                     if (MakeSlug(doc.Name).Equals(slug, StringComparison.OrdinalIgnoreCase))
                     {
@@ -441,7 +443,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 .Append("<p class=\"lead\">Expanded Second Life-style LSL functions implemented or corrected in this OpenSim build, with signatures, return values, permissions, compatibility status and exact in-world usage notes.</p>")
                 .Append("<p class=\"script-source\">Modeled after the public Second Life LSL function index, but scoped to the functions exposed by this simulator branch and backed by the in-world regression lab in <code>doc/script-engine-examples</code>.</p>");
 
-            AppendScriptCompatibilitySummary(html);
+            AppendScriptCompatibilitySummary(html, docs);
 
             if (focus != null)
             {
@@ -453,7 +455,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             }
 
             html.Append("<section class=\"script-toc\" id=\"functions\"><h2>Functions</h2><div>");
-            foreach (IGrouping<string, ScriptFunctionDoc> group in ScriptFunctionDocs.GroupBy(doc => doc.Category))
+            foreach (IGrouping<string, ScriptFunctionDoc> group in docs.GroupBy(doc => doc.Category))
             {
                 html.Append("<a href=\"#").Append(Html(MakeSlug(group.Key))).Append("\">")
                     .Append(Html(group.Key)).Append(" <span>")
@@ -461,7 +463,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             }
             html.Append("</div></section>");
 
-            foreach (IGrouping<string, ScriptFunctionDoc> group in ScriptFunctionDocs.GroupBy(doc => doc.Category))
+            foreach (IGrouping<string, ScriptFunctionDoc> group in docs.GroupBy(doc => doc.Category))
             {
                 html.Append("<section class=\"script-group\" id=\"").Append(Html(MakeSlug(group.Key))).Append("\"><h2>")
                     .Append(Html(group.Key)).Append("</h2>");
@@ -476,10 +478,10 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             SendHtml(response, html.ToString());
         }
 
-        private static void AppendScriptCompatibilitySummary(StringBuilder html)
+        private static void AppendScriptCompatibilitySummary(StringBuilder html, ScriptFunctionDoc[] docs)
         {
             Dictionary<string, int> statusCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (ScriptFunctionDoc doc in ScriptFunctionDocs)
+            foreach (ScriptFunctionDoc doc in docs)
             {
                 string status = GetScriptFunctionStatus(doc);
                 int count;
@@ -489,7 +491,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             html.Append("<section class=\"script-toc\"><h2>Coverage</h2><div>")
                 .Append("<a href=\"#functions\">Total documented <span>")
-                .Append(ScriptFunctionDocs.Length.ToString(CultureInfo.InvariantCulture))
+                .Append(docs.Length.ToString(CultureInfo.InvariantCulture))
                 .Append("</span></a>");
 
             foreach (KeyValuePair<string, int> item in statusCounts.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
@@ -540,6 +542,9 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
         private static string GetScriptFunctionStatus(ScriptFunctionDoc doc)
         {
+            if (doc.Category == AutoScriptFunctionCategory)
+                return "API surface";
+
             string name = doc.Name ?? string.Empty;
             string text = ((doc.Permissions ?? string.Empty) + " " + (doc.Notes ?? string.Empty) + " " + (doc.Usage ?? string.Empty)).ToLowerInvariant();
 
@@ -575,6 +580,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 return "The function accepts and persists current values plus future/extension payloads so scripts can be ported without losing data.";
             if (status == "Experience trust")
                 return "The function follows SL Experience semantics through this build's local Experience-Lite trust and key-value backend.";
+            if (status == "API surface")
+                return "Auto-discovered from ILSL_Api so RegionWeb shows the full exposed script surface even before a hand-written compatibility note is added.";
 
             return "Implemented directly in the simulator script API with Second Life-style arguments, return values and event behavior where applicable.";
         }
@@ -1920,6 +1927,123 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             Doc("Misc compatibility", "llGetAnimationOverride", "string llGetAnimationOverride(string anim_state)", "Animation name or empty string.", "Read the active override for a state.", "Requires animation override permission.", "Useful in AO setup scripts."),
             Doc("Misc compatibility", "llSetSculptAnim", "void llSetSculptAnim(integer mode, integer sizex, integer sizey, integer start_frame, integer end_frame, float rate, integer texture_sync)", "No return value.", "Store SL sculpt-map animation parameters on the prim and mirror them through texture animation for viewer-visible playback.", "None.", "The exact sculpt animation request persists in dynamic attributes; the visible transport uses the standard texture animation packet because OpenSim has no separate sculpt animation field.")
         };
+
+        private const string AutoScriptFunctionCategory = "Auto-discovered API surface";
+        private static readonly Lazy<ScriptFunctionDoc[]> CompleteScriptFunctionDocs = new Lazy<ScriptFunctionDoc[]>(BuildCompleteScriptFunctionDocs);
+
+        private static ScriptFunctionDoc[] GetScriptFunctionDocs()
+        {
+            return CompleteScriptFunctionDocs.Value;
+        }
+
+        private static ScriptFunctionDoc[] BuildCompleteScriptFunctionDocs()
+        {
+            List<ScriptFunctionDoc> docs = new List<ScriptFunctionDoc>(ScriptFunctionDocs);
+            HashSet<string> documented = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (ScriptFunctionDoc doc in ScriptFunctionDocs)
+                documented.Add(doc.Name);
+
+            foreach (MethodInfo method in typeof(ILSL_Api).GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                .OrderBy(method => method.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                if (!method.Name.StartsWith("ll", StringComparison.Ordinal) || documented.Contains(method.Name))
+                    continue;
+
+                docs.Add(Doc(
+                    AutoScriptFunctionCategory,
+                    method.Name,
+                    FormatScriptFunctionSignature(method),
+                    FormatScriptFunctionReturn(method),
+                    "Auto-discovered from the public ILSL_Api surface so the RegionWeb reference stays complete when new LSL functions are exposed.",
+                    "See the simulator implementation and normal LSL permission rules for runtime restrictions.",
+                    "Add a hand-written RegionWeb entry when this function receives compatibility-specific behavior, examples or caveats."));
+                documented.Add(method.Name);
+            }
+
+            return docs
+                .OrderBy(doc => doc.Category == AutoScriptFunctionCategory ? 1 : 0)
+                .ThenBy(doc => doc.Category, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(doc => doc.Name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+
+        private static string FormatScriptFunctionSignature(MethodInfo method)
+        {
+            ParameterInfo[] parameters = method.GetParameters();
+            StringBuilder signature = new StringBuilder();
+            signature.Append(FormatLslType(method.ReturnType, method.Name)).Append(' ').Append(method.Name).Append('(');
+
+            for (int i = 0; i < parameters.Length; ++i)
+            {
+                if (i > 0)
+                    signature.Append(", ");
+
+                ParameterInfo parameter = parameters[i];
+                signature.Append(FormatLslType(parameter.ParameterType, parameter.Name))
+                    .Append(' ')
+                    .Append(parameter.Name ?? ("arg" + i.ToString(CultureInfo.InvariantCulture)));
+            }
+
+            signature.Append(')');
+            return signature.ToString();
+        }
+
+        private static string FormatScriptFunctionReturn(MethodInfo method)
+        {
+            if (method.ReturnType == typeof(void))
+                return "No return value.";
+
+            return "Returns " + FormatLslType(method.ReturnType, method.Name) + ".";
+        }
+
+        private static string FormatLslType(Type type, string nameHint)
+        {
+            if (type == typeof(void))
+                return "void";
+            if (type == typeof(int) || type == typeof(uint) || type == typeof(short) || type == typeof(ushort) || type == typeof(byte) || type == typeof(sbyte) || type == typeof(bool))
+                return "integer";
+            if (type == typeof(float) || type == typeof(double))
+                return "float";
+            if (type == typeof(string))
+                return LooksLikeKeyName(nameHint) ? "key" : "string";
+
+            string typeName = type.FullName ?? type.Name;
+            if (typeName.EndsWith("LSLInteger", StringComparison.Ordinal) || typeName.EndsWith("LSL_Types+LSLInteger", StringComparison.Ordinal))
+                return "integer";
+            if (typeName.EndsWith("LSLFloat", StringComparison.Ordinal) || typeName.EndsWith("LSL_Types+LSLFloat", StringComparison.Ordinal))
+                return "float";
+            if (typeName.EndsWith("LSLString", StringComparison.Ordinal) || typeName.EndsWith("LSL_Types+LSLString", StringComparison.Ordinal))
+                return LooksLikeKeyName(nameHint) ? "key" : "string";
+            if (type.Name.Equals("list", StringComparison.OrdinalIgnoreCase))
+                return "list";
+            if (typeName.EndsWith("Vector3", StringComparison.Ordinal))
+                return "vector";
+            if (typeName.EndsWith("Quaternion", StringComparison.Ordinal))
+                return "rotation";
+
+            return type.Name;
+        }
+
+        private static bool LooksLikeKeyName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return false;
+
+            string lower = name.ToLowerInvariant();
+            return lower.Contains("key")
+                || lower.Contains("id")
+                || lower.Contains("uuid")
+                || lower.Contains("agent")
+                || lower.Contains("avatar")
+                || lower.Contains("object")
+                || lower.Contains("owner")
+                || lower.Contains("target")
+                || lower.Contains("destination")
+                || lower.StartsWith("llrequest", StringComparison.Ordinal)
+                || lower.StartsWith("llgetkey", StringComparison.Ordinal)
+                || lower.StartsWith("llgeneratekey", StringComparison.Ordinal);
+        }
 
         private static ScriptFunctionDoc Doc(string category, string name, string signature, string returnValue, string usage, string permissions, string notes)
         {
