@@ -31,6 +31,7 @@ using System.Reflection;
 using System.Collections;
 using System.Collections.Generic;
 using OpenMetaverse;
+using OpenMetaverse.StructuredData;
 using OpenSim.Framework;
 using OpenSim.Region.ScriptEngine.Interfaces;
 using OpenSim.Region.ScriptEngine.Shared;
@@ -127,6 +128,35 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         public int m_InstEHSlice = 0;  // number of times handler timesliced (ResumeEx called)
         public double m_CPUTime = 0;  // accumulated CPU time (milliseconds)
         public double m_SliceStart = 0;  // when did current exec start
+
+        public override void xmrScriptProfiler(int flags)
+        {
+            base.xmrScriptProfiler(flags);
+
+            SceneObjectPart part = m_Part;
+            if (part == null)
+                return;
+
+            part.DynAttrs ??= new DAMap();
+            lock (part.DynAttrs)
+            {
+                if (!part.DynAttrs.TryGetStore("lsl", "script_profiler", out OSDMap store) || store == null)
+                    store = new OSDMap();
+
+                store["flags"] = OSD.FromInteger(flags);
+                store["enabled"] = OSD.FromBoolean(flags != 0);
+                store["script_item"] = OSD.FromUUID(m_ItemID);
+                store["script_name"] = OSD.FromString(m_Item?.Name ?? string.Empty);
+                store["heap_used"] = OSD.FromInteger(xmrHeapUsed());
+                store["heap_limit"] = OSD.FromInteger(xmrHeapLimit());
+                store["heap_max"] = OSD.FromInteger(xmrHeapMax());
+                store["event_count"] = OSD.FromInteger(m_InstEHEvent);
+                store["slice_count"] = OSD.FromInteger(m_InstEHSlice);
+                store["cpu_ms"] = OSD.FromReal(m_CPUTime);
+                store["updated_unix"] = OSD.FromReal(Util.UnixTimeSinceEpoch());
+                part.DynAttrs.SetStore("lsl", "script_profiler", store);
+            }
+        }
 
         // If code needs to have both m_QueueLock and m_RunLock,
         // be sure to lock m_RunLock first then m_QueueLock, as

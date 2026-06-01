@@ -1,7 +1,7 @@
 // Combat2 Direct Path Sentry
 //
-// Demonstrates the new Combat2-style damage metadata events together with
-// terrain-aware direct pathfinding fallback calls.
+// Demonstrates the new Combat2-style pre-health damage adjustment together with
+// terrain-aware obstacle-avoiding pathfinding calls.
 //
 // Drop this script into a non-physical prim. Touch it to cycle a sentry route.
 // Say "damage" on channel 5 to apply self-damage and exercise on_damage,
@@ -55,7 +55,7 @@ setup()
         CHARACTER_STAY_WITHIN_PARCEL, TRUE
     ]);
 
-    // Stores sculpt animation state for sculpt-map compatible prims/future modules.
+    // Stores sculpt animation state and mirrors it through viewer-visible texture animation.
     llSetSculptAnim(ANIM_ON | LOOP, 4, 4, 0, 15, 8.0, TRUE);
 
     if (gListen)
@@ -79,7 +79,7 @@ doStep()
     else
         goal = nav(here + <0.0, -12.0, 0.0>);
 
-    reportPath("direct route", here, goal);
+    reportPath("obstacle-aware route", here, goal);
     llNavigateTo(goal, [CHARACTER_DESIRED_SPEED, 2.0]);
 
     gStep = (gStep + 1) % 4;
@@ -89,7 +89,7 @@ damageSelf()
 {
     say("Applying llDamage to this object with DAMAGE_TYPE_FIRE.");
     llDamage(llGetKey(), 18.0, DAMAGE_TYPE_FIRE);
-    say("Object health readback: " + (string)llGetHealth((string)llGetKey()));
+    say("Health is applied after on_damage adjustment; final_damage will report the new value.");
 }
 
 default

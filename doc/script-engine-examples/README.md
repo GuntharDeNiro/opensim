@@ -189,7 +189,7 @@ The scripts use:
 - `15_rezzer_provenance_quarantine.lsl`: complex provenance scanner using rezzer detection, notecard trust policy, HUD filtering and scripted return-by-ID quarantine.
 - `16_inventory_transfer_and_ownership_lab.lsl`: complex inventory transfer lab using `llGiveAgentInventory`, destination roots, transfer result codes and ownership copy/take modes.
 - `17_parcel_media_loop_console.lsl`: parcel media console using loop-set command/query, media type, description, integer size and auto-align persistence.
-- `18_pbr_gltf_physics_param_lab.lsl`: render material, GLTF asset/override readback and physics material primitive-param lab.
+- `18_pbr_gltf_physics_param_lab.lsl`: render material, GLTF asset/override readback, future GLTF extension JSON storage and physics material primitive-param lab.
 - `19_object_details_diagnostics_console.lsl`: complex object/avatar diagnostics console using `llGetObjectDetails` cost, render-weight, hover-height, selection, provenance, hover-text and damage readback.
 - `20_identity_lookup_console.lsl`: complex identity diagnostics console using synchronous and asynchronous name, username, display-name and key lookups.
 - `21_parcel_prim_count_auditor.lsl`: parcel audit console using local and same-owner simulator-wide `llGetParcelPrimCount`, `llGetParcelDetails` capacity/used values and owner/count breakdowns.
@@ -201,7 +201,7 @@ The scripts use:
 - `27_avatar_visual_param_inspector.lsl`: avatar visual parameter inspector demonstrating `llGetVisualParams` ids, names, aliases, unsupported entries, owner/toucher scans and periodic watch mode.
 - `28_eep_water_environment_console.lsl`: EEP water console demonstrating `llGetEnvironment`, region/parcel `llSetEnvironment` and agent-local `llSetAgentEnvironment` water overrides.
 - `29_eep_sky_environment_console.lsl`: EEP sky console demonstrating persistent `SKY_*` plus `WATER_*` parameter overrides for region, parcel and agent-local environments.
-- `30_combat2_direct_path_sentry.lsl`: Combat2/direct-path sentry demonstrating `on_damage`, `final_damage`, `on_death`, damage metadata, damage adjustment metadata and terrain-aware pathfinding fallback movement.
+- `30_combat2_direct_path_sentry.lsl`: Combat2/pathfinding sentry demonstrating `on_damage`, `final_damage`, `on_death`, pre-health damage adjustment, damage metadata, obstacle-aware terrain pathfinding and visible sculpt texture animation fallback.
 
 Stock OpenSim may fail to compile or run these scripts because Experience events,
 KVP functions, scripted-only sit flags and newer Second Life LSL compatibility

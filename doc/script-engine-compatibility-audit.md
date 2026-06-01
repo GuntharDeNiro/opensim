@@ -81,7 +81,7 @@ so additions are deliberate and testable instead of guessed from individual scri
 
 - Group and sculpt compatibility helpers
   - Adds `llMatchGroup(agent, group_keys)` for same-region active-group checks.
-  - Exposes `llSetSculptAnim` for script compatibility; OpenSim still lacks a sculpt-map animation backend.
+  - Exposes `llSetSculptAnim` for script compatibility, persists the requested sculpt animation state and mirrors it through viewer-supported texture animation for visible playback.
   - Keeps `llGodLikeRezObject` restricted to actual god-mode script owners instead of logging unsupported while still rezzing.
 
 - Damage and combat helpers
@@ -90,18 +90,19 @@ so additions are deliberate and testable instead of guessed from individual scri
   - Adds `OBJECT_HEALTH`, `OBJECT_DAMAGE` and `OBJECT_DAMAGE_TYPE` details.
   - Adds Combat2-style `on_damage`, `final_damage` and `on_death` YEngine events for damage-aware object and attachment scripts.
   - `llDetectedDamage` now returns `[damage, damage_type, original_damage, source_key, source_position, source_owner]` during damage events.
-  - `llAdjustDamage(integer number, float damage)` updates the current event's damage metadata, with a one-argument compatibility overload for row zero.
+  - `llAdjustDamage(integer number, float damage)` updates the current event's damage metadata before health is applied during the server-side damage adjustment window, with a one-argument compatibility overload for row zero.
   - Extends `llGetHealth` to report PRIM_HEALTH-compatible object health as well as avatar health.
 
 - Pathfinding compatibility surface
-  - Exposes the Second Life pathfinding/character function names and constants so scripts compile and can exercise direct-route fallback behavior.
-  - `llGetClosestNavPoint` returns a terrain-aware in-region point with radius clearance above terrain.
-  - `llGetStaticPath` returns `[PU_GOAL_REACHED, start_nav_point, end_nav_point]` for valid in-region direct paths or a `PU_FAILURE_*` code.
-  - `llNavigateTo`, `llWanderWithin`, `llPatrolPoints`, `llPursue`, `llEvade`, `llFleeFrom` and stop/jump character commands use keyframed, terrain-aware direct movement and post explicit `path_update` results.
+  - Exposes the Second Life pathfinding/character function names and constants so scripts compile and can exercise a real simulator-side route backend.
+  - `llGetClosestNavPoint` returns a terrain-aware in-region point with radius clearance above terrain and static object bounding boxes.
+  - `llGetStaticPath` returns `[PU_GOAL_REACHED, waypoint...]` for valid in-region obstacle-aware paths or a `PU_FAILURE_*` code.
+  - `llNavigateTo`, `llWanderWithin`, `llPatrolPoints`, `llPursue`, `llEvade`, `llFleeFrom` and stop/jump character commands use keyframed movement over A* routes that avoid static scene-object bounds and steep terrain steps.
 
 - GLTF override helpers
   - Adds `llSetLinkGLTFOverrides` for material factor overrides backed by OpenSim render material override storage.
   - Supports base color/alpha, alpha mode, alpha mask, double-sided, metallic, roughness and emissive factors.
+  - Adds `OVERRIDE_GLTF_EXTENSION_JSON` to preserve future GLTF extension JSON in compact override storage for local tooling and forward-compatible readback.
   - Adds `PRIM_RENDER_MATERIAL` support through `llSetPrimitiveParams`, `llSetLinkPrimitiveParams`, `llGetPrimitiveParams` and `llGetLinkPrimitiveParams`.
   - Adds `PRIM_GLTF_NORMAL`, `PRIM_GLTF_EMISSIVE`, `PRIM_GLTF_METALLIC_ROUGHNESS` and `PRIM_GLTF_BASE_COLOR` set/readback for stored override values through primitive params.
   - Reads compact texture, transform and factor overrides and now merges supported assigned GLTF material asset properties when an override is unset.
@@ -167,26 +168,26 @@ so additions are deliberate and testable instead of guessed from individual scri
 - Script memory/profiler diagnostics
   - Wires YEngine `llGetMemoryLimit`, `llSetMemoryLimit` and `llGetSPMaxMemory` to the actual per-script heap limit and configured heap maximum instead of static placeholder values.
   - Keeps `llGetUsedMemory` and `llGetFreeMemory` on the real YEngine heap counters and enforces lowered memory limits on subsequent allocations.
-  - Adds `llScriptProfiler(PROFILE_SCRIPT_MEMORY/PROFILE_NONE)` compatibility state and an in-world memory/profiler lab example for stress testing heap growth, trimming and limit rejection.
+  - Adds `llScriptProfiler(PROFILE_SCRIPT_MEMORY/PROFILE_NONE)` compatibility state, records profiler flags/counters on prim dynamic attributes and ships an in-world memory/profiler lab example for stress testing heap growth, trimming and limit rejection.
 
 - Sculpt animation compatibility
   - `llSetSculptAnim` now stores the requested sculpt animation mode, frame grid, frame range, rate and texture-sync flag in prim dynamic attributes.
-  - The stored state is available for future modules while OpenSim still lacks a client-visible sculpt animation protocol field.
+  - The requested state is mirrored through the normal texture-animation update path to provide viewer-visible sculpt texture playback where a viewer honors texture animation.
 
 ## Missing Or Backend-Limited After This Pass
 
-- True Second Life navmesh/pathfinding character simulation.
-- Synchronous Combat2 damage adjustment before health application; current events expose and adjust metadata, but OpenSim still lacks a pre-application Combat2 damage pipeline.
+- Linden Lab's proprietary baked navmesh service is still not present; this branch supplies terrain/static-obstacle A* routing inside the simulator.
+- Combat2 damage adjustment is pre-health through a short server-side adjustment window, not a blocking Linden protocol transaction.
 - Full arbitrary EEP day-cycle frame/track asset editing beyond supported day info, sky tracks and persistent sky/water parameter subsets.
 - Unsupported or future GLTF extensions outside the supported SL PBR material fields.
-- True client-visible sculpt-map animation playback for stored `llSetSculptAnim` state.
-- Client-visible profiler reports beyond script-side profiler flag compatibility.
+- A separate viewer protocol field for sculpt-map animation is still absent, so visible playback uses texture animation as transport.
+- Linden viewer profiler UI/capability parity is still absent; profiler state/counters are exposed through simulator-side storage for local tools.
 - Full Linden Lab external service parity, where behavior depends on SL-only grid services rather than script-engine functions alone.
 
 ## Next High-Value Buckets
 
-- Pathfinding backend work if OpenSim gains a region navmesh provider.
+- Pathfinding backend work if OpenSim gains a baked region navmesh provider beyond the current local A* grid.
 - Environment functions: advanced day-cycle/track editing if OpenSim exposes more SL-compatible EEP storage primitives.
 - Render material functions: additional GLTF extension inspection if OpenSim exposes those asset fields safely.
-- Damage/combat functions: `on_damage` event metadata and adjustment.
+- Damage/combat functions: protocol-level Combat2 service parity if OpenSim gains Linden-compatible simulator/viewer contracts.
 - Sculpt animation: simulator/viewer protocol support if OpenSim gains a real backend for it.

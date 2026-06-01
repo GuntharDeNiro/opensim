@@ -551,7 +551,7 @@ namespace OpenSim.Region.ScriptEngine.Yengine
             return m_localsHeapUsed + glblVars.arraysHeapUse;
         }
 
-        public void xmrScriptProfiler(int flags)
+        public virtual void xmrScriptProfiler(int flags)
         {
             scriptProfilerFlags = flags;
         }

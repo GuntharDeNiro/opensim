@@ -10,6 +10,7 @@
 // - PRIM_GLTF_EMISSIVE readback after llSetLinkGLTFOverrides
 // - PRIM_GLTF_NORMAL texture/transform readback shape for stored override data
 // - PRIM_GLTF_* readback from the assigned material asset when no override exists
+// - OVERRIDE_GLTF_EXTENSION_JSON storage for future GLTF extension metadata
 // - PRIM_PHYSICS_MATERIAL set and readback using Second Life argument order
 //
 // Setup:
@@ -85,7 +86,8 @@ list pbr_overrides()
         OVERRIDE_GLTF_BASE_DOUBLE_SIDED, TRUE,
         OVERRIDE_GLTF_METALLIC_FACTOR, 0.18,
         OVERRIDE_GLTF_ROUGHNESS_FACTOR, 0.42,
-        OVERRIDE_GLTF_EMISSIVE_FACTOR, <0.05, 0.10, 0.22>
+        OVERRIDE_GLTF_EMISSIVE_FACTOR, <0.05, 0.10, 0.22>,
+        OVERRIDE_GLTF_EXTENSION_JSON, "{\"KHR_materials_emissive_strength\":{\"emissiveStrength\":1.25}}"
     ];
 }
 
@@ -179,7 +181,7 @@ apply_pbr(key agent, integer face)
     ]);
 
     llSetLinkGLTFOverrides(LINK_THIS, face, pbr_overrides());
-    say_to(agent, "Applied render material '" + material + "' and GLTF factor overrides to face " + (string)face + ".");
+    say_to(agent, "Applied render material '" + material + "', GLTF factor overrides and future extension JSON to face " + (string)face + ".");
     read_pbr(agent, TEST_FACE);
 }
 
@@ -279,6 +281,7 @@ help(key agent)
         "ASSET ONLY sets only PRIM_RENDER_MATERIAL so READ PBR can prove GLTF asset-property readback without script overrides." +
         "\nPARAM PBR writes PRIM_RENDER_MATERIAL and direct PRIM_GLTF_* setters in one llSetPrimitiveParams call." +
         "\nAPPLY PBR sets PRIM_RENDER_MATERIAL on face 0 and then writes GLTF factor overrides." +
+        "\nAPPLY PBR also stores OVERRIDE_GLTF_EXTENSION_JSON for future GLTF extension metadata." +
         "\nREAD PBR proves PRIM_RENDER_MATERIAL and PRIM_GLTF_* set/readback." +
         "\nPHYSICS sets PRIM_PHYSICS_MATERIAL in SL order: bits, gravity, restitution, friction, density." +
         "\nREAD PHYS proves PRIM_PHYSICS_MATERIAL readback."

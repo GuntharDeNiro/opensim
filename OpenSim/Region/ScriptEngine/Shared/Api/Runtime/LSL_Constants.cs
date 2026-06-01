@@ -506,6 +506,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         public const int OVERRIDE_GLTF_METALLIC_FACTOR = 6;
         public const int OVERRIDE_GLTF_ROUGHNESS_FACTOR = 7;
         public const int OVERRIDE_GLTF_EMISSIVE_FACTOR = 8;
+        public const int OVERRIDE_GLTF_EXTENSION_JSON = 1000;
 
         public const int PRIM_TEXGEN_DEFAULT = 0;
         public const int PRIM_TEXGEN_PLANAR = 1;

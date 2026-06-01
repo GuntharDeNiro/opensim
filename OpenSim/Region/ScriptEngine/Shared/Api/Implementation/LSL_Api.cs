@@ -141,6 +141,10 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         protected readonly HashSet<UUID> m_scriptExperienceTrustedOwners = new();
         protected readonly HashSet<UUID> m_scriptExperienceTrustedObjects = new();
         private const double ScriptEnergyRechargePerSecond = 0.20;
+        private const int CombatDamageAdjustWindowMs = 100;
+        private const float NavCellSize = 2.0f;
+        private const float NavMaxStepHeight = 1.75f;
+        private const int NavMaxVisitedCells = 18000;
         private static readonly object m_scriptEnergyLock = new();
         private static readonly Dictionary<UUID, ScriptEnergyState> m_scriptEnergy = new();
         private static readonly object m_scriptExperienceKvpLock = new();
@@ -151,6 +155,14 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         {
             public double Energy = 1.0;
             public double LastUpdate = Util.GetTimeStamp();
+        }
+
+        private struct NavObstacle
+        {
+            public float MinX;
+            public float MaxX;
+            public float MinY;
+            public float MaxY;
         }
 
         protected AsyncCommandManager m_AsyncCommands = null;
@@ -6342,30 +6354,54 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             DetectParams[] detects = CreateDamageDetectParams(damage, damageType);
             PostCombatEventToPresence(presence, "on_damage", detects);
 
-            float health = presence.Health - damage;
-            if (health > 100f)
-                health = 100f;
+            UUID presenceID = presence.UUID;
+            ThreadPool.QueueUserWorkItem(_ => CompleteDamageToPresence(presenceID, detects));
+        }
 
-            presence.setHealthWithUpdate(health);
-
-            detects[0].Damage = damage;
-            PostCombatEventToPresence(presence, "final_damage", detects);
-
-            if (health > 0)
-                return;
-
-            PostCombatEventToPresence(presence, "on_death", Array.Empty<DetectParams>());
-
-            if (presence.IsNPC)
+        private void CompleteDamageToPresence(UUID presenceID, DetectParams[] detects)
+        {
+            try
             {
-                INPCModule npcModule = World.RequestModuleInterface<INPCModule>();
-                npcModule?.DeleteNPC(presence.UUID, World);
-                return;
-            }
+                Thread.Sleep(CombatDamageAdjustWindowMs);
 
-            presence.ControllingClient.SendAgentAlertMessage("You died!", true);
-            presence.setHealthWithUpdate(100f);
-            presence.Scene.TeleportClientHome(presence.UUID, presence.ControllingClient);
+                ScenePresence presence = World.GetScenePresence(presenceID);
+                if (presence is null || presence.IsDeleted || presence.IsChildAgent || presence.IsInTransit)
+                    return;
+
+                float finalDamage = detects != null && detects.Length > 0
+                    ? Math.Max(0f, (float)detects[0].Damage)
+                    : 0f;
+
+                float health = presence.Health - finalDamage;
+                if (health > 100f)
+                    health = 100f;
+
+                presence.setHealthWithUpdate(health);
+
+                if (detects != null && detects.Length > 0)
+                    detects[0].Damage = finalDamage;
+                PostCombatEventToPresence(presence, "final_damage", detects);
+
+                if (health > 0)
+                    return;
+
+                PostCombatEventToPresence(presence, "on_death", Array.Empty<DetectParams>());
+
+                if (presence.IsNPC)
+                {
+                    INPCModule npcModule = World.RequestModuleInterface<INPCModule>();
+                    npcModule?.DeleteNPC(presence.UUID, World);
+                    return;
+                }
+
+                presence.ControllingClient.SendAgentAlertMessage("You died!", true);
+                presence.setHealthWithUpdate(100f);
+                presence.Scene.TeleportClientHome(presence.UUID, presence.ControllingClient);
+            }
+            catch (Exception e)
+            {
+                m_log.WarnFormat("[LSL]: Combat2 damage completion failed for avatar {0}: {1}", presenceID, e.Message);
+            }
         }
 
         private void ApplyDamageToObject(SceneObjectPart target, float damage, int damageType)
@@ -6375,21 +6411,45 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
             PostCombatEventToObject(root.LocalId, "on_damage", detects);
 
-            float health = root.GetLslHealth();
-            bool hadHealth = health > 0f;
-            if (hadHealth)
+            UUID rootID = root.UUID;
+            ThreadPool.QueueUserWorkItem(_ => CompleteDamageToObject(rootID, detects));
+        }
+
+        private void CompleteDamageToObject(UUID rootID, DetectParams[] detects)
+        {
+            try
             {
-                health -= damage;
-                if (health < 0f)
-                    health = 0f;
-                root.SetLslHealth(health);
+                Thread.Sleep(CombatDamageAdjustWindowMs);
+
+                SceneObjectPart root = World.GetSceneObjectPart(rootID);
+                if (root is null || root.ParentGroup is null || root.ParentGroup.IsDeleted)
+                    return;
+
+                float finalDamage = detects != null && detects.Length > 0
+                    ? Math.Max(0f, (float)detects[0].Damage)
+                    : 0f;
+
+                float health = root.GetLslHealth();
+                bool hadHealth = health > 0f;
+                if (hadHealth)
+                {
+                    health -= finalDamage;
+                    if (health < 0f)
+                        health = 0f;
+                    root.SetLslHealth(health);
+                }
+
+                if (detects != null && detects.Length > 0)
+                    detects[0].Damage = finalDamage;
+                PostCombatEventToObject(root.LocalId, "final_damage", detects);
+
+                if (hadHealth && health <= 0f)
+                    PostCombatEventToObject(root.LocalId, "on_death", Array.Empty<DetectParams>());
             }
-
-            detects[0].Damage = damage;
-            PostCombatEventToObject(root.LocalId, "final_damage", detects);
-
-            if (hadHealth && health <= 0f)
-                PostCombatEventToObject(root.LocalId, "on_death", Array.Empty<DetectParams>());
+            catch (Exception e)
+            {
+                m_log.WarnFormat("[LSL]: Combat2 damage completion failed for object {0}: {1}", rootID, e.Message);
+            }
         }
 
         public void llDamage(LSL_Key target, LSL_Float damage, LSL_Integer damage_type)
@@ -8451,8 +8511,14 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 m_host.DynAttrs.SetStore("lsl", "sculpt_anim", store);
             }
 
-            // OpenSim does not yet have a viewer protocol field for live sculpt-map animation,
-            // but preserving the state lets scripts and future modules observe the requested mode.
+            // There is no separate LLUDP field for sculpt-map animation in OpenSim, so mirror
+            // the request through the viewer-supported texture animation block as a visible
+            // sculpt-texture playback fallback while preserving the exact requested state above.
+            double length = Math.Max(0.0, end_frame.value - start_frame.value + 1.0);
+            SetTextureAnim(m_host, mode.value, ScriptBaseClass.ALL_SIDES,
+                Math.Max(1, sizex.value), Math.Max(1, sizey.value),
+                start_frame.value, length, rate.value);
+
             m_host.SendFullUpdateToAllClients();
             m_host.ParentGroup.HasGroupChanged = true;
         }
@@ -11131,7 +11197,330 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             PostPathUpdate(new LSL_Integer(status), new LSL_List());
         }
 
-        private bool StartDirectPathMotion(Vector3 goal, LSL_List options)
+        private List<NavObstacle> BuildNavObstacles(SceneObjectGroup actor, float radius)
+        {
+            List<NavObstacle> obstacles = new();
+            float clearance = Math.Max(radius, 0.15f);
+
+            World.ForEachSOG(group =>
+            {
+                if (group == null || group == actor || group.IsDeleted || group.IsAttachment || group.RootPart == null)
+                    return;
+
+                group.GetAxisAlignedBoundingBoxRaw(out float minX, out float maxX, out float minY, out float maxY, out float minZ, out float maxZ);
+                Vector3 pos = group.AbsolutePosition;
+                float centerX = Math.Clamp(pos.X + (minX + maxX) * 0.5f, 0f, World.RegionInfo.RegionSizeX - 0.001f);
+                float centerY = Math.Clamp(pos.Y + (minY + maxY) * 0.5f, 0f, World.RegionInfo.RegionSizeY - 0.001f);
+                float ground = World.GetGroundHeight(centerX, centerY);
+
+                float absMinZ = pos.Z + minZ;
+                float absMaxZ = pos.Z + maxZ;
+                if (absMaxZ < ground + 0.2f || absMinZ > ground + 3.0f)
+                    return;
+
+                obstacles.Add(new NavObstacle
+                {
+                    MinX = pos.X + minX - clearance,
+                    MaxX = pos.X + maxX + clearance,
+                    MinY = pos.Y + minY - clearance,
+                    MaxY = pos.Y + maxY + clearance
+                });
+            });
+
+            return obstacles;
+        }
+
+        private bool IsNavPointBlocked(float x, float y, List<NavObstacle> obstacles)
+        {
+            if (x < 0f || y < 0f || x >= World.RegionInfo.RegionSizeX || y >= World.RegionInfo.RegionSizeY)
+                return true;
+
+            foreach (NavObstacle obstacle in obstacles)
+            {
+                if (x >= obstacle.MinX && x <= obstacle.MaxX && y >= obstacle.MinY && y <= obstacle.MaxY)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private bool HasNavLineOfSight(Vector3 start, Vector3 goal, float radius, List<NavObstacle> obstacles)
+        {
+            Vector3 delta = goal - start;
+            float distance = delta.Length();
+            int steps = Math.Max(1, (int)Math.Ceiling(distance / Math.Max(0.5f, NavCellSize * 0.5f)));
+            float previousGround = World.GetGroundHeight(start.X, start.Y);
+
+            for (int i = 0; i <= steps; ++i)
+            {
+                float t = i / (float)steps;
+                float x = start.X + delta.X * t;
+                float y = start.Y + delta.Y * t;
+                if (IsNavPointBlocked(x, y, obstacles))
+                    return false;
+
+                float ground = World.GetGroundHeight(x, y);
+                if (i > 0 && Math.Abs(ground - previousGround) > NavMaxStepHeight)
+                    return false;
+                previousGround = ground;
+            }
+
+            return true;
+        }
+
+        private List<Vector3> SimplifyNavPath(List<Vector3> rawPath, float radius, List<NavObstacle> obstacles)
+        {
+            if (rawPath.Count <= 2)
+                return rawPath;
+
+            List<Vector3> simplified = new();
+            int anchor = 0;
+            simplified.Add(rawPath[0]);
+
+            while (anchor < rawPath.Count - 1)
+            {
+                int next = rawPath.Count - 1;
+                while (next > anchor + 1 && !HasNavLineOfSight(rawPath[anchor], rawPath[next], radius, obstacles))
+                    --next;
+
+                simplified.Add(rawPath[next]);
+                anchor = next;
+            }
+
+            return simplified;
+        }
+
+        private bool TryBuildNavPath(Vector3 start, Vector3 goal, float radius, out List<Vector3> path)
+        {
+            path = new List<Vector3>();
+            List<NavObstacle> obstacles = BuildNavObstacles(m_host.ParentGroup, radius);
+
+            float maxX = Math.Max(0f, World.RegionInfo.RegionSizeX - 0.001f);
+            float maxY = Math.Max(0f, World.RegionInfo.RegionSizeY - 0.001f);
+            int width = Math.Max(1, (int)Math.Ceiling(World.RegionInfo.RegionSizeX / NavCellSize));
+            int height = Math.Max(1, (int)Math.Ceiling(World.RegionInfo.RegionSizeY / NavCellSize));
+            int total = width * height;
+
+            int CellX(float x) => Math.Clamp((int)(Math.Clamp(x, 0f, maxX) / NavCellSize), 0, width - 1);
+            int CellY(float y) => Math.Clamp((int)(Math.Clamp(y, 0f, maxY) / NavCellSize), 0, height - 1);
+            int CellIndex(int cx, int cy) => cy * width + cx;
+            int IndexX(int index) => index % width;
+            int IndexY(int index) => index / width;
+            float CellWorldX(int cx) => Math.Clamp(cx * NavCellSize + NavCellSize * 0.5f, 0f, maxX);
+            float CellWorldY(int cy) => Math.Clamp(cy * NavCellSize + NavCellSize * 0.5f, 0f, maxY);
+
+            bool IsWalkable(int cx, int cy)
+            {
+                if (cx < 0 || cy < 0 || cx >= width || cy >= height)
+                    return false;
+
+                return !IsNavPointBlocked(CellWorldX(cx), CellWorldY(cy), obstacles);
+            }
+
+            bool TryFindNearestWalkableCell(int cx, int cy, int maxRadius, out int index)
+            {
+                if (IsWalkable(cx, cy))
+                {
+                    index = CellIndex(cx, cy);
+                    return true;
+                }
+
+                for (int r = 1; r <= maxRadius; ++r)
+                {
+                    for (int y = cy - r; y <= cy + r; ++y)
+                    {
+                        for (int x = cx - r; x <= cx + r; ++x)
+                        {
+                            if (Math.Abs(x - cx) != r && Math.Abs(y - cy) != r)
+                                continue;
+
+                            if (IsWalkable(x, y))
+                            {
+                                index = CellIndex(x, y);
+                                return true;
+                            }
+                        }
+                    }
+                }
+
+                index = -1;
+                return false;
+            }
+
+            Vector3 CellPoint(int index)
+            {
+                float x = CellWorldX(IndexX(index));
+                float y = CellWorldY(IndexY(index));
+                return new Vector3(x, y, World.GetGroundHeight(x, y) + Math.Max(radius, 0.05f));
+            }
+
+            int startCx = CellX(start.X);
+            int startCy = CellY(start.Y);
+            int goalCx = CellX(goal.X);
+            int goalCy = CellY(goal.Y);
+
+            if (!TryFindNearestWalkableCell(startCx, startCy, 2, out int startIndex))
+                return false;
+
+            if (!TryFindNearestWalkableCell(goalCx, goalCy, 12, out int goalIndex))
+                return false;
+
+            if (startIndex != CellIndex(startCx, startCy))
+                start = CellPoint(startIndex);
+            if (goalIndex != CellIndex(goalCx, goalCy))
+                goal = CellPoint(goalIndex);
+
+            if (HasNavLineOfSight(start, goal, radius, obstacles))
+            {
+                path.Add(start);
+                path.Add(goal);
+                return true;
+            }
+
+            float[] gScore = new float[total];
+            float[] fScore = new float[total];
+            int[] cameFrom = new int[total];
+            bool[] closed = new bool[total];
+            bool[] openSet = new bool[total];
+            List<int> open = new();
+
+            for (int i = 0; i < total; ++i)
+            {
+                gScore[i] = float.MaxValue;
+                fScore[i] = float.MaxValue;
+                cameFrom[i] = -1;
+            }
+
+            float Heuristic(int index)
+            {
+                int dx = IndexX(index) - IndexX(goalIndex);
+                int dy = IndexY(index) - IndexY(goalIndex);
+                return MathF.Sqrt(dx * dx + dy * dy) * NavCellSize;
+            }
+
+            gScore[startIndex] = 0f;
+            fScore[startIndex] = Heuristic(startIndex);
+            open.Add(startIndex);
+            openSet[startIndex] = true;
+
+            int[] offsets =
+            {
+                -1, 0, 1, 0, 0, -1, 0, 1,
+                -1, -1, 1, -1, -1, 1, 1, 1
+            };
+
+            int visited = 0;
+            while (open.Count > 0 && visited++ < NavMaxVisitedCells)
+            {
+                int openSlot = 0;
+                int current = open[0];
+                float best = fScore[current];
+                for (int i = 1; i < open.Count; ++i)
+                {
+                    int candidate = open[i];
+                    if (fScore[candidate] < best)
+                    {
+                        current = candidate;
+                        best = fScore[candidate];
+                        openSlot = i;
+                    }
+                }
+
+                open.RemoveAt(openSlot);
+                openSet[current] = false;
+
+                if (current == goalIndex)
+                {
+                    List<Vector3> rawPath = new();
+                    int walk = current;
+                    while (walk >= 0)
+                    {
+                        rawPath.Add(CellPoint(walk));
+                        walk = cameFrom[walk];
+                    }
+                    rawPath.Reverse();
+                    rawPath[0] = start;
+                    rawPath[rawPath.Count - 1] = goal;
+                    path = SimplifyNavPath(rawPath, radius, obstacles);
+                    return true;
+                }
+
+                closed[current] = true;
+                int currentX = IndexX(current);
+                int currentY = IndexY(current);
+                float currentGround = World.GetGroundHeight(CellWorldX(currentX), CellWorldY(currentY));
+
+                for (int i = 0; i < offsets.Length; i += 2)
+                {
+                    int nx = currentX + offsets[i];
+                    int ny = currentY + offsets[i + 1];
+                    if (!IsWalkable(nx, ny))
+                        continue;
+
+                    int neighbor = CellIndex(nx, ny);
+                    if (closed[neighbor])
+                        continue;
+
+                    float neighborGround = World.GetGroundHeight(CellWorldX(nx), CellWorldY(ny));
+                    float heightDelta = Math.Abs(neighborGround - currentGround);
+                    if (heightDelta > NavMaxStepHeight)
+                        continue;
+
+                    bool diagonal = offsets[i] != 0 && offsets[i + 1] != 0;
+                    float stepCost = diagonal ? NavCellSize * 1.41421356f : NavCellSize;
+                    float tentative = gScore[current] + stepCost + heightDelta * 0.35f;
+                    if (tentative >= gScore[neighbor])
+                        continue;
+
+                    cameFrom[neighbor] = current;
+                    gScore[neighbor] = tentative;
+                    fScore[neighbor] = tentative + Heuristic(neighbor);
+                    if (!openSet[neighbor])
+                    {
+                        open.Add(neighbor);
+                        openSet[neighbor] = true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private bool TryGetObstacleFreeNavPoint(LSL_Vector point, float radius, bool clamp, out Vector3 result)
+        {
+            if (!TryGetDirectNavPoint(point, radius, clamp, out result))
+                return false;
+
+            List<NavObstacle> obstacles = BuildNavObstacles(m_host.ParentGroup, radius);
+            if (!IsNavPointBlocked(result.X, result.Y, obstacles))
+                return true;
+
+            float maxX = Math.Max(0f, World.RegionInfo.RegionSizeX - 0.001f);
+            float maxY = Math.Max(0f, World.RegionInfo.RegionSizeY - 0.001f);
+            for (float ring = NavCellSize; ring <= NavCellSize * 12f; ring += NavCellSize)
+            {
+                for (float y = result.Y - ring; y <= result.Y + ring; y += NavCellSize)
+                {
+                    for (float x = result.X - ring; x <= result.X + ring; x += NavCellSize)
+                    {
+                        if (Math.Abs(x - result.X) < ring && Math.Abs(y - result.Y) < ring)
+                            continue;
+
+                        float sx = Math.Clamp(x, 0f, maxX);
+                        float sy = Math.Clamp(y, 0f, maxY);
+                        if (IsNavPointBlocked(sx, sy, obstacles))
+                            continue;
+
+                        result = new Vector3(sx, sy, World.GetGroundHeight(sx, sy) + Math.Max(radius, 0.05f));
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private bool StartPathMotion(List<Vector3> path, LSL_List options)
         {
             SceneObjectGroup group = m_host.ParentGroup;
 
@@ -11148,30 +11537,50 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             }
 
             Vector3 current = group.AbsolutePosition;
-            Vector3 delta = goal - current;
-            float distance = delta.Length();
-            if (distance <= 0.05f)
+            if (path == null || path.Count == 0)
             {
-                PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), new LSL_List(ToLSLVector(goal)));
-                return true;
+                PostPathFailure(ScriptBaseClass.PU_FAILURE_NO_VALID_DESTINATION);
+                return false;
             }
 
-            float duration = Math.Max(0.2f, distance / GetCharacterSpeed(options));
+            float speed = GetCharacterSpeed(options);
+            List<KeyframeMotion.Keyframe> frames = new();
+            Vector3 finalGoal = path[path.Count - 1];
 
-            group.RootPart.KeyframeMotion?.Delete();
-            group.RootPart.KeyframeMotion = new KeyframeMotion(group, KeyframeMotion.PlayMode.Forward, KeyframeMotion.DataFormat.Translation);
-            group.RootPart.KeyframeMotion.SetKeyframes(new[]
+            for (int i = 1; i < path.Count; ++i)
             {
-                new KeyframeMotion.Keyframe
+                Vector3 delta = path[i] - current;
+                float distance = delta.Length();
+                if (distance <= 0.05f)
+                {
+                    current = path[i];
+                    continue;
+                }
+
+                frames.Add(new KeyframeMotion.Keyframe
                 {
                     Position = delta,
                     Rotation = null,
-                    TimeMS = (int)(duration * 1000f)
-                }
-            });
+                    TimeMS = (int)(Math.Max(0.2f, distance / speed) * 1000f)
+                });
+                current = path[i];
+            }
+
+            if (frames.Count == 0)
+            {
+                PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), new LSL_List(ToLSLVector(finalGoal)));
+                return true;
+            }
+
+            group.RootPart.KeyframeMotion?.Delete();
+            group.RootPart.KeyframeMotion = new KeyframeMotion(group, KeyframeMotion.PlayMode.Forward, KeyframeMotion.DataFormat.Translation);
+            group.RootPart.KeyframeMotion.SetKeyframes(frames.ToArray());
             group.RootPart.KeyframeMotion.Start();
 
-            PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), new LSL_List(ToLSLVector(goal)));
+            LSL_List route = new(ToLSLVector(finalGoal));
+            for (int i = 1; i < path.Count - 1 && i < 12; ++i)
+                route.Add(ToLSLVector(path[i]));
+            PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), route);
             return true;
         }
 
@@ -11223,13 +11632,20 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public void llNavigateTo(LSL_Vector goal, LSL_List options)
         {
-            if (!TryGetDirectNavPoint(goal, GetCharacterRadius(options), false, out Vector3 navPoint))
+            float radius = GetCharacterRadius(options);
+            if (!TryGetDirectNavPoint(goal, radius, false, out Vector3 navPoint))
             {
                 PostPathFailure(ScriptBaseClass.PU_FAILURE_INVALID_GOAL);
                 return;
             }
 
-            StartDirectPathMotion(navPoint, options);
+            if (!TryBuildNavPath(m_host.ParentGroup.AbsolutePosition, navPoint, radius, out List<Vector3> path))
+            {
+                PostPathFailure(ScriptBaseClass.PU_FAILURE_UNREACHABLE);
+                return;
+            }
+
+            StartPathMotion(path, options);
         }
 
         public void llWanderWithin(LSL_Vector origin, LSL_Vector distance, LSL_List options)
@@ -11249,11 +11665,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 return;
             }
 
-            List<KeyframeMotion.Keyframe> frames = new();
             Vector3 current = group.AbsolutePosition;
             Vector3 finalGoal = current;
             float radius = GetCharacterRadius(options);
             float speed = GetCharacterSpeed(options);
+            List<Vector3> patrolPath = new() { current };
 
             for (int i = 0; i < patrol_points.Length; ++i)
             {
@@ -11271,10 +11687,33 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 if (!TryGetDirectNavPoint(point, radius, false, out Vector3 goal))
                     continue;
 
-                Vector3 delta = goal - current;
+                if (!TryBuildNavPath(current, goal, radius, out List<Vector3> leg) || leg.Count < 2)
+                    continue;
+
+                for (int j = 1; j < leg.Count; ++j)
+                    patrolPath.Add(leg[j]);
+
+                current = goal;
+                finalGoal = goal;
+            }
+
+            if (patrolPath.Count <= 1)
+            {
+                PostPathFailure(ScriptBaseClass.PU_FAILURE_NO_VALID_DESTINATION);
+                return;
+            }
+
+            List<KeyframeMotion.Keyframe> frames = new();
+            current = group.AbsolutePosition;
+            for (int i = 1; i < patrolPath.Count; ++i)
+            {
+                Vector3 delta = patrolPath[i] - current;
                 float distance = delta.Length();
                 if (distance <= 0.05f)
+                {
+                    current = patrolPath[i];
                     continue;
+                }
 
                 frames.Add(new KeyframeMotion.Keyframe
                 {
@@ -11282,14 +11721,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     Rotation = null,
                     TimeMS = (int)(Math.Max(0.2f, distance / speed) * 1000f)
                 });
-                current = goal;
-                finalGoal = goal;
-            }
-
-            if (frames.Count == 0)
-            {
-                PostPathFailure(ScriptBaseClass.PU_FAILURE_NO_VALID_DESTINATION);
-                return;
+                current = patrolPath[i];
             }
 
             group.RootPart.KeyframeMotion?.Delete();
@@ -11395,17 +11827,19 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             if (!TryGetDirectNavPoint(end, radius, false, out Vector3 endPoint))
                 return new LSL_List(new LSL_Integer(ScriptBaseClass.PU_FAILURE_INVALID_GOAL));
 
-            return new LSL_List(new object[]
-            {
-                new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED),
-                ToLSLVector(startPoint),
-                ToLSLVector(endPoint)
-            });
+            if (!TryBuildNavPath(startPoint, endPoint, (float)radius, out List<Vector3> path))
+                return new LSL_List(new LSL_Integer(ScriptBaseClass.PU_FAILURE_UNREACHABLE));
+
+            LSL_List result = new(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED));
+            foreach (Vector3 point in path)
+                result.Add(ToLSLVector(point));
+
+            return result;
         }
 
         public LSL_Vector llGetClosestNavPoint(LSL_Vector point, LSL_List options)
         {
-            return TryGetDirectNavPoint(point, GetCharacterRadius(options), true, out Vector3 navPoint)
+            return TryGetObstacleFreeNavPoint(point, GetCharacterRadius(options), true, out Vector3 navPoint)
                 ? ToLSLVector(navPoint)
                 : LSL_Vector.Zero;
         }
@@ -24100,6 +24534,13 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                         changed = true;
                         break;
 
+                    case ScriptBaseClass.OVERRIDE_GLTF_EXTENSION_JSON:
+                        touched = true;
+                        data = clear ? RemoveCompactKey(data, "xj") : SetCompactKey(data, "xj", OSD.FromString(rawValue?.ToString() ?? string.Empty));
+                        idx++;
+                        changed = true;
+                        break;
+
                     default:
                         idx++;
                         break;
@@ -24485,7 +24926,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         private static readonly string[] s_gltfCompactKeys =
         [
-            "tex", "ti", "bc", "am", "ac", "ds", "mf", "rf", "ec"
+            "tex", "ti", "bc", "am", "ac", "ds", "mf", "rf", "ec", "xj"
         ];
 
         private static string SetCompactKey(string data, string key, OSD value)
