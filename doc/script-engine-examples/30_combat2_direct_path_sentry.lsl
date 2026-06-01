@@ -1,7 +1,7 @@
 // Combat2 Direct Path Sentry
 //
-// Demonstrates the new Combat2-style pre-health damage adjustment together with
-// terrain-aware obstacle-avoiding pathfinding calls.
+// Demonstrates the new Combat2-style pre-health damage transaction together with
+// persistent character options and terrain-aware obstacle-avoiding pathfinding.
 //
 // Drop this script into a non-physical prim. Touch it to cycle a sentry route.
 // Say "damage" on channel 5 to apply self-damage and exercise on_damage,
@@ -52,6 +52,7 @@ setup()
         CHARACTER_MAX_SPEED, 4.0,
         CHARACTER_RADIUS, 0.6,
         CHARACTER_LENGTH, 1.6,
+        CHARACTER_AVOIDANCE_MODE, AVOID_DYNAMIC_OBSTACLES | AVOID_CHARACTERS,
         CHARACTER_STAY_WITHIN_PARCEL, TRUE
     ]);
 
@@ -80,7 +81,7 @@ doStep()
         goal = nav(here + <0.0, -12.0, 0.0>);
 
     reportPath("obstacle-aware route", here, goal);
-    llNavigateTo(goal, [CHARACTER_DESIRED_SPEED, 2.0]);
+    llNavigateTo(goal, [CHARACTER_DESIRED_SPEED, 2.0, REQUIRE_LINE_OF_SIGHT, FALSE]);
 
     gStep = (gStep + 1) % 4;
 }
@@ -89,7 +90,7 @@ damageSelf()
 {
     say("Applying llDamage to this object with DAMAGE_TYPE_FIRE.");
     llDamage(llGetKey(), 18.0, DAMAGE_TYPE_FIRE);
-    say("Health is applied after on_damage adjustment; final_damage will report the new value.");
+    say("Health is applied after the on_damage quiet transaction; final_damage will report the new value.");
 }
 
 default
@@ -113,12 +114,13 @@ default
         else if (llToLower(message) == "jump")
             llExecCharacterCmd(CHARACTER_CMD_JUMP, []);
         else if (llToLower(message) == "wander")
-            llWanderWithin(llGetPos(), <20.0, 20.0, 0.0>, [CHARACTER_DESIRED_SPEED, 2.0]);
+            llWanderWithin(llGetPos(), <20.0, 20.0, 0.0>, [CHARACTER_DESIRED_SPEED, 2.0, REQUIRE_LINE_OF_SIGHT, FALSE]);
     }
 
     path_update(integer type, list reserved)
     {
-        say("path_update type=" + (string)type + " data=" + llList2CSV(reserved));
+        say("path_update type=" + (string)type + " data=" + llList2CSV(reserved)
+            + " (PU_GOAL_REACHED now arrives after motion completion)");
     }
 
     on_damage(integer n)

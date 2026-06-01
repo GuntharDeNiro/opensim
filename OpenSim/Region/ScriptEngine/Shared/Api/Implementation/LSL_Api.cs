@@ -141,12 +141,18 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         protected readonly HashSet<UUID> m_scriptExperienceTrustedOwners = new();
         protected readonly HashSet<UUID> m_scriptExperienceTrustedObjects = new();
         private const double ScriptEnergyRechargePerSecond = 0.20;
-        private const int CombatDamageAdjustWindowMs = 100;
+        private const int CombatDamageInitialWindowMs = 80;
+        private const int CombatDamageAdjustQuietWindowMs = 50;
+        private const int CombatDamageMaxWindowMs = 750;
         private const float NavCellSize = 2.0f;
         private const float NavMaxStepHeight = 1.75f;
         private const int NavMaxVisitedCells = 18000;
         private static readonly object m_scriptEnergyLock = new();
         private static readonly Dictionary<UUID, ScriptEnergyState> m_scriptEnergy = new();
+        private static readonly object m_combatDamageLock = new();
+        private static readonly Dictionary<DetectParams, CombatDamageTransaction> m_combatDamageTransactions = new();
+        private static readonly object m_characterNavLock = new();
+        private static readonly Dictionary<UUID, CharacterNavState> m_characterNavStates = new();
         private static readonly object m_scriptExperienceKvpLock = new();
         private static readonly Dictionary<string, Dictionary<string, string>> m_scriptExperienceKvpStores = new();
         private static readonly HashSet<string> m_scriptExperienceKvpLoadedScopes = new();
@@ -163,6 +169,47 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             public float MaxX;
             public float MinY;
             public float MaxY;
+        }
+
+        private struct NavRequestOptions
+        {
+            public bool ForceDirectPath;
+            public bool RequireLineOfSight;
+        }
+
+        private sealed class CharacterNavState
+        {
+            public readonly object Sync = new();
+            public bool Created;
+            public float DesiredSpeed = 3f;
+            public float MaxSpeed = 3f;
+            public float Radius = 0.5f;
+            public float Length = 2f;
+            public float MaxAccel = 20f;
+            public float MaxDecel = 20f;
+            public float MaxTurnRadius = 0f;
+            public float DesiredTurnSpeed = 5f;
+            public int AvoidanceMode = ScriptBaseClass.AVOID_DYNAMIC_OBSTACLES;
+            public int CharacterType = ScriptBaseClass.CHARACTER_TYPE_A;
+            public bool AccountForSkippedFrames = true;
+            public bool StayWithinParcel;
+            public UUID MotionID = UUID.Zero;
+            public double LastUpdated = Util.GetTimeStamp();
+        }
+
+        private sealed class CombatDamageTransaction
+        {
+            public readonly object Sync = new();
+            public readonly DetectParams[] Detects;
+            public readonly DateTime CreatedUtc = DateTime.UtcNow;
+            public DateTime LastAdjustmentUtc;
+            public bool Finalized;
+
+            public CombatDamageTransaction(DetectParams[] detects)
+            {
+                Detects = detects ?? Array.Empty<DetectParams>();
+                LastAdjustmentUtc = CreatedUtc;
+            }
         }
 
         protected AsyncCommandManager m_AsyncCommands = null;
@@ -6324,6 +6371,100 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             return new[] { detect };
         }
 
+        private CombatDamageTransaction BeginCombatDamageTransaction(DetectParams[] detects)
+        {
+            CombatDamageTransaction transaction = new(detects);
+
+            lock (m_combatDamageLock)
+            {
+                foreach (DetectParams detect in transaction.Detects)
+                {
+                    if (detect != null)
+                        m_combatDamageTransactions[detect] = transaction;
+                }
+            }
+
+            return transaction;
+        }
+
+        private static void EndCombatDamageTransaction(CombatDamageTransaction transaction)
+        {
+            if (transaction is null)
+                return;
+
+            lock (transaction.Sync)
+            {
+                transaction.Finalized = true;
+            }
+
+            lock (m_combatDamageLock)
+            {
+                foreach (DetectParams detect in transaction.Detects)
+                {
+                    if (detect != null && m_combatDamageTransactions.TryGetValue(detect, out CombatDamageTransaction stored)
+                        && ReferenceEquals(stored, transaction))
+                    {
+                        m_combatDamageTransactions.Remove(detect);
+                    }
+                }
+            }
+        }
+
+        private static bool TryAdjustCombatDamage(DetectParams detect, double damage)
+        {
+            if (detect is null)
+                return false;
+
+            CombatDamageTransaction transaction;
+            lock (m_combatDamageLock)
+            {
+                if (!m_combatDamageTransactions.TryGetValue(detect, out transaction))
+                    return false;
+            }
+
+            lock (transaction.Sync)
+            {
+                if (transaction.Finalized)
+                    return false;
+
+                detect.Damage = damage;
+                transaction.LastAdjustmentUtc = DateTime.UtcNow;
+                return true;
+            }
+        }
+
+        private static float WaitForFinalCombatDamage(CombatDamageTransaction transaction)
+        {
+            if (transaction is null || transaction.Detects.Length == 0 || transaction.Detects[0] is null)
+                return 0f;
+
+            DateTime earliest = transaction.CreatedUtc.AddMilliseconds(CombatDamageInitialWindowMs);
+            DateTime deadline = transaction.CreatedUtc.AddMilliseconds(CombatDamageMaxWindowMs);
+
+            while (true)
+            {
+                DateTime now = DateTime.UtcNow;
+                DateTime quietUntil;
+                lock (transaction.Sync)
+                {
+                    quietUntil = transaction.LastAdjustmentUtc.AddMilliseconds(CombatDamageAdjustQuietWindowMs);
+                }
+
+                DateTime waitUntil = earliest > quietUntil ? earliest : quietUntil;
+                if (now >= waitUntil || now >= deadline)
+                    break;
+
+                TimeSpan wait = waitUntil - now;
+                int sleepMs = Math.Clamp((int)wait.TotalMilliseconds, 5, 50);
+                Thread.Sleep(sleepMs);
+            }
+
+            lock (transaction.Sync)
+            {
+                return Math.Max(0f, (float)transaction.Detects[0].Damage);
+            }
+        }
+
         private void PostCombatEventToObject(uint localID, string eventName, DetectParams[] detects)
         {
             object[] args = eventName == "on_death"
@@ -6352,25 +6493,24 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         private void ApplyDamageToPresence(ScenePresence presence, float damage, int damageType)
         {
             DetectParams[] detects = CreateDamageDetectParams(damage, damageType);
+            CombatDamageTransaction transaction = BeginCombatDamageTransaction(detects);
             PostCombatEventToPresence(presence, "on_damage", detects);
 
             UUID presenceID = presence.UUID;
-            ThreadPool.QueueUserWorkItem(_ => CompleteDamageToPresence(presenceID, detects));
+            ThreadPool.QueueUserWorkItem(_ => CompleteDamageToPresence(presenceID, transaction));
         }
 
-        private void CompleteDamageToPresence(UUID presenceID, DetectParams[] detects)
+        private void CompleteDamageToPresence(UUID presenceID, CombatDamageTransaction transaction)
         {
             try
             {
-                Thread.Sleep(CombatDamageAdjustWindowMs);
+                DetectParams[] detects = transaction?.Detects ?? Array.Empty<DetectParams>();
+                float finalDamage = WaitForFinalCombatDamage(transaction);
+                EndCombatDamageTransaction(transaction);
 
                 ScenePresence presence = World.GetScenePresence(presenceID);
                 if (presence is null || presence.IsDeleted || presence.IsChildAgent || presence.IsInTransit)
                     return;
-
-                float finalDamage = detects != null && detects.Length > 0
-                    ? Math.Max(0f, (float)detects[0].Damage)
-                    : 0f;
 
                 float health = presence.Health - finalDamage;
                 if (health > 100f)
@@ -6400,6 +6540,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             }
             catch (Exception e)
             {
+                EndCombatDamageTransaction(transaction);
                 m_log.WarnFormat("[LSL]: Combat2 damage completion failed for avatar {0}: {1}", presenceID, e.Message);
             }
         }
@@ -6408,26 +6549,25 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         {
             SceneObjectPart root = target.ParentGroup?.RootPart ?? target;
             DetectParams[] detects = CreateDamageDetectParams(damage, damageType);
+            CombatDamageTransaction transaction = BeginCombatDamageTransaction(detects);
 
             PostCombatEventToObject(root.LocalId, "on_damage", detects);
 
             UUID rootID = root.UUID;
-            ThreadPool.QueueUserWorkItem(_ => CompleteDamageToObject(rootID, detects));
+            ThreadPool.QueueUserWorkItem(_ => CompleteDamageToObject(rootID, transaction));
         }
 
-        private void CompleteDamageToObject(UUID rootID, DetectParams[] detects)
+        private void CompleteDamageToObject(UUID rootID, CombatDamageTransaction transaction)
         {
             try
             {
-                Thread.Sleep(CombatDamageAdjustWindowMs);
+                DetectParams[] detects = transaction?.Detects ?? Array.Empty<DetectParams>();
+                float finalDamage = WaitForFinalCombatDamage(transaction);
+                EndCombatDamageTransaction(transaction);
 
                 SceneObjectPart root = World.GetSceneObjectPart(rootID);
                 if (root is null || root.ParentGroup is null || root.ParentGroup.IsDeleted)
                     return;
-
-                float finalDamage = detects != null && detects.Length > 0
-                    ? Math.Max(0f, (float)detects[0].Damage)
-                    : 0f;
 
                 float health = root.GetLslHealth();
                 bool hadHealth = health > 0f;
@@ -6448,6 +6588,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             }
             catch (Exception e)
             {
+                EndCombatDamageTransaction(transaction);
                 m_log.WarnFormat("[LSL]: Combat2 damage completion failed for object {0}: {1}", rootID, e.Message);
             }
         }
@@ -6475,7 +6616,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         public void llAdjustDamage(LSL_Integer number, LSL_Float damage)
         {
             DetectParams detectedParams = m_ScriptEngine.GetDetectParams(m_item.ItemID, number);
-            if (detectedParams != null)
+            if (detectedParams != null && !TryAdjustCombatDamage(detectedParams, damage))
                 detectedParams.Damage = damage;
         }
 
@@ -11116,12 +11257,190 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             }
         }
 
+        private static bool TryGetOptionIntegerValue(object value, out int result)
+        {
+            switch (value)
+            {
+                case LSL_Integer lslInteger:
+                    result = lslInteger.value;
+                    return true;
+                case int integer:
+                    result = integer;
+                    return true;
+                case LSL_Float lslFloat:
+                    result = (int)lslFloat.value;
+                    return true;
+                case float single:
+                    result = (int)single;
+                    return true;
+                case double dbl:
+                    result = (int)dbl;
+                    return true;
+                case LSL_String lslString when int.TryParse(lslString.m_string, NumberStyles.Integer, CultureInfo.InvariantCulture, out result):
+                    return true;
+                case string str when int.TryParse(str, NumberStyles.Integer, CultureInfo.InvariantCulture, out result):
+                    return true;
+                default:
+                    result = 0;
+                    return false;
+            }
+        }
+
+        private CharacterNavState GetCharacterState(bool create)
+        {
+            SceneObjectGroup group = m_host?.ParentGroup;
+            SceneObjectPart root = group?.RootPart;
+            if (root == null)
+                return null;
+
+            lock (m_characterNavLock)
+            {
+                if (!m_characterNavStates.TryGetValue(root.UUID, out CharacterNavState state) && create)
+                {
+                    state = new CharacterNavState();
+                    m_characterNavStates[root.UUID] = state;
+                }
+                return state;
+            }
+        }
+
+        private void RemoveCharacterState()
+        {
+            SceneObjectPart root = m_host?.ParentGroup?.RootPart;
+            if (root == null)
+                return;
+
+            lock (m_characterNavLock)
+                m_characterNavStates.Remove(root.UUID);
+        }
+
+        private static void ApplyCharacterOptions(CharacterNavState state, LSL_List options)
+        {
+            if (state == null || options == null)
+                return;
+
+            lock (state.Sync)
+            {
+                int idx = 0;
+                while (idx < options.Length)
+                {
+                    int option = options.GetIntegerItem(idx++);
+                    if (idx >= options.Length)
+                        break;
+
+                    object value = options.Data[idx++];
+                    switch (option)
+                    {
+                        case ScriptBaseClass.CHARACTER_DESIRED_SPEED:
+                            if (!IsIntegerBooleanOptionValue(value) && TryGetOptionFloatValue(value, out float desiredSpeed))
+                                state.DesiredSpeed = Math.Max(0.1f, desiredSpeed);
+                            break;
+
+                        case ScriptBaseClass.CHARACTER_MAX_SPEED:
+                            if (!IsIntegerBooleanOptionValue(value) && TryGetOptionFloatValue(value, out float maxSpeed))
+                                state.MaxSpeed = Math.Max(0.1f, maxSpeed);
+                            break;
+
+                        case ScriptBaseClass.CHARACTER_RADIUS:
+                            if (!IsIntegerBooleanOptionValue(value) && TryGetOptionFloatValue(value, out float radius))
+                                state.Radius = Math.Clamp(radius, 0.05f, 32f);
+                            break;
+
+                        case ScriptBaseClass.CHARACTER_LENGTH:
+                            if (!IsIntegerBooleanOptionValue(value) && TryGetOptionFloatValue(value, out float length))
+                                state.Length = Math.Clamp(length, 0.05f, 64f);
+                            break;
+
+                        case ScriptBaseClass.CHARACTER_MAX_ACCEL:
+                            if (!IsIntegerBooleanOptionValue(value) && TryGetOptionFloatValue(value, out float accel))
+                                state.MaxAccel = Math.Max(0.1f, accel);
+                            break;
+
+                        case ScriptBaseClass.CHARACTER_MAX_DECEL:
+                            if (!IsIntegerBooleanOptionValue(value) && TryGetOptionFloatValue(value, out float decel))
+                                state.MaxDecel = Math.Max(0.1f, decel);
+                            break;
+
+                        case ScriptBaseClass.CHARACTER_MAX_TURN_RADIUS:
+                            if (!IsIntegerBooleanOptionValue(value) && TryGetOptionFloatValue(value, out float turnRadius))
+                                state.MaxTurnRadius = Math.Max(0f, turnRadius);
+                            break;
+
+                        case ScriptBaseClass.CHARACTER_DESIRED_TURN_SPEED:
+                            if (!IsIntegerBooleanOptionValue(value) && TryGetOptionFloatValue(value, out float turnSpeed))
+                                state.DesiredTurnSpeed = Math.Max(0.1f, turnSpeed);
+                            break;
+
+                        case ScriptBaseClass.CHARACTER_AVOIDANCE_MODE:
+                            if (TryGetOptionIntegerValue(value, out int avoidanceMode))
+                                state.AvoidanceMode = avoidanceMode;
+                            break;
+
+                        case ScriptBaseClass.CHARACTER_TYPE:
+                            if (TryGetOptionIntegerValue(value, out int characterType))
+                                state.CharacterType = characterType;
+                            break;
+
+                        case ScriptBaseClass.CHARACTER_ACCOUNT_FOR_SKIPPED_FRAMES:
+                            if (TryGetOptionIntegerValue(value, out int skippedFrames))
+                                state.AccountForSkippedFrames = skippedFrames != 0;
+                            break;
+
+                        case ScriptBaseClass.CHARACTER_STAY_WITHIN_PARCEL:
+                            if (TryGetOptionIntegerValue(value, out int stayWithinParcel))
+                                state.StayWithinParcel = stayWithinParcel != 0;
+                            break;
+                    }
+                }
+
+                state.Created = true;
+                state.LastUpdated = Util.GetTimeStamp();
+            }
+        }
+
+        private static NavRequestOptions GetNavRequestOptions(LSL_List options)
+        {
+            NavRequestOptions request = new();
+            if (options == null)
+                return request;
+
+            int idx = 0;
+            while (idx < options.Length)
+            {
+                int option = options.GetIntegerItem(idx++);
+                if (idx >= options.Length)
+                    break;
+
+                object value = options.Data[idx++];
+                switch (option)
+                {
+                    case ScriptBaseClass.FORCE_DIRECT_PATH:
+                        if (IsIntegerBooleanOptionValue(value) && TryGetOptionIntegerValue(value, out int forceDirect))
+                            request.ForceDirectPath = forceDirect != 0;
+                        break;
+
+                    case ScriptBaseClass.REQUIRE_LINE_OF_SIGHT:
+                        if (IsIntegerBooleanOptionValue(value) && TryGetOptionIntegerValue(value, out int requireLineOfSight))
+                            request.RequireLineOfSight = requireLineOfSight != 0;
+                        break;
+                }
+            }
+
+            return request;
+        }
+
         private float GetCharacterSpeed(LSL_List options)
         {
-            float speed = 3f;
+            return GetCharacterSpeed(options, GetCharacterState(false));
+        }
+
+        private float GetCharacterSpeed(LSL_List options, CharacterNavState state)
+        {
+            float speed = state != null ? state.DesiredSpeed : 3f;
+            float maxSpeed = state != null ? state.MaxSpeed : speed;
             int idx = 0;
 
-            while (idx < options.Length)
+            while (options != null && idx < options.Length)
             {
                 int option = options.GetIntegerItem(idx++);
                 if (idx >= options.Length)
@@ -11130,12 +11449,20 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 switch (option)
                 {
                     case ScriptBaseClass.CHARACTER_DESIRED_SPEED:
-                    case ScriptBaseClass.CHARACTER_MAX_SPEED:
                         object speedValue = options.Data[idx++];
                         if (!IsIntegerBooleanOptionValue(speedValue)
                             && TryGetOptionFloatValue(speedValue, out float parsedSpeed))
                         {
                             speed = Math.Max(0.1f, parsedSpeed);
+                        }
+                        break;
+
+                    case ScriptBaseClass.CHARACTER_MAX_SPEED:
+                        object maxSpeedValue = options.Data[idx++];
+                        if (!IsIntegerBooleanOptionValue(maxSpeedValue)
+                            && TryGetOptionFloatValue(maxSpeedValue, out float parsedMaxSpeed))
+                        {
+                            maxSpeed = Math.Max(0.1f, parsedMaxSpeed);
                         }
                         break;
 
@@ -11145,15 +11472,20 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 }
             }
 
-            return speed;
+            return Math.Max(0.1f, Math.Min(speed, Math.Max(0.1f, maxSpeed)));
         }
 
         private float GetCharacterRadius(LSL_List options)
         {
-            float radius = 0.5f;
+            return GetCharacterRadius(options, GetCharacterState(false));
+        }
+
+        private float GetCharacterRadius(LSL_List options, CharacterNavState state)
+        {
+            float radius = state != null ? state.Radius : 0.5f;
             int idx = 0;
 
-            while (idx < options.Length)
+            while (options != null && idx < options.Length)
             {
                 int option = options.GetIntegerItem(idx++);
                 if (idx >= options.Length)
@@ -11182,7 +11514,12 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         private void PostPathUpdate(LSL_Integer status, LSL_List data)
         {
-            m_ScriptEngine.PostObjectEvent(m_host.LocalId, new EventParams(
+            PostPathUpdate(m_host.LocalId, status, data);
+        }
+
+        private void PostPathUpdate(uint localID, LSL_Integer status, LSL_List data)
+        {
+            m_ScriptEngine.PostObjectEvent(localID, new EventParams(
                 "path_update",
                 new object[]
                 {
@@ -11197,10 +11534,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             PostPathUpdate(new LSL_Integer(status), new LSL_List());
         }
 
-        private List<NavObstacle> BuildNavObstacles(SceneObjectGroup actor, float radius)
+        private List<NavObstacle> BuildNavObstacles(SceneObjectGroup actor, float radius, CharacterNavState state)
         {
             List<NavObstacle> obstacles = new();
             float clearance = Math.Max(radius, 0.15f);
+            int avoidanceMode = state != null ? state.AvoidanceMode : ScriptBaseClass.AVOID_DYNAMIC_OBSTACLES;
 
             World.ForEachSOG(group =>
             {
@@ -11226,6 +11564,25 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     MaxY = pos.Y + maxY + clearance
                 });
             });
+
+            if ((avoidanceMode & ScriptBaseClass.AVOID_CHARACTERS) != 0)
+            {
+                World.ForEachRootScenePresence(presence =>
+                {
+                    if (presence == null || presence.IsDeleted || presence.IsChildAgent || presence.IsInTransit)
+                        return;
+
+                    Vector3 pos = presence.AbsolutePosition;
+                    float agentClearance = Math.Max(clearance, 0.75f);
+                    obstacles.Add(new NavObstacle
+                    {
+                        MinX = pos.X - agentClearance,
+                        MaxX = pos.X + agentClearance,
+                        MinY = pos.Y - agentClearance,
+                        MaxY = pos.Y + agentClearance
+                    });
+                });
+            }
 
             return obstacles;
         }
@@ -11268,10 +11625,13 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             return true;
         }
 
-        private List<Vector3> SimplifyNavPath(List<Vector3> rawPath, float radius, List<NavObstacle> obstacles)
+        private List<Vector3> SimplifyNavPath(List<Vector3> rawPath, float radius, List<NavObstacle> obstacles, Func<Vector3, Vector3, bool> hasLineOfSight = null)
         {
             if (rawPath.Count <= 2)
                 return rawPath;
+
+            if (hasLineOfSight == null)
+                hasLineOfSight = (a, b) => HasNavLineOfSight(a, b, radius, obstacles);
 
             List<Vector3> simplified = new();
             int anchor = 0;
@@ -11280,7 +11640,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             while (anchor < rawPath.Count - 1)
             {
                 int next = rawPath.Count - 1;
-                while (next > anchor + 1 && !HasNavLineOfSight(rawPath[anchor], rawPath[next], radius, obstacles))
+                while (next > anchor + 1 && !hasLineOfSight(rawPath[anchor], rawPath[next]))
                     --next;
 
                 simplified.Add(rawPath[next]);
@@ -11292,8 +11652,25 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         private bool TryBuildNavPath(Vector3 start, Vector3 goal, float radius, out List<Vector3> path)
         {
+            return TryBuildNavPath(start, goal, radius, GetCharacterState(false), new NavRequestOptions(), out path);
+        }
+
+        private bool TryBuildNavPath(Vector3 start, Vector3 goal, float radius, CharacterNavState state, NavRequestOptions request, out List<Vector3> path)
+        {
             path = new List<Vector3>();
-            List<NavObstacle> obstacles = BuildNavObstacles(m_host.ParentGroup, radius);
+            List<NavObstacle> obstacles = BuildNavObstacles(m_host.ParentGroup, radius, state);
+            float maxStepHeight = NavMaxStepHeight;
+            bool stayWithinParcel = false;
+            ILandObject sourceParcel = null;
+
+            if (state != null)
+            {
+                lock (state.Sync)
+                    stayWithinParcel = state.StayWithinParcel;
+
+                if (stayWithinParcel)
+                    sourceParcel = World.LandChannel?.GetLandObject(start.X, start.Y);
+            }
 
             float maxX = Math.Max(0f, World.RegionInfo.RegionSizeX - 0.001f);
             float maxY = Math.Max(0f, World.RegionInfo.RegionSizeY - 0.001f);
@@ -11309,12 +11686,43 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             float CellWorldX(int cx) => Math.Clamp(cx * NavCellSize + NavCellSize * 0.5f, 0f, maxX);
             float CellWorldY(int cy) => Math.Clamp(cy * NavCellSize + NavCellSize * 0.5f, 0f, maxY);
 
+            bool IsAllowedParcel(float x, float y)
+            {
+                if (!stayWithinParcel || sourceParcel == null)
+                    return true;
+
+                ILandObject parcel = World.LandChannel?.GetLandObject(x, y);
+                return parcel != null && parcel.LocalID == sourceParcel.LocalID;
+            }
+
             bool IsWalkable(int cx, int cy)
             {
                 if (cx < 0 || cy < 0 || cx >= width || cy >= height)
                     return false;
 
-                return !IsNavPointBlocked(CellWorldX(cx), CellWorldY(cy), obstacles);
+                float x = CellWorldX(cx);
+                float y = CellWorldY(cy);
+                return IsAllowedParcel(x, y) && !IsNavPointBlocked(x, y, obstacles);
+            }
+
+            bool HasAllowedLineOfSight(Vector3 lineStart, Vector3 lineGoal)
+            {
+                if (!HasNavLineOfSight(lineStart, lineGoal, radius, obstacles))
+                    return false;
+
+                if (!stayWithinParcel || sourceParcel == null)
+                    return true;
+
+                Vector3 delta = lineGoal - lineStart;
+                int steps = Math.Max(1, (int)Math.Ceiling(delta.Length() / Math.Max(0.5f, NavCellSize * 0.5f)));
+                for (int i = 0; i <= steps; ++i)
+                {
+                    float t = i / (float)steps;
+                    if (!IsAllowedParcel(lineStart.X + delta.X * t, lineStart.Y + delta.Y * t))
+                        return false;
+                }
+
+                return true;
             }
 
             bool TryFindNearestWalkableCell(int cx, int cy, int maxRadius, out int index)
@@ -11370,7 +11778,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             if (goalIndex != CellIndex(goalCx, goalCy))
                 goal = CellPoint(goalIndex);
 
-            if (HasNavLineOfSight(start, goal, radius, obstacles))
+            bool directLineOfSight = HasAllowedLineOfSight(start, goal);
+            if ((request.ForceDirectPath || request.RequireLineOfSight) && !directLineOfSight)
+                return false;
+
+            if (directLineOfSight)
             {
                 path.Add(start);
                 path.Add(goal);
@@ -11441,7 +11853,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     rawPath.Reverse();
                     rawPath[0] = start;
                     rawPath[rawPath.Count - 1] = goal;
-                    path = SimplifyNavPath(rawPath, radius, obstacles);
+                    path = SimplifyNavPath(rawPath, radius, obstacles, HasAllowedLineOfSight);
                     return true;
                 }
 
@@ -11463,7 +11875,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
                     float neighborGround = World.GetGroundHeight(CellWorldX(nx), CellWorldY(ny));
                     float heightDelta = Math.Abs(neighborGround - currentGround);
-                    if (heightDelta > NavMaxStepHeight)
+                    if (heightDelta > maxStepHeight)
                         continue;
 
                     bool diagonal = offsets[i] != 0 && offsets[i + 1] != 0;
@@ -11491,7 +11903,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             if (!TryGetDirectNavPoint(point, radius, clamp, out result))
                 return false;
 
-            List<NavObstacle> obstacles = BuildNavObstacles(m_host.ParentGroup, radius);
+            List<NavObstacle> obstacles = BuildNavObstacles(m_host.ParentGroup, radius, GetCharacterState(false));
             if (!IsNavPointBlocked(result.X, result.Y, obstacles))
                 return true;
 
@@ -11522,6 +11934,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         private bool StartPathMotion(List<Vector3> path, LSL_List options)
         {
+            CharacterNavState state = GetCharacterState(true);
             SceneObjectGroup group = m_host.ParentGroup;
 
             if (group.IsAttachment)
@@ -11543,9 +11956,10 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 return false;
             }
 
-            float speed = GetCharacterSpeed(options);
+            float speed = GetCharacterSpeed(options, state);
             List<KeyframeMotion.Keyframe> frames = new();
             Vector3 finalGoal = path[path.Count - 1];
+            int totalTimeMS = 0;
 
             for (int i = 1; i < path.Count; ++i)
             {
@@ -11563,6 +11977,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     Rotation = null,
                     TimeMS = (int)(Math.Max(0.2f, distance / speed) * 1000f)
                 });
+                totalTimeMS += frames[frames.Count - 1].TimeMS;
                 current = path[i];
             }
 
@@ -11580,23 +11995,68 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             LSL_List route = new(ToLSLVector(finalGoal));
             for (int i = 1; i < path.Count - 1 && i < 12; ++i)
                 route.Add(ToLSLVector(path[i]));
-            PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), route);
+
+            UUID motionID = UUID.Random();
+            lock (state.Sync)
+            {
+                state.MotionID = motionID;
+                state.LastUpdated = Util.GetTimeStamp();
+            }
+
+            QueuePathCompletion(group.RootPart.LocalId, state, motionID, totalTimeMS, route);
             return true;
+        }
+
+        private void QueuePathCompletion(uint localID, CharacterNavState state, UUID motionID, int totalTimeMS, LSL_List route)
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    Thread.Sleep(Math.Max(50, totalTimeMS + 50));
+
+                    lock (state.Sync)
+                    {
+                        if (state.MotionID != motionID)
+                            return;
+
+                        state.MotionID = UUID.Zero;
+                        state.LastUpdated = Util.GetTimeStamp();
+                    }
+
+                    PostPathUpdate(localID, new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), route);
+                }
+                catch (Exception e)
+                {
+                    m_log.WarnFormat("[LSL]: Pathfinding completion event failed for localID {0}: {1}", localID, e.Message);
+                }
+            });
         }
 
         public void llCreateCharacter(LSL_List options)
         {
+            CharacterNavState state = GetCharacterState(true);
+            ApplyCharacterOptions(state, options);
             PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), new LSL_List());
         }
 
         public void llUpdateCharacter(LSL_List options)
         {
+            CharacterNavState state = GetCharacterState(true);
+            ApplyCharacterOptions(state, options);
             PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), new LSL_List());
         }
 
         public void llDeleteCharacter()
         {
             m_host.ParentGroup.RootPart.KeyframeMotion?.Stop();
+            CharacterNavState state = GetCharacterState(false);
+            if (state != null)
+            {
+                lock (state.Sync)
+                    state.MotionID = UUID.Random();
+            }
+            RemoveCharacterState();
             PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), new LSL_List());
         }
 
@@ -11608,6 +12068,15 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 case ScriptBaseClass.CHARACTER_CMD_STOP:
                 case ScriptBaseClass.CHARACTER_CMD_SMOOTH_STOP:
                     group.RootPart.KeyframeMotion?.Stop();
+                    CharacterNavState state = GetCharacterState(false);
+                    if (state != null)
+                    {
+                        lock (state.Sync)
+                        {
+                            state.MotionID = UUID.Random();
+                            state.LastUpdated = Util.GetTimeStamp();
+                        }
+                    }
                     PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), new LSL_List());
                     break;
 
@@ -11632,14 +12101,30 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public void llNavigateTo(LSL_Vector goal, LSL_List options)
         {
-            float radius = GetCharacterRadius(options);
+            CharacterNavState state = GetCharacterState(true);
+            float radius = GetCharacterRadius(options, state);
             if (!TryGetDirectNavPoint(goal, radius, false, out Vector3 navPoint))
             {
                 PostPathFailure(ScriptBaseClass.PU_FAILURE_INVALID_GOAL);
                 return;
             }
 
-            if (!TryBuildNavPath(m_host.ParentGroup.AbsolutePosition, navPoint, radius, out List<Vector3> path))
+            bool stayWithinParcel = false;
+            lock (state.Sync)
+                stayWithinParcel = state.StayWithinParcel;
+
+            if (stayWithinParcel)
+            {
+                ILandObject startParcel = World.LandChannel?.GetLandObject(m_host.ParentGroup.AbsolutePosition.X, m_host.ParentGroup.AbsolutePosition.Y);
+                ILandObject goalParcel = World.LandChannel?.GetLandObject(navPoint.X, navPoint.Y);
+                if (startParcel != null && goalParcel != null && startParcel.LocalID != goalParcel.LocalID)
+                {
+                    PostPathFailure(ScriptBaseClass.PU_FAILURE_PARCEL_UNREACHABLE);
+                    return;
+                }
+            }
+
+            if (!TryBuildNavPath(m_host.ParentGroup.AbsolutePosition, navPoint, radius, state, GetNavRequestOptions(options), out List<Vector3> path))
             {
                 PostPathFailure(ScriptBaseClass.PU_FAILURE_UNREACHABLE);
                 return;
@@ -11666,9 +12151,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             }
 
             Vector3 current = group.AbsolutePosition;
-            Vector3 finalGoal = current;
-            float radius = GetCharacterRadius(options);
-            float speed = GetCharacterSpeed(options);
+            float radius = GetCharacterRadius(options, GetCharacterState(true));
             List<Vector3> patrolPath = new() { current };
 
             for (int i = 0; i < patrol_points.Length; ++i)
@@ -11694,7 +12177,6 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     patrolPath.Add(leg[j]);
 
                 current = goal;
-                finalGoal = goal;
             }
 
             if (patrolPath.Count <= 1)
@@ -11703,33 +12185,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 return;
             }
 
-            List<KeyframeMotion.Keyframe> frames = new();
-            current = group.AbsolutePosition;
-            for (int i = 1; i < patrolPath.Count; ++i)
-            {
-                Vector3 delta = patrolPath[i] - current;
-                float distance = delta.Length();
-                if (distance <= 0.05f)
-                {
-                    current = patrolPath[i];
-                    continue;
-                }
-
-                frames.Add(new KeyframeMotion.Keyframe
-                {
-                    Position = delta,
-                    Rotation = null,
-                    TimeMS = (int)(Math.Max(0.2f, distance / speed) * 1000f)
-                });
-                current = patrolPath[i];
-            }
-
-            group.RootPart.KeyframeMotion?.Delete();
-            group.RootPart.KeyframeMotion = new KeyframeMotion(group, KeyframeMotion.PlayMode.Forward, KeyframeMotion.DataFormat.Translation);
-            group.RootPart.KeyframeMotion.SetKeyframes(frames.ToArray());
-            group.RootPart.KeyframeMotion.Start();
-
-            PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), new LSL_List(ToLSLVector(finalGoal)));
+            StartPathMotion(patrolPath, options);
         }
 
         public void llPursue(LSL_Key target, LSL_List options)
@@ -11816,6 +12272,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             away.Normalize();
 
             Vector3 goal = current + away * (float)Math.Max(0.1, distance);
+            goal.X = Math.Clamp(goal.X, 0f, Math.Max(0f, World.RegionInfo.RegionSizeX - 0.001f));
+            goal.Y = Math.Clamp(goal.Y, 0f, Math.Max(0f, World.RegionInfo.RegionSizeY - 0.001f));
             llNavigateTo(ToLSLVector(goal), options);
         }
 

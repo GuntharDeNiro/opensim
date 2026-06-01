@@ -201,7 +201,7 @@ The scripts use:
 - `27_avatar_visual_param_inspector.lsl`: avatar visual parameter inspector demonstrating `llGetVisualParams` ids, names, aliases, unsupported entries, owner/toucher scans and periodic watch mode.
 - `28_eep_water_environment_console.lsl`: EEP water console demonstrating `llGetEnvironment`, region/parcel `llSetEnvironment` and agent-local `llSetAgentEnvironment` water overrides.
 - `29_eep_sky_environment_console.lsl`: EEP sky console demonstrating persistent `SKY_*` plus `WATER_*` parameter overrides for region, parcel and agent-local environments.
-- `30_combat2_direct_path_sentry.lsl`: Combat2/pathfinding sentry demonstrating `on_damage`, `final_damage`, `on_death`, pre-health damage adjustment, damage metadata, obstacle-aware terrain pathfinding and visible sculpt texture animation fallback.
+- `30_combat2_direct_path_sentry.lsl`: Combat2/pathfinding sentry demonstrating `on_damage`, `final_damage`, `on_death`, quiet-window pre-health damage transactions, damage metadata, persistent character options, completion-timed `path_update`, obstacle/avatar-aware terrain pathfinding and visible sculpt texture animation fallback.
 
 Stock OpenSim may fail to compile or run these scripts because Experience events,
 KVP functions, scripted-only sit flags and newer Second Life LSL compatibility

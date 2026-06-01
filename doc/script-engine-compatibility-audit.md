@@ -90,14 +90,18 @@ so additions are deliberate and testable instead of guessed from individual scri
   - Adds `OBJECT_HEALTH`, `OBJECT_DAMAGE` and `OBJECT_DAMAGE_TYPE` details.
   - Adds Combat2-style `on_damage`, `final_damage` and `on_death` YEngine events for damage-aware object and attachment scripts.
   - `llDetectedDamage` now returns `[damage, damage_type, original_damage, source_key, source_position, source_owner]` during damage events.
-  - `llAdjustDamage(integer number, float damage)` updates the current event's damage metadata before health is applied during the server-side damage adjustment window, with a one-argument compatibility overload for row zero.
+  - `llAdjustDamage(integer number, float damage)` updates the current event's damage metadata before health is applied, with a one-argument compatibility overload for row zero.
+  - Damage application now uses a pending server-side transaction: `on_damage` opens a quiet adjustment window, each `llAdjustDamage` extends that quiet window, and health is reduced only after the transaction settles or reaches its cap.
   - Extends `llGetHealth` to report PRIM_HEALTH-compatible object health as well as avatar health.
 
 - Pathfinding compatibility surface
   - Exposes the Second Life pathfinding/character function names and constants so scripts compile and can exercise a real simulator-side route backend.
+  - `llCreateCharacter` and `llUpdateCharacter` persist local character options such as radius, desired/max speed, avoidance mode and parcel-stay behavior for subsequent movement calls.
   - `llGetClosestNavPoint` returns a terrain-aware in-region point with radius clearance above terrain and static object bounding boxes.
   - `llGetStaticPath` returns `[PU_GOAL_REACHED, waypoint...]` for valid in-region obstacle-aware paths or a `PU_FAILURE_*` code.
-  - `llNavigateTo`, `llWanderWithin`, `llPatrolPoints`, `llPursue`, `llEvade`, `llFleeFrom` and stop/jump character commands use keyframed movement over A* routes that avoid static scene-object bounds and steep terrain steps.
+  - `llNavigateTo`, `llWanderWithin`, `llPatrolPoints`, `llPursue`, `llEvade`, `llFleeFrom` and stop/jump character commands use keyframed movement over A* routes that avoid scene-object bounds, optional avatar bounds and steep terrain steps.
+  - Path completion events are now invalidated by stop/delete/new movement and `PU_GOAL_REACHED` is posted after keyframed movement completes instead of at route start.
+  - `FORCE_DIRECT_PATH`, `REQUIRE_LINE_OF_SIGHT` and `CHARACTER_STAY_WITHIN_PARCEL` are honored by the local route backend where applicable.
 
 - GLTF override helpers
   - Adds `llSetLinkGLTFOverrides` for material factor overrides backed by OpenSim render material override storage.
@@ -176,8 +180,8 @@ so additions are deliberate and testable instead of guessed from individual scri
 
 ## Missing Or Backend-Limited After This Pass
 
-- Linden Lab's proprietary baked navmesh service is still not present; this branch supplies terrain/static-obstacle A* routing inside the simulator.
-- Combat2 damage adjustment is pre-health through a short server-side adjustment window, not a blocking Linden protocol transaction.
+- Linden Lab's proprietary baked navmesh service is still not present; this branch supplies terrain/object/avatar-clearance A* routing and persistent character state inside the simulator.
+- Combat2 damage adjustment is pre-health through a server-side transaction/quiet window; it still does not expose a Linden-owned external Combat2 service contract.
 - Full arbitrary EEP day-cycle frame/track asset editing beyond supported day info, sky tracks and persistent sky/water parameter subsets.
 - Unsupported or future GLTF extensions outside the supported SL PBR material fields.
 - A separate viewer protocol field for sculpt-map animation is still absent, so visible playback uses texture animation as transport.
@@ -186,8 +190,8 @@ so additions are deliberate and testable instead of guessed from individual scri
 
 ## Next High-Value Buckets
 
-- Pathfinding backend work if OpenSim gains a baked region navmesh provider beyond the current local A* grid.
+- Pathfinding backend work if OpenSim gains a baked region navmesh provider beyond the current local A* grid and object/avatar clearance model.
 - Environment functions: advanced day-cycle/track editing if OpenSim exposes more SL-compatible EEP storage primitives.
 - Render material functions: additional GLTF extension inspection if OpenSim exposes those asset fields safely.
-- Damage/combat functions: protocol-level Combat2 service parity if OpenSim gains Linden-compatible simulator/viewer contracts.
+- Damage/combat functions: protocol-level Combat2 service parity if OpenSim gains Linden-compatible simulator/viewer contracts beyond the current local pre-health transaction model.
 - Sculpt animation: simulator/viewer protocol support if OpenSim gains a real backend for it.
