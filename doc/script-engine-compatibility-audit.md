@@ -101,7 +101,8 @@ so additions are deliberate and testable instead of guessed from individual scri
   - Supports base color/alpha, alpha mode, alpha mask, double-sided, metallic, roughness and emissive factors.
   - Adds `PRIM_RENDER_MATERIAL` support through `llSetPrimitiveParams`, `llSetLinkPrimitiveParams`, `llGetPrimitiveParams` and `llGetLinkPrimitiveParams`.
   - Adds `PRIM_GLTF_NORMAL`, `PRIM_GLTF_EMISSIVE`, `PRIM_GLTF_METALLIC_ROUGHNESS` and `PRIM_GLTF_BASE_COLOR` set/readback for stored override values through primitive params.
-  - Reads compact texture, transform and factor overrides without claiming access to unset values inside the underlying material asset.
+  - Reads compact texture, transform and factor overrides and now merges supported assigned GLTF material asset properties when an override is unset.
+  - Updates the PBR GLTF physics primitive-param lab with an asset-only path that proves material asset readback before applying script overrides.
 
 - Physics material primitive params
   - Adds `PRIM_PHYSICS_MATERIAL` readback.
@@ -141,6 +142,13 @@ so additions are deliberate and testable instead of guessed from individual scri
   - Applies Second Life validation ranges for supported water rules before persisting overrides.
   - Extends RegionWeb documentation for the now-supported `llGetEnvironment`, `llSetEnvironment` and `llSetAgentEnvironment` water parameter workflows.
 
+- Environment sky compatibility
+  - Adds persistent per-parameter `llSetEnvironment` and `llSetAgentEnvironment` support for the simulator-backed `SKY_*` rules OpenSim can store today.
+  - Supports `SKY_AMBIENT`, `SKY_BLUE`, `SKY_CLOUDS`, `SKY_DOME`, `SKY_GAMMA`, `SKY_GLOW`, `SKY_HAZE`, `SKY_MOON`, `SKY_PLANET`, `SKY_REFRACTION`, `SKY_REFLECTION_PROBE_AMBIANCE`, `SKY_STAR_BRIGHTNESS`, `SKY_SUN`, `SKY_CLOUD_TEXTURE`, `SKY_MOON_TEXTURE` and `SKY_SUN_TEXTURE`.
+  - Adds `llGetEnvironment` readback for sky texture UUIDs and `SKY_TEXTURE_DEFAULTS`.
+  - Preserves existing sky tracks when present, creates script-owned static sky frames when missing, and applies whole-region negative-Z updates across all sky tracks.
+  - Adds an in-world EEP sky environment console example for region, parcel and agent-local sky/water presets.
+
 - Parcel prim count compatibility
   - Completes `llGetParcelPrimCount` for same-owner simulator-wide `PARCEL_COUNT_OWNER`, `PARCEL_COUNT_GROUP`, `PARCEL_COUNT_OTHER` and `PARCEL_COUNT_SELECTED`.
   - Adds `PARCEL_COUNT_TEMP` support by counting temporary-on-rez non-mesh linksets on the target parcel or same-owner parcels.
@@ -161,15 +169,16 @@ so additions are deliberate and testable instead of guessed from individual scri
 
 - True Second Life navmesh/pathfinding character simulation.
 - Combat2 `on_damage` event state and mutable per-hit damage adjustment.
-- Full per-parameter EEP sky/day override persistence for `llSetEnvironment` and `llSetAgentEnvironment`.
-- Underlying material asset readback for unset `PRIM_GLTF_*` properties.
+- Advanced EEP day-cycle editing beyond the supported persistent sky/water parameter subset.
+- Unsupported or future GLTF extensions outside the supported SL PBR material fields.
 - True client-visible sculpt-map animation for `llSetSculptAnim`.
 - Client-visible profiler reports beyond script-side profiler flag compatibility.
+- Full Linden Lab external service parity, where behavior depends on SL-only grid services rather than script-engine functions alone.
 
 ## Next High-Value Buckets
 
 - Pathfinding backend work if OpenSim gains a region navmesh provider.
-- Environment functions: full per-parameter EEP sky/day override storage for `llSetEnvironment` and `llSetAgentEnvironment`.
-- Render material functions: optional material asset inspection if OpenSim exposes it safely.
+- Environment functions: advanced day-cycle/track editing if OpenSim exposes more SL-compatible EEP storage primitives.
+- Render material functions: additional GLTF extension inspection if OpenSim exposes those asset fields safely.
 - Damage/combat functions: `on_damage` event metadata and adjustment.
 - Sculpt animation: simulator/viewer protocol support if OpenSim gains a real backend for it.

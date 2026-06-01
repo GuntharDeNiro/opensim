@@ -461,5 +461,53 @@ namespace OpenSim.Framework
             Util.AddToGatheredIds(uuids, rainbow_id, (sbyte)AssetType.Texture);
             Util.AddToGatheredIds(uuids, sun_id, (sbyte)AssetType.Texture);
         }
+
+        public UUID CloudTexture
+        {
+            get { return cloud_id; }
+            set { cloud_id = value; }
+        }
+
+        public UUID MoonTexture
+        {
+            get { return moon_id; }
+            set { moon_id = value; }
+        }
+
+        public UUID SunTexture
+        {
+            get { return sun_id; }
+            set { sun_id = value; }
+        }
+
+        public bool IsDefaultBloomTexture()
+        {
+            return bloom_id == new SkyData().bloom_id;
+        }
+
+        public bool IsDefaultCloudTexture()
+        {
+            return cloud_id == new SkyData().cloud_id;
+        }
+
+        public bool IsDefaultHaloTexture()
+        {
+            return halo_id == new SkyData().halo_id;
+        }
+
+        public bool IsDefaultMoonTexture()
+        {
+            return moon_id == new SkyData().moon_id;
+        }
+
+        public bool IsDefaultRainbowTexture()
+        {
+            return rainbow_id == new SkyData().rainbow_id;
+        }
+
+        public bool IsDefaultSunTexture()
+        {
+            return sun_id == new SkyData().sun_id;
+        }
     }
 }

@@ -53,6 +53,7 @@ The scripts use:
 - `llSetLinkGLTFOverrides`
 - `PRIM_RENDER_MATERIAL`
 - `PRIM_GLTF_*` setters through primitive params
+- `PRIM_GLTF_*` readback from assigned material assets and stored overrides
 - `PRIM_GLTF_NORMAL`
 - `PRIM_GLTF_EMISSIVE`
 - `PRIM_GLTF_METALLIC_ROUGHNESS`
@@ -80,6 +81,22 @@ The scripts use:
 - `llGetEnvironment`
 - `llSetEnvironment`
 - `llSetAgentEnvironment`
+- `SKY_AMBIENT`
+- `SKY_BLUE`
+- `SKY_CLOUDS`
+- `SKY_DOME`
+- `SKY_GAMMA`
+- `SKY_GLOW`
+- `SKY_HAZE`
+- `SKY_MOON`
+- `SKY_PLANET`
+- `SKY_REFRACTION`
+- `SKY_REFLECTION_PROBE_AMBIANCE`
+- `SKY_STAR_BRIGHTNESS`
+- `SKY_SUN`
+- `SKY_CLOUD_TEXTURE`
+- `SKY_MOON_TEXTURE`
+- `SKY_SUN_TEXTURE`
 - `llGetAnimation`
 - `llGetAnimationList`
 - `llGetEnergy`
@@ -151,7 +168,7 @@ The scripts use:
 - `15_rezzer_provenance_quarantine.lsl`: complex provenance scanner using rezzer detection, notecard trust policy, HUD filtering and scripted return-by-ID quarantine.
 - `16_inventory_transfer_and_ownership_lab.lsl`: complex inventory transfer lab using `llGiveAgentInventory`, destination roots, transfer result codes and ownership copy/take modes.
 - `17_parcel_media_loop_console.lsl`: parcel media console using loop-set command/query, media type, description, integer size and auto-align persistence.
-- `18_pbr_gltf_physics_param_lab.lsl`: render material, GLTF override readback and physics material primitive-param lab.
+- `18_pbr_gltf_physics_param_lab.lsl`: render material, GLTF asset/override readback and physics material primitive-param lab.
 - `19_object_details_diagnostics_console.lsl`: complex object/avatar diagnostics console using `llGetObjectDetails` cost, render-weight, hover-height, selection, provenance, hover-text and damage readback.
 - `20_identity_lookup_console.lsl`: complex identity diagnostics console using synchronous and asynchronous name, username, display-name and key lookups.
 - `21_parcel_prim_count_auditor.lsl`: parcel audit console using local and same-owner simulator-wide `llGetParcelPrimCount`, `llGetParcelDetails` capacity/used values and owner/count breakdowns.
@@ -162,6 +179,7 @@ The scripts use:
 - `26_physics_energy_meter.lsl`: physics energy meter demonstrating dynamic `llGetEnergy` drain/recharge around force, torque, impulse, hover, buoyancy and push operations.
 - `27_avatar_visual_param_inspector.lsl`: avatar visual parameter inspector demonstrating `llGetVisualParams` ids, names, aliases, unsupported entries, owner/toucher scans and periodic watch mode.
 - `28_eep_water_environment_console.lsl`: EEP water console demonstrating `llGetEnvironment`, region/parcel `llSetEnvironment` and agent-local `llSetAgentEnvironment` water overrides.
+- `29_eep_sky_environment_console.lsl`: EEP sky console demonstrating persistent `SKY_*` plus `WATER_*` parameter overrides for region, parcel and agent-local environments.
 
 Stock OpenSim may fail to compile or run these scripts because Experience events,
 KVP functions, scripted-only sit flags and newer Second Life LSL compatibility

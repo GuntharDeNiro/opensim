@@ -14261,7 +14261,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         private void AddGltfPrimitiveParams(ref LSL_List res, int code, SceneObjectPart part, int face)
         {
-            string data = GetMaterialOverrideData(part, face);
+            string data = GetGltfMaterialData(part, face);
             int textureIndex = code switch
             {
                 ScriptBaseClass.PRIM_GLTF_NORMAL => 1,
@@ -14309,6 +14309,316 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     break;
                 }
             }
+        }
+
+        private string GetGltfMaterialData(SceneObjectPart part, int face)
+        {
+            string assetData = GetGltfMaterialAssetData(part, face);
+            string overrideData = GetMaterialOverrideData(part, face);
+            return MergeCompactGltfData(assetData, overrideData);
+        }
+
+        private string GetGltfMaterialAssetData(SceneObjectPart part, int face)
+        {
+            UUID materialID = GetRenderMaterialID(part, face);
+            if (materialID.IsZero())
+                return "{}";
+
+            AssetBase asset = World.AssetService?.Get(materialID.ToString());
+            if (asset is null || asset.Data is null || asset.Data.Length == 0)
+                return "{}";
+
+            return TryExtractGltfJson(asset.Data, out string json)
+                && TryCompactGltfMaterialJson(json, out string data) ? data : "{}";
+        }
+
+        private static UUID GetRenderMaterialID(SceneObjectPart part, int face)
+        {
+            if (part?.Shape?.RenderMaterials?.entries is null)
+                return UUID.Zero;
+
+            foreach (Primitive.RenderMaterials.RenderMaterialEntry entry in part.Shape.RenderMaterials.entries)
+            {
+                if (entry.te_index == face)
+                    return entry.id;
+            }
+            return UUID.Zero;
+        }
+
+        private static bool TryExtractGltfJson(byte[] data, out string json)
+        {
+            json = null;
+            if (data is null || data.Length == 0)
+                return false;
+
+            string text = Encoding.UTF8.GetString(data).Trim();
+            if (text.StartsWith("{", StringComparison.Ordinal) && text.Contains("\"materials\"", StringComparison.Ordinal))
+            {
+                json = text;
+                return true;
+            }
+
+            try
+            {
+                if (TryExtractGltfJson(OSDParser.DeserializeLLSDXml(data), out json))
+                    return true;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                return TryExtractGltfJson(OSDParser.DeserializeJson(text), out json);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TryExtractGltfJson(OSD osd, out string json)
+        {
+            json = null;
+            if (osd is not OSDMap map)
+                return false;
+
+            if (map.TryGetValue("gltf_json", out OSD gltfJson))
+            {
+                json = gltfJson.AsString();
+                return !string.IsNullOrWhiteSpace(json);
+            }
+
+            if (map.ContainsKey("materials"))
+            {
+                json = OSDParser.SerializeJsonString(map);
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryGetGltfExtensionTransform(OSDMap inMap, out OSDMap outMap)
+        {
+            outMap = null;
+            if (inMap is null || !inMap.TryGetValue("extensions", out OSD extOSD) || extOSD is not OSDMap extMap)
+                return false;
+
+            if (!extMap.TryGetValue("KHR_texture_transform", out OSD trOSD) || trOSD is not OSDMap trMap)
+                return false;
+
+            OSDMap result = new();
+            if (trMap.TryGetValue("offset", out OSD offsetOSD) && offsetOSD is OSDArray offset && offset.Count >= 2)
+            {
+                result["o"] = new OSDArray
+                {
+                    Math.Round((double)offset[0], 4),
+                    Math.Round((double)offset[1], 4)
+                };
+            }
+
+            if (trMap.TryGetValue("rotation", out OSD rotationOSD))
+                result["r"] = Math.Round(rotationOSD.AsReal(), 6);
+
+            if (trMap.TryGetValue("scale", out OSD scaleOSD) && scaleOSD is OSDArray scale && scale.Count >= 2)
+            {
+                result["s"] = new OSDArray
+                {
+                    Math.Round((double)scale[0], 4),
+                    Math.Round((double)scale[1], 4)
+                };
+            }
+
+            outMap = result;
+            return result.Count > 0;
+        }
+
+        private static bool TryCompactGltfMaterialJson(string json, out string data)
+        {
+            data = "{}";
+            if (string.IsNullOrWhiteSpace(json))
+                return false;
+
+            try
+            {
+                if (OSDParser.DeserializeJson(json) is not OSDMap mainMap)
+                    return false;
+
+                if (!mainMap.TryGetValue("materials", out OSD materialsOSD) ||
+                    materialsOSD is not OSDArray materialsArray ||
+                    materialsArray.Count < 1 ||
+                    materialsArray[0] is not OSDMap material)
+                    return false;
+
+                UUID[] textureURIs = ReadGltfTextureUris(mainMap);
+                bool hasTextureUris = textureURIs is not null;
+                OSDMap compact = new();
+                OSDArray transforms = new(4);
+                UUID[] textureIDs = new UUID[4];
+                bool[] textureChanged = new bool[4];
+                bool texturesChanged = false;
+
+                void SetTextureFromIndex(OSDMap textureMap, int compactIndex)
+                {
+                    if (!hasTextureUris || textureMap is null ||
+                        !textureMap.TryGetValue("index", out OSD indexOSD))
+                        return;
+
+                    int sourceIndex = indexOSD.AsInteger();
+                    if (sourceIndex >= 0 && sourceIndex < textureURIs.Length)
+                    {
+                        textureIDs[compactIndex] = textureURIs[sourceIndex];
+                        textureChanged[compactIndex] = true;
+                        texturesChanged = true;
+                    }
+                }
+
+                void SetTransform(OSDMap textureMap, int compactIndex)
+                {
+                    if (!TryGetGltfExtensionTransform(textureMap, out OSDMap transform))
+                        return;
+
+                    while (transforms.Count < compactIndex)
+                        transforms.Add(new OSDMap());
+
+                    if (transforms.Count == compactIndex)
+                        transforms.Add(transform);
+                    else
+                        transforms[compactIndex] = transform;
+                }
+
+                if (material.TryGetValue("pbrMetallicRoughness", out OSD pmrOSD) && pmrOSD is OSDMap pmrMap)
+                {
+                    if (pmrMap.TryGetValue("baseColorTexture", out OSD baseTextureOSD) && baseTextureOSD is OSDMap baseTexture)
+                    {
+                        SetTextureFromIndex(baseTexture, 0);
+                        SetTransform(baseTexture, 0);
+                    }
+
+                    if (pmrMap.TryGetValue("metallicRoughnessTexture", out OSD mrTextureOSD) && mrTextureOSD is OSDMap mrTexture)
+                    {
+                        SetTextureFromIndex(mrTexture, 2);
+                        SetTransform(mrTexture, 2);
+                    }
+
+                    if (pmrMap.TryGetValue("baseColorFactor", out OSD baseColorOSD) && baseColorOSD is OSDArray baseColor && baseColor.Count >= 4)
+                    {
+                        compact["bc"] = new OSDArray
+                        {
+                            Math.Round(baseColor[0].AsReal(), 4),
+                            Math.Round(baseColor[1].AsReal(), 4),
+                            Math.Round(baseColor[2].AsReal(), 4),
+                            Math.Round(baseColor[3].AsReal(), 4)
+                        };
+                    }
+
+                    if (pmrMap.TryGetValue("metallicFactor", out OSD metallicFactor))
+                        compact["mf"] = Math.Round(metallicFactor.AsReal(), 4);
+
+                    if (pmrMap.TryGetValue("roughnessFactor", out OSD roughnessFactor))
+                        compact["rf"] = Math.Round(roughnessFactor.AsReal(), 4);
+                }
+
+                if (material.TryGetValue("normalTexture", out OSD normalOSD) && normalOSD is OSDMap normalTexture)
+                {
+                    SetTextureFromIndex(normalTexture, 1);
+                    SetTransform(normalTexture, 1);
+                }
+
+                if (material.TryGetValue("occlusionTexture", out OSD occlusionOSD) && occlusionOSD is OSDMap occlusionTexture)
+                {
+                    SetTextureFromIndex(occlusionTexture, 2);
+                    SetTransform(occlusionTexture, 2);
+                }
+
+                if (material.TryGetValue("emissiveTexture", out OSD emissiveOSD) && emissiveOSD is OSDMap emissiveTexture)
+                {
+                    SetTextureFromIndex(emissiveTexture, 3);
+                    SetTransform(emissiveTexture, 3);
+                }
+
+                if (material.TryGetValue("alphaMode", out OSD alphaMode))
+                {
+                    compact["am"] = alphaMode.AsString() switch
+                    {
+                        "BLEND" => 1,
+                        "MASK" => 2,
+                        _ => 0
+                    };
+                }
+
+                if (material.TryGetValue("alphaCutoff", out OSD alphaCutoff))
+                    compact["ac"] = Math.Round(alphaCutoff.AsReal(), 4);
+
+                if (material.TryGetValue("emissiveFactor", out OSD emissiveFactorOSD) && emissiveFactorOSD is OSDArray emissiveFactor && emissiveFactor.Count >= 3)
+                {
+                    compact["ec"] = new OSDArray
+                    {
+                        Math.Round(emissiveFactor[0].AsReal(), 4),
+                        Math.Round(emissiveFactor[1].AsReal(), 4),
+                        Math.Round(emissiveFactor[2].AsReal(), 4)
+                    };
+                }
+
+                if (material.TryGetValue("doubleSided", out OSD doubleSided))
+                    compact["ds"] = OSD.FromBoolean(doubleSided.AsBoolean());
+
+                if (texturesChanged)
+                {
+                    OSDArray tex = new(textureIDs.Length);
+                    for (int i = 0; i < textureIDs.Length; ++i)
+                        tex.Add(textureChanged[i] ? OSD.FromUUID(textureIDs[i]) : new OSD());
+                    compact["tex"] = tex;
+                }
+
+                if (transforms.Count > 0)
+                    compact["ti"] = transforms;
+
+                if (compact.Count == 0)
+                    return false;
+
+                data = OSDParser.SerializeLLSDNotation(compact);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static UUID[] ReadGltfTextureUris(OSDMap mainMap)
+        {
+            if (!mainMap.TryGetValue("images", out OSD imagesOSD) ||
+                imagesOSD is not OSDArray imagesArray ||
+                imagesArray.Count == 0 ||
+                imagesArray.Count >= 16 ||
+                !mainMap.TryGetValue("textures", out OSD texturesOSD) ||
+                texturesOSD is not OSDArray texturesArray ||
+                texturesArray.Count == 0 ||
+                texturesArray.Count >= 16)
+                return null;
+
+            UUID[] imageUris = new UUID[imagesArray.Count];
+            for (int i = 0; i < imagesArray.Count; ++i)
+            {
+                if (imagesArray[i] is OSDMap imageMap &&
+                    imageMap.TryGetValue("uri", out OSD uriOSD) &&
+                    UUID.TryParse(uriOSD.AsString(), out UUID textureID))
+                    imageUris[i] = textureID;
+            }
+
+            UUID[] textureUris = new UUID[texturesArray.Count];
+            for (int i = 0; i < texturesArray.Count; ++i)
+            {
+                if (texturesArray[i] is OSDMap textureMap &&
+                    textureMap.TryGetValue("source", out OSD sourceOSD))
+                {
+                    int imageIndex = sourceOSD.AsInteger();
+                    if (imageIndex >= 0 && imageIndex < imageUris.Length)
+                        textureUris[i] = imageUris[imageIndex];
+                }
+            }
+            return textureUris;
         }
 
         private void AddGltfTextureTransformParams(ref LSL_List res, SceneObjectPart part, string data, int textureIndex)
@@ -20825,9 +21135,21 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             return new Vector2((float)v.x, (float)v.y);
         }
 
+        private static Vector3 ToVector3(LSL_Vector v)
+        {
+            return new Vector3((float)v.x, (float)v.y, (float)v.z);
+        }
+
         private static LSL_Rotation ToLSLRotation(Quaternion v)
         {
             return new LSL_Rotation(v.X, v.Y, v.Z, v.W);
+        }
+
+        private static Quaternion ToQuaternion(LSL_Rotation v)
+        {
+            Quaternion q = new((float)v.x, (float)v.y, (float)v.z, (float)v.s);
+            q.Normalize();
+            return q;
         }
 
         private static bool InRange(float value, float min, float max)
@@ -20848,11 +21170,57 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 && InRange((float)value.y, min, max);
         }
 
-        private LSL_Integer ApplyEnvironmentWaterParameters(ViewerEnvironment env, LSL_List parameters)
+        private static bool LooksLikeVectorItem(LSL_List list, int index)
+        {
+            if (list is null || index < 0 || index >= list.Length)
+                return false;
+
+            object value = list.Data[index];
+            return value is LSL_Vector || value is Vector3;
+        }
+
+        private static bool TryReadIntegerItem(LSL_List list, int index, out int value)
+        {
+            value = 0;
+            try
+            {
+                value = list.GetLSLIntegerItem(index);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool ShouldConsumeOptionalSkyReadback(LSL_List parameters, int index)
+        {
+            return index + 4 <= parameters.Length
+                && TryReadIntegerItem(parameters, index, out int defaultFlag)
+                && (defaultFlag == 0 || defaultFlag == 1)
+                && LooksLikeVectorItem(parameters, index + 1)
+                && LooksLikeVectorItem(parameters, index + 2)
+                && LooksLikeVectorItem(parameters, index + 3);
+        }
+
+        private LSL_Integer ApplyEnvironmentParameters(ViewerEnvironment env, LSL_List parameters, float altitude, bool allSkyTracks)
         {
             try
             {
-                WaterData water = env.EnsureWater();
+                WaterData water = null;
+                WaterData GetWaterTarget()
+                {
+                    water ??= env.EnsureWater();
+                    return water;
+                }
+
+                List<SkyData> skyTargets = null;
+                List<SkyData> GetSkyTargets()
+                {
+                    skyTargets ??= env.EnsureSkyTargets(altitude, allSkyTracks);
+                    return skyTargets;
+                }
+
                 int i = 0;
 
                 while (i < parameters.Length)
@@ -20860,13 +21228,249 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     int rule = parameters.GetLSLIntegerItem(i++);
                     switch (rule)
                     {
+                        case ScriptBaseClass.SKY_AMBIENT:
+                            if (i + 1 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            LSL_Vector ambient = parameters.GetVector3Item(i++);
+                            if (!InRange(ambient, 0.0f, 3.0f))
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            foreach (SkyData sky in GetSkyTargets())
+                                sky.ambient = ToVector3(ambient);
+                            break;
+
+                        case ScriptBaseClass.SKY_BLUE:
+                            if (i + 2 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            LSL_Vector blueDensity = parameters.GetVector3Item(i++);
+                            LSL_Vector blueHorizon = parameters.GetVector3Item(i++);
+                            if (!InRange(blueDensity, 0.0f, 3.0f) || !InRange(blueHorizon, 0.0f, 3.0f))
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            foreach (SkyData sky in GetSkyTargets())
+                            {
+                                sky.blue_density = ToVector3(blueDensity);
+                                sky.blue_horizon = ToVector3(blueHorizon);
+                            }
+                            break;
+
+                        case ScriptBaseClass.SKY_CLOUDS:
+                            if (i + 7 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            LSL_Vector cloudColor = parameters.GetVector3Item(i++);
+                            float cloudShadow = (float)parameters.GetLSLFloatItem(i++);
+                            float cloudScale = (float)parameters.GetLSLFloatItem(i++);
+                            float cloudVariance = (float)parameters.GetLSLFloatItem(i++);
+                            LSL_Vector cloudScroll = parameters.GetVector3Item(i++);
+                            LSL_Vector cloudDensity1 = parameters.GetVector3Item(i++);
+                            LSL_Vector cloudDensity2 = parameters.GetVector3Item(i++);
+                            if (i < parameters.Length
+                                && TryReadIntegerItem(parameters, i, out int drawClassicClouds)
+                                && (drawClassicClouds == 0 || drawClassicClouds == 1)
+                                && (i == parameters.Length - 1 || !LooksLikeVectorItem(parameters, i + 1)))
+                                i++;
+                            if (!InRange(cloudColor, 0.0f, 1.0f) || !InRange(cloudShadow, 0.0f, 1.0f)
+                                || !InRange(cloudScale, 0.0f, 1.0f) || !InRange(cloudVariance, 0.0f, 1.0f)
+                                || !InRangeXY(cloudScroll, -20.0f, 20.0f)
+                                || !InRange(cloudDensity1, 0.0f, 1.0f) || !InRange(cloudDensity2, 0.0f, 1.0f))
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            foreach (SkyData sky in GetSkyTargets())
+                            {
+                                sky.cloud_color = ToVector3(cloudColor);
+                                sky.cloud_shadow = cloudShadow;
+                                sky.cloud_scale = cloudScale;
+                                sky.cloud_variance = cloudVariance;
+                                sky.cloud_scroll_rate = ToVector2(cloudScroll);
+                                sky.cloud_pos_density1 = ToVector3(cloudDensity1);
+                                sky.cloud_pos_density2 = ToVector3(cloudDensity2);
+                            }
+                            break;
+
+                        case ScriptBaseClass.SKY_DOME:
+                            if (i + 3 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            float domeOffset = (float)parameters.GetLSLFloatItem(i++);
+                            float domeRadius = (float)parameters.GetLSLFloatItem(i++);
+                            float maxY = (float)parameters.GetLSLFloatItem(i++);
+                            if (!InRange(domeOffset, 0.0f, 1.0f) || !InRange(domeRadius, 0.0f, 100000.0f)
+                                || !InRange(maxY, 0.0f, 100000.0f))
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            foreach (SkyData sky in GetSkyTargets())
+                            {
+                                sky.dome_offset = domeOffset;
+                                sky.dome_radius = domeRadius;
+                                sky.max_y = maxY;
+                            }
+                            break;
+
+                        case ScriptBaseClass.SKY_GAMMA:
+                            if (i + 1 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            float gamma = (float)parameters.GetLSLFloatItem(i++);
+                            if (!InRange(gamma, 0.0f, 20.0f))
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            foreach (SkyData sky in GetSkyTargets())
+                                sky.gamma = gamma;
+                            break;
+
+                        case ScriptBaseClass.SKY_GLOW:
+                            if (i + 2 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            float glowSize = (float)parameters.GetLSLFloatItem(i++);
+                            float glowFocus = (float)parameters.GetLSLFloatItem(i++);
+                            if (!InRange(glowSize, -20.0f, 40.0f) || !InRange(glowFocus, -20.0f, 20.0f))
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            foreach (SkyData sky in GetSkyTargets())
+                                sky.glow = new Vector3(glowSize, sky.glow.Y, glowFocus);
+                            break;
+
+                        case ScriptBaseClass.SKY_MOON:
+                            if (i + 3 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            Quaternion moonRotation = ToQuaternion(parameters.GetQuaternionItem(i++));
+                            float moonScale = (float)parameters.GetLSLFloatItem(i++);
+                            float moonBrightness = (float)parameters.GetLSLFloatItem(i++);
+                            if (!InRange(moonScale, 0.0f, 20.0f) || !InRange(moonBrightness, 0.0f, 1.0f))
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            if (ShouldConsumeOptionalSkyReadback(parameters, i))
+                                i += 4;
+                            foreach (SkyData sky in GetSkyTargets())
+                            {
+                                sky.moon_rotation = moonRotation;
+                                sky.moon_scale = moonScale;
+                                sky.moon_brightness = moonBrightness;
+                            }
+                            break;
+
+                        case ScriptBaseClass.SKY_PLANET:
+                            if (i + 3 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            float planetRadius = (float)parameters.GetLSLFloatItem(i++);
+                            float skyBottomRadius = (float)parameters.GetLSLFloatItem(i++);
+                            float skyTopRadius = (float)parameters.GetLSLFloatItem(i++);
+                            if (!InRange(planetRadius, 0.0f, 100000.0f) || !InRange(skyBottomRadius, 0.0f, 100000.0f)
+                                || !InRange(skyTopRadius, 0.0f, 100000.0f) || skyTopRadius < skyBottomRadius)
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            foreach (SkyData sky in GetSkyTargets())
+                            {
+                                sky.planet_radius = planetRadius;
+                                sky.sky_bottom_radius = skyBottomRadius;
+                                sky.sky_top_radius = skyTopRadius;
+                            }
+                            break;
+
+                        case ScriptBaseClass.SKY_REFRACTION:
+                            if (i + 3 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            float moistureLevel = (float)parameters.GetLSLFloatItem(i++);
+                            float dropletRadius = (float)parameters.GetLSLFloatItem(i++);
+                            float iceLevel = (float)parameters.GetLSLFloatItem(i++);
+                            if (!InRange(moistureLevel, 0.0f, 1.0f) || !InRange(dropletRadius, 0.0f, 2000.0f)
+                                || !InRange(iceLevel, 0.0f, 1.0f))
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            foreach (SkyData sky in GetSkyTargets())
+                            {
+                                sky.moisture_level = moistureLevel;
+                                sky.droplet_radius = dropletRadius;
+                                sky.ice_level = iceLevel;
+                            }
+                            break;
+
+                        case ScriptBaseClass.SKY_STAR_BRIGHTNESS:
+                            if (i + 1 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            float starBrightness = (float)parameters.GetLSLFloatItem(i++);
+                            if (!InRange(starBrightness, 0.0f, 500.0f))
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            foreach (SkyData sky in GetSkyTargets())
+                                sky.star_brightness = starBrightness;
+                            break;
+
+                        case ScriptBaseClass.SKY_SUN:
+                            if (i + 3 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            Quaternion sunRotation = ToQuaternion(parameters.GetQuaternionItem(i++));
+                            float sunScale = (float)parameters.GetLSLFloatItem(i++);
+                            LSL_Vector sunlightColor = parameters.GetVector3Item(i++);
+                            if (!InRange(sunScale, 0.0f, 20.0f) || !InRange(sunlightColor, 0.0f, 3.0f))
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            if (ShouldConsumeOptionalSkyReadback(parameters, i))
+                                i += 4;
+                            foreach (SkyData sky in GetSkyTargets())
+                            {
+                                sky.sun_rotation = sunRotation;
+                                sky.sun_scale = sunScale;
+                                sky.sunlight_color = new Vector4((float)sunlightColor.x, (float)sunlightColor.y, (float)sunlightColor.z, sky.sunlight_color.W);
+                            }
+                            break;
+
+                        case ScriptBaseClass.SKY_CLOUD_TEXTURE:
+                            if (i + 1 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            UUID cloudTexture = ScriptUtils.GetAssetIdFromKeyOrItemName(m_host, parameters.GetLSLStringItem(i++), AssetType.Texture);
+                            if (cloudTexture.IsZero())
+                                return ScriptBaseClass.ENV_NO_ENVIRONMENT;
+                            foreach (SkyData sky in GetSkyTargets())
+                                sky.CloudTexture = cloudTexture;
+                            break;
+
+                        case ScriptBaseClass.SKY_MOON_TEXTURE:
+                            if (i + 1 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            UUID moonTexture = ScriptUtils.GetAssetIdFromKeyOrItemName(m_host, parameters.GetLSLStringItem(i++), AssetType.Texture);
+                            if (moonTexture.IsZero())
+                                return ScriptBaseClass.ENV_NO_ENVIRONMENT;
+                            foreach (SkyData sky in GetSkyTargets())
+                                sky.MoonTexture = moonTexture;
+                            break;
+
+                        case ScriptBaseClass.SKY_SUN_TEXTURE:
+                            if (i + 1 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            UUID sunTexture = ScriptUtils.GetAssetIdFromKeyOrItemName(m_host, parameters.GetLSLStringItem(i++), AssetType.Texture);
+                            if (sunTexture.IsZero())
+                                return ScriptBaseClass.ENV_NO_ENVIRONMENT;
+                            foreach (SkyData sky in GetSkyTargets())
+                                sky.SunTexture = sunTexture;
+                            break;
+
+                        case ScriptBaseClass.SKY_HAZE:
+                            if (i + 4 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            float hazeDensity = (float)parameters.GetLSLFloatItem(i++);
+                            float hazeHorizon = (float)parameters.GetLSLFloatItem(i++);
+                            float densityMultiplier = (float)parameters.GetLSLFloatItem(i++);
+                            float distanceMultiplier = (float)parameters.GetLSLFloatItem(i++);
+                            if (!InRange(hazeDensity, 0.0f, 4.0f) || !InRange(hazeHorizon, 0.0f, 4.0f)
+                                || !InRange(densityMultiplier, 0.0f, 1.0f) || !InRange(distanceMultiplier, 0.0f, 1000.0f))
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            foreach (SkyData sky in GetSkyTargets())
+                            {
+                                sky.haze_density = hazeDensity;
+                                sky.haze_horizon = hazeHorizon;
+                                sky.density_multiplier = densityMultiplier;
+                                sky.distance_multiplier = distanceMultiplier;
+                            }
+                            break;
+
+                        case ScriptBaseClass.SKY_REFLECTION_PROBE_AMBIANCE:
+                            if (i + 1 > parameters.Length)
+                                return ScriptBaseClass.ENV_INVALID_RULE;
+                            float reflectionProbeAmbiance = (float)parameters.GetLSLFloatItem(i++);
+                            if (!InRange(reflectionProbeAmbiance, 0.0f, 10.0f))
+                                return ScriptBaseClass.ENV_VALIDATION_FAIL;
+                            foreach (SkyData sky in GetSkyTargets())
+                            {
+                                sky.HasRefProbe = true;
+                                sky.reflectionProbeAmbiance = reflectionProbeAmbiance;
+                            }
+                            break;
+
                         case ScriptBaseClass.WATER_BLUR_MULTIPLIER:
                             if (i + 1 > parameters.Length)
                                 return ScriptBaseClass.ENV_INVALID_RULE;
                             float blur = (float)parameters.GetLSLFloatItem(i++);
                             if (!InRange(blur, -0.5f, 0.5f))
                                 return ScriptBaseClass.ENV_VALIDATION_FAIL;
-                            water.blurMultiplier = blur;
+                            GetWaterTarget().blurMultiplier = blur;
                             break;
 
                         case ScriptBaseClass.WATER_FOG:
@@ -20878,9 +21482,10 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             if (!InRange(fogColor, 0.0f, 1.0f) || !InRange(fogDensity, -10.0f, 10.0f)
                                 || !InRange(underwaterMod, 0.0f, 20.0f))
                                 return ScriptBaseClass.ENV_VALIDATION_FAIL;
-                            water.waterFogColor = new Vector3((float)fogColor.x, (float)fogColor.y, (float)fogColor.z);
-                            water.waterFogDensity = fogDensity;
-                            water.underWaterFogMod = underwaterMod;
+                            WaterData fogWater = GetWaterTarget();
+                            fogWater.waterFogColor = new Vector3((float)fogColor.x, (float)fogColor.y, (float)fogColor.z);
+                            fogWater.waterFogDensity = fogDensity;
+                            fogWater.underWaterFogMod = underwaterMod;
                             break;
 
                         case ScriptBaseClass.WATER_FRESNEL:
@@ -20890,8 +21495,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             float fresnelScale = (float)parameters.GetLSLFloatItem(i++);
                             if (!InRange(fresnelOffset, 0.0f, 1.0f) || !InRange(fresnelScale, 0.0f, 1.0f))
                                 return ScriptBaseClass.ENV_VALIDATION_FAIL;
-                            water.fresnelOffset = fresnelOffset;
-                            water.fresnelScale = fresnelScale;
+                            WaterData fresnelWater = GetWaterTarget();
+                            fresnelWater.fresnelOffset = fresnelOffset;
+                            fresnelWater.fresnelScale = fresnelScale;
                             break;
 
                         case ScriptBaseClass.WATER_NORMAL_SCALE:
@@ -20900,7 +21506,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             LSL_Vector normalScale = parameters.GetVector3Item(i++);
                             if (!InRange(normalScale, 0.0f, 10.0f))
                                 return ScriptBaseClass.ENV_VALIDATION_FAIL;
-                            water.normScale = new Vector3((float)normalScale.x, (float)normalScale.y, (float)normalScale.z);
+                            GetWaterTarget().normScale = new Vector3((float)normalScale.x, (float)normalScale.y, (float)normalScale.z);
                             break;
 
                         case ScriptBaseClass.WATER_REFRACTION:
@@ -20910,8 +21516,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             float scaleBelow = (float)parameters.GetLSLFloatItem(i++);
                             if (!InRange(scaleAbove, 0.0f, 3.0f) || !InRange(scaleBelow, 0.0f, 3.0f))
                                 return ScriptBaseClass.ENV_VALIDATION_FAIL;
-                            water.scaleAbove = scaleAbove;
-                            water.scaleBelow = scaleBelow;
+                            WaterData refractionWater = GetWaterTarget();
+                            refractionWater.scaleAbove = scaleAbove;
+                            refractionWater.scaleBelow = scaleBelow;
                             break;
 
                         case ScriptBaseClass.WATER_WAVE_DIRECTION:
@@ -20921,8 +21528,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             LSL_Vector littleWave = parameters.GetVector3Item(i++);
                             if (!InRangeXY(bigWave, -20.0f, 20.0f) || !InRangeXY(littleWave, -20.0f, 20.0f))
                                 return ScriptBaseClass.ENV_VALIDATION_FAIL;
-                            water.wave2Dir = ToVector2(bigWave);
-                            water.wave1Dir = ToVector2(littleWave);
+                            WaterData waveWater = GetWaterTarget();
+                            waveWater.wave2Dir = ToVector2(bigWave);
+                            waveWater.wave1Dir = ToVector2(littleWave);
                             break;
 
                         case ScriptBaseClass.WATER_NORMAL_TEXTURE:
@@ -20931,8 +21539,15 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             UUID normalMap = ScriptUtils.GetAssetIdFromKeyOrItemName(m_host, parameters.GetLSLStringItem(i++), AssetType.Texture);
                             if (normalMap.IsZero())
                                 return ScriptBaseClass.ENV_NO_ENVIRONMENT;
-                            water.normalMap = normalMap;
+                            GetWaterTarget().normalMap = normalMap;
                             break;
+
+                        case ScriptBaseClass.ENVIRONMENT_DAYINFO:
+                        case ScriptBaseClass.SKY_TEXTURE_DEFAULTS:
+                        case ScriptBaseClass.SKY_LIGHT:
+                        case ScriptBaseClass.SKY_TRACKS:
+                        case ScriptBaseClass.WATER_TEXTURE_DEFAULTS:
+                            return ScriptBaseClass.ENV_INVALID_RULE;
 
                         default:
                             return ScriptBaseClass.ENV_INVALID_RULE;
@@ -20979,6 +21594,18 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     case ScriptBaseClass.SKY_AMBIENT:
                         if (sky is not null)
                             result.Add(ToLSLVector(sky.ambient));
+                        break;
+
+                    case ScriptBaseClass.SKY_TEXTURE_DEFAULTS:
+                        if (sky is not null)
+                        {
+                            result.Add(new LSL_Integer(sky.IsDefaultBloomTexture() ? 1 : 0));
+                            result.Add(new LSL_Integer(sky.IsDefaultCloudTexture() ? 1 : 0));
+                            result.Add(new LSL_Integer(sky.IsDefaultHaloTexture() ? 1 : 0));
+                            result.Add(new LSL_Integer(sky.IsDefaultMoonTexture() ? 1 : 0));
+                            result.Add(new LSL_Integer(sky.IsDefaultRainbowTexture() ? 1 : 0));
+                            result.Add(new LSL_Integer(sky.IsDefaultSunTexture() ? 1 : 0));
+                        }
                         break;
 
                     case ScriptBaseClass.SKY_CLOUDS:
@@ -21033,6 +21660,21 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     case ScriptBaseClass.SKY_STAR_BRIGHTNESS:
                         if (sky is not null)
                             result.Add(new LSL_Float(sky.star_brightness));
+                        break;
+
+                    case ScriptBaseClass.SKY_CLOUD_TEXTURE:
+                        if (sky is not null)
+                            result.Add(sky.CloudTexture.ToString());
+                        break;
+
+                    case ScriptBaseClass.SKY_MOON_TEXTURE:
+                        if (sky is not null)
+                            result.Add(sky.MoonTexture.ToString());
+                        break;
+
+                    case ScriptBaseClass.SKY_SUN_TEXTURE:
+                        if (sky is not null)
+                            result.Add(sky.SunTexture.ToString());
                         break;
 
                     case ScriptBaseClass.SKY_SUN:
@@ -21276,7 +21918,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 return ScriptBaseClass.ENV_NO_ENVIRONMENT;
 
             ViewerEnvironment env = (sp.Environment ?? m_envModule.GetRegionEnvironment()).Clone();
-            LSL_Integer result = ApplyEnvironmentWaterParameters(env, parameters);
+            LSL_Integer result = ApplyEnvironmentParameters(env, parameters, sp.AbsolutePosition.Z, false);
             if (result.value != 1)
                 return result;
 
@@ -21377,7 +22019,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 if (hasParameters)
                 {
                     ViewerEnvironment env = m_envModule.GetRegionEnvironment().Clone();
-                    LSL_Integer result = ApplyEnvironmentWaterParameters(env, parameters);
+                    LSL_Integer result = ApplyEnvironmentParameters(env, parameters, (float)position.z, position.z < 0);
                     if (result.value != 1)
                         return result;
 
@@ -21407,7 +22049,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     return ScriptBaseClass.ENV_NO_ENVIRONMENT;
 
                 ViewerEnvironment env = (parcel.LandData.Environment ?? m_envModule.GetRegionEnvironment()).Clone();
-                LSL_Integer result = ApplyEnvironmentWaterParameters(env, parameters);
+                LSL_Integer result = ApplyEnvironmentParameters(env, parameters, (float)position.z, position.z < 0);
                 if (result.value != 1)
                     return result;
 
@@ -22857,7 +23499,10 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             string data = GetMaterialOverrideData(part, face);
             bool changed = false;
             bool touched = false;
-            double[] baseColor = ReadCompactNumberArray(data, "bc", 4) ?? [1.0, 1.0, 1.0, 1.0];
+            string assetData = GetGltfMaterialAssetData(part, face);
+            double[] baseColor = ReadCompactNumberArray(data, "bc", 4)
+                ?? ReadCompactNumberArray(assetData, "bc", 4)
+                ?? [1.0, 1.0, 1.0, 1.0];
             bool clearBaseColor = false;
 
             int idx = 0;
@@ -23313,10 +23958,45 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             return $"'{key}':{serialized}";
         }
 
+        private static string MergeCompactGltfData(string assetData, string overrideData)
+        {
+            string result = string.IsNullOrWhiteSpace(assetData) ? "{}" : assetData;
+            if (!HasCompactOverrideData(overrideData))
+                return result;
+
+            foreach (string key in s_gltfCompactKeys)
+            {
+                if (FindCompactKeyRange(overrideData, key, out int start, out int end))
+                {
+                    int colon = overrideData.IndexOf(':', start);
+                    if (colon > start && colon < end)
+                        result = SetCompactRawKey(result, key, overrideData[(colon + 1)..end].Trim());
+                }
+            }
+
+            return result;
+        }
+
+        private static readonly string[] s_gltfCompactKeys =
+        [
+            "tex", "ti", "bc", "am", "ac", "ds", "mf", "rf", "ec"
+        ];
+
         private static string SetCompactKey(string data, string key, OSD value)
         {
             data = RemoveCompactKey(data, key);
             string entry = CompactEntry(key, value);
+            return AddCompactEntry(data, entry);
+        }
+
+        private static string SetCompactRawKey(string data, string key, string rawValue)
+        {
+            data = RemoveCompactKey(data, key);
+            return AddCompactEntry(data, $"'{key}':{rawValue}");
+        }
+
+        private static string AddCompactEntry(string data, string entry)
+        {
             string trimmed = string.IsNullOrWhiteSpace(data) ? "{}" : data.Trim();
             if (trimmed == "{}")
                 return "{" + entry + "}";

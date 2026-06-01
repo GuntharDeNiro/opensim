@@ -9,14 +9,15 @@
 // - PRIM_GLTF_METALLIC_ROUGHNESS readback after llSetLinkGLTFOverrides
 // - PRIM_GLTF_EMISSIVE readback after llSetLinkGLTFOverrides
 // - PRIM_GLTF_NORMAL texture/transform readback shape for stored override data
+// - PRIM_GLTF_* readback from the assigned material asset when no override exists
 // - PRIM_PHYSICS_MATERIAL set and readback using Second Life argument order
 //
 // Setup:
 // Put one material asset in this object's inventory. Optionally add one texture
 // asset so the direct PRIM_GLTF_* setters can store texture UUID overrides too.
-// Touch the object and use PARAM PBR, APPLY PBR or APPLY ALL. Use READ PBR to
-// verify what the simulator now returns. Use PHYSICS and READ PHYS to test
-// PRIM_PHYSICS_MATERIAL.
+// Touch the object and use ASSET ONLY, PARAM PBR, APPLY PBR or APPLY ALL. Use
+// READ PBR to verify what the simulator now returns. Use PHYSICS and READ PHYS
+// to test PRIM_PHYSICS_MATERIAL.
 
 integer MENU_CHANNEL = -90150018;
 integer TEST_FACE = 0;
@@ -60,6 +61,7 @@ show_menu(key agent)
         "Inventory material: " + first_material() +
         "\nInventory texture: " + first_texture(),
         [
+            "ASSET ONLY",
             "PARAM PBR",
             "APPLY PBR",
             "APPLY ALL",
@@ -85,6 +87,23 @@ list pbr_overrides()
         OVERRIDE_GLTF_ROUGHNESS_FACTOR, 0.42,
         OVERRIDE_GLTF_EMISSIVE_FACTOR, <0.05, 0.10, 0.22>
     ];
+}
+
+apply_asset_only(key agent, integer face)
+{
+    string material = first_material();
+    if (material == "")
+    {
+        say_to(agent, "Add one material asset to object inventory first. The script will use the first INVENTORY_MATERIAL item.");
+        return;
+    }
+
+    llSetPrimitiveParams([
+        PRIM_RENDER_MATERIAL, face, material
+    ]);
+
+    say_to(agent, "Applied only render material '" + material + "' to face " + (string)face + ". READ PBR now checks the assigned GLTF material asset with no scripted override.");
+    read_pbr(agent, TEST_FACE);
 }
 
 apply_pbr_params(key agent, integer face)
@@ -257,7 +276,8 @@ read_physics(key agent)
 help(key agent)
 {
     say_to(agent,
-        "PARAM PBR writes PRIM_RENDER_MATERIAL and direct PRIM_GLTF_* setters in one llSetPrimitiveParams call." +
+        "ASSET ONLY sets only PRIM_RENDER_MATERIAL so READ PBR can prove GLTF asset-property readback without script overrides." +
+        "\nPARAM PBR writes PRIM_RENDER_MATERIAL and direct PRIM_GLTF_* setters in one llSetPrimitiveParams call." +
         "\nAPPLY PBR sets PRIM_RENDER_MATERIAL on face 0 and then writes GLTF factor overrides." +
         "\nREAD PBR proves PRIM_RENDER_MATERIAL and PRIM_GLTF_* set/readback." +
         "\nPHYSICS sets PRIM_PHYSICS_MATERIAL in SL order: bits, gravity, restitution, friction, density." +
@@ -283,7 +303,8 @@ default
         if (channel != MENU_CHANNEL)
             return;
 
-        if (message == "PARAM PBR") apply_pbr_params(id, TEST_FACE);
+        if (message == "ASSET ONLY") apply_asset_only(id, TEST_FACE);
+        else if (message == "PARAM PBR") apply_pbr_params(id, TEST_FACE);
         else if (message == "APPLY PBR") apply_pbr(id, TEST_FACE);
         else if (message == "APPLY ALL") apply_pbr(id, ALL_SIDES);
         else if (message == "READ PBR") read_pbr(id, TEST_FACE);
