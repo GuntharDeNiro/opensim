@@ -1527,6 +1527,12 @@
     ;# {CurrencyBuyEnabled} {CurrencyPortalEnabled} {Allow wallet token purchases} {true false} true
     ; CurrencyBuyEnabled = true
 
+    ;# {CurrencyBuyMode} {CurrencyPortalEnabled} {How wallet token purchases are handled: grant credits immediately, request stores pending console approval, disabled hides purchases} {grant request disabled} grant
+    ; CurrencyBuyMode = "grant"
+
+    ;# {CurrencyPurchaseStorage} {CurrencyPortalEnabled} {TSV file for pending RegionWeb wallet purchase requests} {} Currency/regionweb-purchases.tsv
+    ; CurrencyPurchaseStorage = "Currency/regionweb-purchases.tsv"
+
     ;# {CurrencyTransferEnabled} {CurrencyPortalEnabled} {Allow wallet avatar-to-avatar transfers} {true false} true
     ; CurrencyTransferEnabled = true
 

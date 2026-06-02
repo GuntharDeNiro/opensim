@@ -69,9 +69,11 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private readonly Dictionary<string, UUID> m_regionIDsBySlug = new Dictionary<string, UUID>(StringComparer.OrdinalIgnoreCase);
         private const string CurrencySessionCookie = "RegionWebCurrency";
         private readonly object m_currencyAuthLock = new object();
+        private readonly object m_currencyPurchaseLock = new object();
         private readonly Dictionary<string, CurrencyLoginChallenge> m_currencyChallenges = new Dictionary<string, CurrencyLoginChallenge>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, CurrencyWebSession> m_currencySessions = new Dictionary<string, CurrencyWebSession>(StringComparer.Ordinal);
         private readonly Dictionary<UUID, DateTime> m_currencyLastChallengeUTCByAgent = new Dictionary<UUID, DateTime>();
+        private readonly Dictionary<string, CurrencyPurchaseRequest> m_currencyPurchaseRequests = new Dictionary<string, CurrencyPurchaseRequest>(StringComparer.OrdinalIgnoreCase);
 
         private bool m_enabled;
         private bool m_handlerRegistered;
@@ -91,7 +93,10 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private string m_defaultEstateTitle = "OpenSimulator Estate";
         private string m_basePath = "/regionweb";
         private string m_contentDirectory = "RegionWeb";
+        private string m_currencyBuyMode = "grant";
+        private string m_currencyPurchaseStoragePath = "Currency/regionweb-purchases.tsv";
         private string m_absoluteContentDirectory;
+        private string m_absoluteCurrencyPurchaseStoragePath;
 
         public string Name { get { return "RegionWebModule"; } }
 
@@ -119,16 +124,23 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             m_currencySessionHours = Math.Max(1, config.GetInt("CurrencySessionHours", 12));
             m_currencyStatementLimit = Math.Max(1, config.GetInt("CurrencyStatementLimit", 30));
             m_currencyBuyLimit = Math.Max(1, config.GetInt("CurrencyBuyLimit", 100000));
+            m_currencyBuyMode = NormalizeCurrencyBuyMode(config.GetString("CurrencyBuyMode", "grant"));
+            m_currencyPurchaseStoragePath = config.GetString("CurrencyPurchaseStorage", "Currency/regionweb-purchases.tsv").Trim();
             m_defaultEstateTitle = config.GetString("EstateTitle", "OpenSimulator Estate").Trim();
             if (string.IsNullOrEmpty(m_defaultEstateTitle))
                 m_defaultEstateTitle = "OpenSimulator Estate";
 
             if (string.IsNullOrEmpty(m_contentDirectory))
                 m_contentDirectory = "RegionWeb";
+            if (string.IsNullOrEmpty(m_currencyPurchaseStoragePath))
+                m_currencyPurchaseStoragePath = "Currency/regionweb-purchases.tsv";
 
             m_absoluteContentDirectory = Path.IsPathRooted(m_contentDirectory)
                 ? m_contentDirectory
                 : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, m_contentDirectory);
+            m_absoluteCurrencyPurchaseStoragePath = Path.IsPathRooted(m_currencyPurchaseStoragePath)
+                ? m_currencyPurchaseStoragePath
+                : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, m_currencyPurchaseStoragePath);
         }
 
         public void PostInitialise()
@@ -141,6 +153,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 Directory.CreateDirectory(m_absoluteContentDirectory);
                 if (m_autoCreateContent)
                     EnsureEstateContent();
+                LoadCurrencyPurchaseRequests();
 
                 IHttpServer server = MainServer.GetHttpServer(0);
                 server.AddSimpleStreamHandler(new SimpleStreamHandler(m_basePath, HandleRequest, "RegionWeb"));
@@ -152,6 +165,24 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     "regionweb show",
                     "Show public RegionWeb URLs and content folders for loaded regions.",
                     HandleShowCommand);
+
+                MainConsole.Instance.Commands.AddCommand(
+                    "RegionWeb", false, "regionweb currency pending",
+                    "regionweb currency pending",
+                    "List pending RegionWeb wallet token purchase requests.",
+                    HandleCurrencyCommand);
+
+                MainConsole.Instance.Commands.AddCommand(
+                    "RegionWeb", false, "regionweb currency approve",
+                    "regionweb currency approve <request-id> [note]",
+                    "Approve a pending RegionWeb wallet token purchase request and credit the avatar.",
+                    HandleCurrencyCommand);
+
+                MainConsole.Instance.Commands.AddCommand(
+                    "RegionWeb", false, "regionweb currency deny",
+                    "regionweb currency deny <request-id> [note]",
+                    "Deny a pending RegionWeb wallet token purchase request.",
+                    HandleCurrencyCommand);
 
                 m_log.InfoFormat("[REGION WEB]: Enabled at {0}; content folder {1}", m_basePath, m_absoluteContentDirectory);
             }
@@ -223,6 +254,9 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 m_currencySessions.Clear();
                 m_currencyLastChallengeUTCByAgent.Clear();
             }
+
+            lock (m_currencyPurchaseLock)
+                m_currencyPurchaseRequests.Clear();
         }
 
         private void AddOrUpdateScene(Scene scene)
@@ -260,6 +294,67 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     slug,
                     GetRegionDirectory(scene));
             }
+        }
+
+        private void HandleCurrencyCommand(string module, string[] cmd)
+        {
+            if (cmd == null || cmd.Length < 3)
+            {
+                MainConsole.Instance.Output("[REGION WEB]: Usage: regionweb currency pending|approve|deny");
+                return;
+            }
+
+            string action = cmd[2].ToLowerInvariant();
+            if (action == "pending")
+            {
+                List<CurrencyPurchaseRequest> pending;
+                lock (m_currencyPurchaseLock)
+                    pending = m_currencyPurchaseRequests.Values
+                        .Where(r => (r.Status ?? string.Empty).Equals("pending", StringComparison.OrdinalIgnoreCase))
+                        .OrderBy(r => r.RequestedUTC)
+                        .ToList();
+
+                if (pending.Count == 0)
+                {
+                    MainConsole.Instance.Output("[REGION WEB]: No pending currency purchase requests.");
+                    return;
+                }
+
+                foreach (CurrencyPurchaseRequest request in pending)
+                {
+                    MainConsole.Instance.Output(
+                        "[REGION WEB]: {0}: {1} requested {2} tokens at {3}",
+                        request.RequestID,
+                        request.DisplayName,
+                        request.Amount.ToString(CultureInfo.InvariantCulture),
+                        request.RequestedUTC.ToLocalTime().ToString("dd MMM HH:mm", CultureInfo.InvariantCulture));
+                }
+                return;
+            }
+
+            if (cmd.Length < 4)
+            {
+                MainConsole.Instance.Output("[REGION WEB]: Usage: regionweb currency {0} <request-id> [note]", action);
+                return;
+            }
+
+            string requestID = cmd[3];
+            string note = cmd.Length > 4 ? string.Join(" ", cmd.Skip(4).ToArray()) : string.Empty;
+            if (action == "approve")
+            {
+                ApproveCurrencyPurchase(requestID, note, out string message);
+                MainConsole.Instance.Output("[REGION WEB]: " + message);
+                return;
+            }
+
+            if (action == "deny")
+            {
+                DenyCurrencyPurchase(requestID, note, out string message);
+                MainConsole.Instance.Output("[REGION WEB]: " + message);
+                return;
+            }
+
+            MainConsole.Instance.Output("[REGION WEB]: Usage: regionweb currency pending|approve|deny");
         }
 
         private void HandleRequest(IOSHttpRequest request, IOSHttpResponse response)
@@ -722,7 +817,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private void HandleCurrencyBuy(CurrencyWebSession session, Dictionary<string, string> form, out string message, out string severity)
         {
             severity = "error";
-            if (!m_currencyBuyEnabled)
+            if (!IsCurrencyBuyAvailable())
             {
                 message = "Token purchases are disabled on this RegionWeb portal.";
                 return;
@@ -730,6 +825,17 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             if (!TryParsePositiveAmount(FormValue(form, "amount"), m_currencyBuyLimit, out int amount, out message))
                 return;
+
+            if (m_currencyBuyMode.Equals("request", StringComparison.OrdinalIgnoreCase))
+            {
+                CurrencyPurchaseRequest request = CreateCurrencyPurchaseRequest(session, amount);
+                severity = "ok";
+                message = "Purchase request " + request.RequestID + " created for " + amount.ToString(CultureInfo.InvariantCulture)
+                    + " tokens. Estate staff can approve it from the console.";
+                NotifyCurrencyAvatar(session.AgentID, "RegionWeb wallet purchase request " + request.RequestID
+                    + " created for " + amount.ToString(CultureInfo.InvariantCulture) + " tokens.");
+                return;
+            }
 
             IMoneyModule money = GetCurrencyMoneyModule();
             if (money == null)
@@ -859,15 +965,20 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             else
             {
                 html.Append("<section class=\"wallet-grid\"><article class=\"wallet-card\"><h2>Buy tokens</h2>");
-                if (m_currencyBuyEnabled)
+                if (IsCurrencyBuyAvailable())
                 {
                     html.Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/\">")
                         .Append("<input type=\"hidden\" name=\"action\" value=\"buy\">")
                         .Append("<input type=\"hidden\" name=\"csrf\" value=\"").Append(Html(session.CsrfToken)).Append("\">")
                         .Append("<label>Amount<input name=\"amount\" type=\"number\" min=\"1\" max=\"")
                         .Append(m_currencyBuyLimit.ToString(CultureInfo.InvariantCulture)).Append("\" required></label>")
-                        .Append("<button type=\"submit\">Buy tokens</button></form>")
-                        .Append("<p class=\"wallet-note\">This credits the local simulator ledger and updates the viewer-visible balance.</p>");
+                        .Append("<button type=\"submit\">")
+                        .Append(m_currencyBuyMode.Equals("request", StringComparison.OrdinalIgnoreCase) ? "Request tokens" : "Buy tokens")
+                        .Append("</button></form>");
+                    if (m_currencyBuyMode.Equals("request", StringComparison.OrdinalIgnoreCase))
+                        html.Append("<p class=\"wallet-note\">This creates a pending purchase request for estate staff approval from the console.</p>");
+                    else
+                        html.Append("<p class=\"wallet-note\">This credits the local simulator ledger and updates the viewer-visible balance.</p>");
                 }
                 else
                 {
@@ -893,6 +1004,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 html.Append("</article></section>");
 
                 AppendCurrencyStatement(html, money, session.AgentID);
+                AppendCurrencyPurchaseRequests(html, session.AgentID);
             }
 
             html.Append("<form class=\"wallet-logout\" method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/\">")
@@ -934,6 +1046,36 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     .Append(Html(signedAmount)).Append("</td><td>")
                     .Append(Html(RowValue(row, "balance"))).Append("</td><td>")
                     .Append(Html(RowValue(row, "description"))).Append("</td></tr>");
+            }
+
+            html.Append("</tbody></table></div></section>");
+        }
+
+        private void AppendCurrencyPurchaseRequests(StringBuilder html, UUID agentID)
+        {
+            List<CurrencyPurchaseRequest> requests;
+            lock (m_currencyPurchaseLock)
+            {
+                requests = m_currencyPurchaseRequests.Values
+                    .Where(r => r.AgentID == agentID)
+                    .OrderByDescending(r => r.RequestedUTC)
+                    .Take(12)
+                    .ToList();
+            }
+
+            if (requests.Count == 0)
+                return;
+
+            html.Append("<section class=\"wallet-card wallet-statement\"><h2>Purchase requests</h2>")
+                .Append("<div class=\"wallet-table\"><table><thead><tr><th>Date</th><th>ID</th><th>Amount</th><th>Status</th><th>Note</th></tr></thead><tbody>");
+
+            foreach (CurrencyPurchaseRequest request in requests)
+            {
+                html.Append("<tr><td>").Append(Html(request.RequestedUTC.ToLocalTime().ToString("dd MMM HH:mm", CultureInfo.InvariantCulture))).Append("</td><td>")
+                    .Append(Html(request.RequestID)).Append("</td><td>")
+                    .Append(request.Amount.ToString(CultureInfo.InvariantCulture)).Append("</td><td>")
+                    .Append(Html(request.Status)).Append("</td><td>")
+                    .Append(Html(request.Note)).Append("</td></tr>");
             }
 
             html.Append("</tbody></table></div></section>");
@@ -1060,6 +1202,152 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             {
                 reason = e.InnerException != null ? e.InnerException.Message : e.Message;
                 return false;
+            }
+        }
+
+        private CurrencyPurchaseRequest CreateCurrencyPurchaseRequest(CurrencyWebSession session, int amount)
+        {
+            CurrencyPurchaseRequest request = new CurrencyPurchaseRequest
+            {
+                RequestID = GenerateCurrencyPurchaseRequestID(),
+                RequestedUTC = DateTime.UtcNow,
+                AgentID = session.AgentID,
+                DisplayName = session.DisplayName,
+                Amount = amount,
+                Status = "pending",
+                UpdatedUTC = DateTime.UtcNow,
+                OperatorName = string.Empty,
+                Note = string.Empty
+            };
+
+            lock (m_currencyPurchaseLock)
+            {
+                m_currencyPurchaseRequests[request.RequestID] = request;
+                SaveCurrencyPurchaseRequestsLocked();
+            }
+
+            return request;
+        }
+
+        private bool ApproveCurrencyPurchase(string requestID, string note, out string message)
+        {
+            message = string.Empty;
+            UUID agentID;
+            string displayName;
+            int amount;
+
+            lock (m_currencyPurchaseLock)
+            {
+                if (!m_currencyPurchaseRequests.TryGetValue(requestID ?? string.Empty, out CurrencyPurchaseRequest request))
+                {
+                    message = "Currency purchase request not found: " + requestID;
+                    return false;
+                }
+
+                if (!(request.Status ?? string.Empty).Equals("pending", StringComparison.OrdinalIgnoreCase))
+                {
+                    message = "Currency purchase request " + request.RequestID + " is already " + request.Status + ".";
+                    return false;
+                }
+
+                request.Status = "processing";
+                request.UpdatedUTC = DateTime.UtcNow;
+                request.OperatorName = "console";
+                request.Note = note ?? string.Empty;
+                agentID = request.AgentID;
+                displayName = request.DisplayName;
+                amount = request.Amount;
+                SaveCurrencyPurchaseRequestsLocked();
+            }
+
+            IMoneyModule money = GetCurrencyMoneyModule();
+            if (money == null)
+            {
+                MarkCurrencyPurchasePending(requestID, "Currency module is not active.");
+                message = "Currency module is not active. Request left pending.";
+                return false;
+            }
+
+            if (!InvokeWebBuyCurrency(money, agentID, amount, out string reason))
+            {
+                string failure = string.IsNullOrWhiteSpace(reason) ? "Token purchase failed." : reason;
+                MarkCurrencyPurchasePending(requestID, failure);
+                message = failure + " Request left pending.";
+                return false;
+            }
+
+            lock (m_currencyPurchaseLock)
+            {
+                if (m_currencyPurchaseRequests.TryGetValue(requestID ?? string.Empty, out CurrencyPurchaseRequest request))
+                {
+                    request.Status = "approved";
+                    request.UpdatedUTC = DateTime.UtcNow;
+                    request.OperatorName = "console";
+                    request.Note = note ?? string.Empty;
+                    SaveCurrencyPurchaseRequestsLocked();
+                }
+            }
+
+            NotifyCurrencyAvatar(agentID, "RegionWeb wallet purchase " + requestID + " approved: "
+                + amount.ToString(CultureInfo.InvariantCulture) + " tokens credited.");
+            message = "Approved " + requestID + " for " + displayName + " and credited "
+                + amount.ToString(CultureInfo.InvariantCulture) + " tokens.";
+            return true;
+        }
+
+        private bool DenyCurrencyPurchase(string requestID, string note, out string message)
+        {
+            UUID agentID;
+            string storedRequestID;
+            string displayName;
+            string storedNote;
+
+            lock (m_currencyPurchaseLock)
+            {
+                if (!m_currencyPurchaseRequests.TryGetValue(requestID ?? string.Empty, out CurrencyPurchaseRequest request))
+                {
+                    message = "Currency purchase request not found: " + requestID;
+                    return false;
+                }
+
+                string status = request.Status ?? string.Empty;
+                if (!status.Equals("pending", StringComparison.OrdinalIgnoreCase)
+                    && !status.Equals("processing", StringComparison.OrdinalIgnoreCase))
+                {
+                    message = "Currency purchase request " + request.RequestID + " is already " + request.Status + ".";
+                    return false;
+                }
+
+                request.Status = "denied";
+                request.UpdatedUTC = DateTime.UtcNow;
+                request.OperatorName = "console";
+                request.Note = note ?? string.Empty;
+                SaveCurrencyPurchaseRequestsLocked();
+
+                agentID = request.AgentID;
+                storedRequestID = request.RequestID;
+                displayName = request.DisplayName;
+                storedNote = request.Note;
+            }
+
+            NotifyCurrencyAvatar(agentID, "RegionWeb wallet purchase " + storedRequestID + " denied."
+                + (string.IsNullOrWhiteSpace(storedNote) ? string.Empty : " " + storedNote));
+            message = "Denied " + storedRequestID + " for " + displayName + ".";
+            return true;
+        }
+
+        private void MarkCurrencyPurchasePending(string requestID, string note)
+        {
+            lock (m_currencyPurchaseLock)
+            {
+                if (m_currencyPurchaseRequests.TryGetValue(requestID ?? string.Empty, out CurrencyPurchaseRequest request))
+                {
+                    request.Status = "pending";
+                    request.UpdatedUTC = DateTime.UtcNow;
+                    request.OperatorName = "console";
+                    request.Note = note ?? string.Empty;
+                    SaveCurrencyPurchaseRequestsLocked();
+                }
             }
         }
 
@@ -1357,6 +1645,51 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             return UUID.Random().ToString().Replace("-", string.Empty) + UUID.Random().ToString().Replace("-", string.Empty);
         }
 
+        private static string GenerateCurrencyPurchaseRequestID()
+        {
+            return "RW" + DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture)
+                + "-" + UUID.Random().ToString().Replace("-", string.Empty).Substring(0, 6).ToUpperInvariant();
+        }
+
+        private static string NormalizeCurrencyBuyMode(string value)
+        {
+            string mode = (value ?? string.Empty).Trim().ToLowerInvariant();
+            if (mode == "request" || mode == "approval" || mode == "approve")
+                return "request";
+            if (mode == "disabled" || mode == "disable" || mode == "off" || mode == "false")
+                return "disabled";
+            return "grant";
+        }
+
+        private bool IsCurrencyBuyAvailable()
+        {
+            return m_currencyBuyEnabled && !m_currencyBuyMode.Equals("disabled", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void NotifyCurrencyAvatar(UUID agentID, string message)
+        {
+            if (agentID == UUID.Zero || string.IsNullOrWhiteSpace(message))
+                return;
+
+            if (!TryFindOnlineClient(agentID, out IClientAPI client))
+                return;
+
+            try
+            {
+                client.SendBlueBoxMessage(UUID.Zero, "RegionWeb", message);
+            }
+            catch
+            {
+                try
+                {
+                    client.SendAgentAlertMessage(message, false);
+                }
+                catch
+                {
+                }
+            }
+        }
+
         private static string RowValue(Dictionary<string, string> row, string key)
         {
             if (row != null && row.TryGetValue(key, out string value))
@@ -1390,6 +1723,102 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             bool mustQuote = value.IndexOfAny(new[] { ',', '"', '\r', '\n' }) >= 0;
             string escaped = value.Replace("\"", "\"\"");
             return mustQuote ? "\"" + escaped + "\"" : escaped;
+        }
+
+        private void LoadCurrencyPurchaseRequests()
+        {
+            lock (m_currencyPurchaseLock)
+            {
+                m_currencyPurchaseRequests.Clear();
+
+                if (string.IsNullOrWhiteSpace(m_absoluteCurrencyPurchaseStoragePath)
+                    || !File.Exists(m_absoluteCurrencyPurchaseStoragePath))
+                    return;
+
+                try
+                {
+                    foreach (string line in File.ReadAllLines(m_absoluteCurrencyPurchaseStoragePath))
+                    {
+                        if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#", StringComparison.Ordinal))
+                            continue;
+
+                        string[] parts = line.Split('\t');
+                        if (parts.Length < 9 || !UUID.TryParse(parts[2], out UUID agentID))
+                            continue;
+
+                        if (!int.TryParse(parts[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out int amount))
+                            continue;
+
+                        DateTime requestedUTC;
+                        DateTime updatedUTC;
+                        if (!DateTime.TryParse(parts[1], CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out requestedUTC))
+                            requestedUTC = DateTime.UtcNow;
+                        if (!DateTime.TryParse(parts[6], CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out updatedUTC))
+                            updatedUTC = requestedUTC;
+
+                        CurrencyPurchaseRequest request = new CurrencyPurchaseRequest
+                        {
+                            RequestID = parts[0],
+                            RequestedUTC = requestedUTC.ToUniversalTime(),
+                            AgentID = agentID,
+                            DisplayName = parts[3],
+                            Amount = amount,
+                            Status = string.IsNullOrWhiteSpace(parts[5]) ? "pending" : parts[5],
+                            UpdatedUTC = updatedUTC.ToUniversalTime(),
+                            OperatorName = parts[7],
+                            Note = parts[8]
+                        };
+
+                        if (!string.IsNullOrWhiteSpace(request.RequestID))
+                            m_currencyPurchaseRequests[request.RequestID] = request;
+                    }
+                }
+                catch (Exception e)
+                {
+                    m_log.WarnFormat("[REGION WEB]: Could not load currency purchase requests from {0}: {1}", m_absoluteCurrencyPurchaseStoragePath, e.Message);
+                }
+            }
+        }
+
+        private void SaveCurrencyPurchaseRequestsLocked()
+        {
+            if (string.IsNullOrWhiteSpace(m_absoluteCurrencyPurchaseStoragePath))
+                return;
+
+            try
+            {
+                string directory = Path.GetDirectoryName(m_absoluteCurrencyPurchaseStoragePath);
+                if (!string.IsNullOrEmpty(directory))
+                    Directory.CreateDirectory(directory);
+
+                StringBuilder rows = new StringBuilder();
+                rows.Append("# request_id\trequested_utc\tagent_id\tdisplay_name\tamount\tstatus\tupdated_utc\toperator\tnote\n");
+                foreach (CurrencyPurchaseRequest request in m_currencyPurchaseRequests.Values.OrderBy(r => r.RequestedUTC))
+                {
+                    rows.Append(Tsv(request.RequestID)).Append('\t')
+                        .Append(request.RequestedUTC.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture)).Append('\t')
+                        .Append(request.AgentID).Append('\t')
+                        .Append(Tsv(request.DisplayName)).Append('\t')
+                        .Append(request.Amount.ToString(CultureInfo.InvariantCulture)).Append('\t')
+                        .Append(Tsv(request.Status)).Append('\t')
+                        .Append(request.UpdatedUTC.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture)).Append('\t')
+                        .Append(Tsv(request.OperatorName)).Append('\t')
+                        .Append(Tsv(request.Note)).Append('\n');
+                }
+
+                File.WriteAllText(m_absoluteCurrencyPurchaseStoragePath, rows.ToString(), Encoding.UTF8);
+            }
+            catch (Exception e)
+            {
+                m_log.WarnFormat("[REGION WEB]: Could not save currency purchase requests to {0}: {1}", m_absoluteCurrencyPurchaseStoragePath, e.Message);
+            }
+        }
+
+        private static string Tsv(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return string.Empty;
+            return value.Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ').Trim();
         }
 
         private static void AppendScriptCompatibilitySummary(StringBuilder html, ScriptFunctionDoc[] docs)
@@ -1880,6 +2309,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Usage.Add("Use console commands such as money show, money balance, money set, money give, money take, money transfer, money export and money import for estate administration.");
                     content.Usage.Add("Open /regionweb/currency/ for the reserved avatar wallet area: users request an inworld token, log in on RegionWeb, view balance/statement, buy tokens and transfer to another avatar.");
                     content.Usage.Add("Use CurrencyBuyEnabled, CurrencyTransferEnabled, CurrencyChallengeCooldownSeconds, CurrencyStatementLimit and CurrencyBuyLimit in [RegionWeb] to tune the wallet.");
+                    content.Usage.Add("Set CurrencyBuyMode = request if purchases should become pending wallet requests instead of immediate credits.");
+                    content.Usage.Add("Use regionweb currency pending, regionweb currency approve <request-id> and regionweb currency deny <request-id> to manage pending wallet purchase requests from the simulator console.");
                     content.Usage.Add("Restart the region after changing economy settings, then log in or request the balance in the viewer to receive the latest MoneyBalanceReply.");
                     content.Notes.Add("Balances are local to this simulator/grid configuration and are intended for estate/gameplay currency, not real-money production payment processing.");
                     content.Notes.Add("Scripted llGiveMoney and llTransferLindenDollars still require owner-granted PERMISSION_DEBIT before money leaves the object owner.");
@@ -1887,6 +2318,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Notes.Add("Land/object purchases and upload/group charges use the same ledger, so users see the result immediately in the viewer balance.");
                     content.Notes.Add("RegionWeb region pages show live economy totals when this local money module is active, and the wallet login uses a one-time inworld token instead of trusting only a typed avatar name.");
                     content.Notes.Add("Wallet buy, transfer and logout forms are protected by a session CSRF token, and the statement can be downloaded as CSV.");
+                    content.Notes.Add("Pending wallet purchase requests are stored in CurrencyPurchaseStorage as TSV so they survive simulator restarts.");
                     break;
 
                 case "viewer-polish":
@@ -3350,6 +3782,19 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             public string DisplayName;
             public string CsrfToken;
             public DateTime ExpiresUTC;
+        }
+
+        private class CurrencyPurchaseRequest
+        {
+            public string RequestID;
+            public DateTime RequestedUTC;
+            public UUID AgentID;
+            public string DisplayName;
+            public int Amount;
+            public string Status;
+            public DateTime UpdatedUTC;
+            public string OperatorName;
+            public string Note;
         }
 
         private class RegionWebStats
