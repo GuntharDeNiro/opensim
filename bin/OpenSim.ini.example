@@ -1519,6 +1519,23 @@
     ;# {PostsPerPage} {Enabled} {Number of blog posts on the region page} {} 5
     ; PostsPerPage = 5
 
+    ;# {CurrencyPortalEnabled} {Enabled} {Enable the reserved avatar wallet at /regionweb/currency/} {true false} true
+    ;; Avatars request a one-time login token inworld, then use RegionWeb to view
+    ;; balance, statement, token purchases and avatar-to-avatar transfers.
+    ; CurrencyPortalEnabled = true
+
+    ;# {CurrencyChallengeMinutes} {CurrencyPortalEnabled} {Minutes before an inworld wallet login token expires} {} 10
+    ; CurrencyChallengeMinutes = 10
+
+    ;# {CurrencySessionHours} {CurrencyPortalEnabled} {Hours before a wallet web session expires} {} 12
+    ; CurrencySessionHours = 12
+
+    ;# {CurrencyStatementLimit} {CurrencyPortalEnabled} {Maximum transaction rows shown in the wallet statement} {} 30
+    ; CurrencyStatementLimit = 30
+
+    ;# {CurrencyBuyLimit} {CurrencyPortalEnabled} {Maximum tokens purchasable in one RegionWeb wallet action} {} 100000
+    ; CurrencyBuyLimit = 100000
+
 
 [TextBuild]
     ;# {Enabled} {} {Enable chat-driven text build commands} {true false} false

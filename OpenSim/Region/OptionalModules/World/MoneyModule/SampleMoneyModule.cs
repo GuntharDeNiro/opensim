@@ -899,6 +899,101 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
             return stats;
         }
 
+        public bool WebBuyCurrency(UUID agentID, int amount, out string reason)
+        {
+            reason = String.Empty;
+            if (agentID.IsZero())
+            {
+                reason = "Invalid avatar.";
+                return false;
+            }
+            if (amount <= 0)
+            {
+                reason = "Amount must be greater than zero.";
+                return false;
+            }
+
+            Credit(agentID, amount, (int)TransactionType.SystemGenerated, "RegionWeb token purchase");
+            BalanceUpdate(UUID.Zero, agentID, true, "RegionWeb token purchase", (int)TransactionType.SystemGenerated, amount);
+            return true;
+        }
+
+        public bool WebTransfer(UUID fromUser, UUID toUser, int amount, string description, out string reason)
+        {
+            reason = String.Empty;
+            if (fromUser.IsZero() || toUser.IsZero())
+            {
+                reason = "Invalid avatar.";
+                return false;
+            }
+            if (fromUser == toUser)
+            {
+                reason = "Cannot transfer to the same avatar.";
+                return false;
+            }
+            if (amount <= 0)
+            {
+                reason = "Amount must be greater than zero.";
+                return false;
+            }
+
+            string text = string.IsNullOrWhiteSpace(description) ? "RegionWeb transfer" : description.Trim();
+            bool result = TransferMoney(fromUser, toUser, amount, (int)TransactionType.Gift, text, out reason);
+            BalanceUpdate(fromUser, toUser, result, result ? text : reason, (int)TransactionType.Gift, amount);
+            return result;
+        }
+
+        public List<Dictionary<string, string>> GetCurrencyStatement(UUID agentID, int limit)
+        {
+            List<Dictionary<string, string>> rows = new List<Dictionary<string, string>>();
+            if (agentID.IsZero())
+                return rows;
+            if (limit <= 0)
+                limit = 25;
+
+            lock (m_balanceLock)
+            {
+                EnsureBalancesLoaded();
+
+                if (!File.Exists(m_transactionLogPath))
+                    return rows;
+
+                string agentText = agentID.ToString();
+                string[] lines = File.ReadAllLines(m_transactionLogPath);
+                for (int i = lines.Length - 1; i >= 0 && rows.Count < limit; i--)
+                {
+                    string line = lines[i].Trim();
+                    if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal))
+                        continue;
+
+                    string[] parts = line.Split('\t');
+                    if (parts.Length < 11)
+                        continue;
+                    if (!parts[3].Equals(agentText, StringComparison.OrdinalIgnoreCase)
+                            && !parts[4].Equals(agentText, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    Dictionary<string, string> row = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    row["utc"] = parts[0];
+                    row["sequence"] = parts[1];
+                    row["action"] = parts[2];
+                    row["source"] = parts[3];
+                    row["destination"] = parts[4];
+                    row["amount"] = parts[5];
+                    row["transaction_type"] = parts[6];
+                    row["success"] = parts[7];
+                    row["source_balance"] = parts[8];
+                    row["destination_balance"] = parts[9];
+                    row["description"] = parts[10];
+                    row["direction"] = parts[4].Equals(agentText, StringComparison.OrdinalIgnoreCase) ? "credit" : "debit";
+                    row["balance"] = row["direction"] == "credit" ? parts[9] : parts[8];
+                    rows.Add(row);
+                }
+            }
+
+            return rows;
+        }
+
         private void EnsureBalancesLoaded()
         {
             if (m_balancesLoaded)

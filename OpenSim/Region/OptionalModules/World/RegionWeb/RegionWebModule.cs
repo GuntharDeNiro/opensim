@@ -45,6 +45,7 @@ using OpenSim.Region.Framework.Interfaces;
 using OpenSim.Region.Framework.Scenes;
 using OpenSim.Region.ScriptEngine.Shared.Api.Interfaces;
 using OpenSim.Server.Base;
+using OpenSim.Services.Interfaces;
 
 namespace OpenSim.Region.OptionalModules.World.RegionWeb
 {
@@ -66,6 +67,10 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private readonly object m_sync = new object();
         private readonly Dictionary<UUID, Scene> m_scenesByID = new Dictionary<UUID, Scene>();
         private readonly Dictionary<string, UUID> m_regionIDsBySlug = new Dictionary<string, UUID>(StringComparer.OrdinalIgnoreCase);
+        private const string CurrencySessionCookie = "RegionWebCurrency";
+        private readonly object m_currencyAuthLock = new object();
+        private readonly Dictionary<string, CurrencyLoginChallenge> m_currencyChallenges = new Dictionary<string, CurrencyLoginChallenge>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, CurrencyWebSession> m_currencySessions = new Dictionary<string, CurrencyWebSession>(StringComparer.Ordinal);
 
         private bool m_enabled;
         private bool m_handlerRegistered;
@@ -73,7 +78,12 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private bool m_showMap;
         private bool m_showStats;
         private bool m_showParcels;
+        private bool m_currencyPortalEnabled = true;
         private int m_postsPerPage;
+        private int m_currencyChallengeMinutes = 10;
+        private int m_currencySessionHours = 12;
+        private int m_currencyStatementLimit = 30;
+        private int m_currencyBuyLimit = 100000;
         private string m_defaultEstateTitle = "OpenSimulator Estate";
         private string m_basePath = "/regionweb";
         private string m_contentDirectory = "RegionWeb";
@@ -97,6 +107,11 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             m_showStats = config.GetBoolean("ShowStats", true);
             m_showParcels = config.GetBoolean("ShowParcels", true);
             m_postsPerPage = Math.Max(1, config.GetInt("PostsPerPage", 5));
+            m_currencyPortalEnabled = config.GetBoolean("CurrencyPortalEnabled", true);
+            m_currencyChallengeMinutes = Math.Max(1, config.GetInt("CurrencyChallengeMinutes", 10));
+            m_currencySessionHours = Math.Max(1, config.GetInt("CurrencySessionHours", 12));
+            m_currencyStatementLimit = Math.Max(1, config.GetInt("CurrencyStatementLimit", 30));
+            m_currencyBuyLimit = Math.Max(1, config.GetInt("CurrencyBuyLimit", 100000));
             m_defaultEstateTitle = config.GetString("EstateTitle", "OpenSimulator Estate").Trim();
             if (string.IsNullOrEmpty(m_defaultEstateTitle))
                 m_defaultEstateTitle = "OpenSimulator Estate";
@@ -265,6 +280,12 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     return;
                 }
 
+                if (parts[0].Equals("currency", StringComparison.OrdinalIgnoreCase))
+                {
+                    SendCurrencyPortal(parts, request, response);
+                    return;
+                }
+
                 if (parts.Length >= 2 && parts[0].Equals("feature", StringComparison.OrdinalIgnoreCase))
                 {
                     SendFeaturePage(parts[1], response);
@@ -340,7 +361,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 .Append(Html(content.Title)).Append("</h1>")
                 .Append(Paragraphs(content.Description))
                 .Append("<div class=\"estate-actions\"><a href=\"#regions\">Explore regions</a><a href=\"#features\">New features</a><a href=\"")
-                .Append(Html(m_basePath)).Append("/feature/").Append(Url(MakeSlug(CurrencyFeatureTitle))).Append("/\">Currency</a><a href=\"")
+                .Append(Html(m_basePath)).Append("/currency/\">Avatar wallet</a><a href=\"")
+                .Append(Html(m_basePath)).Append("/feature/").Append(Url(MakeSlug(CurrencyFeatureTitle))).Append("/\">Currency guide</a><a href=\"")
                 .Append(Html(m_basePath)).Append("/scripts\">LSL scripts</a></div>")
                 .Append("</div></header>");
 
@@ -482,6 +504,724 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             html.Append("</main>").Append(EndPage());
             SendHtml(response, html.ToString());
+        }
+
+        private void SendCurrencyPortal(string[] parts, IOSHttpRequest request, IOSHttpResponse response)
+        {
+            if (!m_currencyPortalEnabled)
+            {
+                SendNotFound(response, "RegionWeb currency portal is disabled.");
+                return;
+            }
+
+            Dictionary<string, string> form = ReadForm(request);
+            bool isPost = !string.IsNullOrEmpty(request.HttpMethod)
+                && request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase);
+            string action = isPost ? FormValue(form, "action") :
+                (parts.Length >= 2 ? parts[1] : string.Empty);
+
+            CurrencyWebSession session = GetCurrencySession(request);
+
+            if (action.Equals("logout", StringComparison.OrdinalIgnoreCase))
+            {
+                string sessionToken = ReadCookie(request, CurrencySessionCookie);
+                if (!string.IsNullOrEmpty(sessionToken))
+                {
+                    lock (m_currencyAuthLock)
+                        m_currencySessions.Remove(sessionToken);
+                }
+
+                ClearCurrencySessionCookie(response);
+                SendCurrencyLogin(response, "You have been logged out.", string.Empty);
+                return;
+            }
+
+            if (isPost && action.Equals("request-token", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleCurrencyTokenRequest(form, response);
+                return;
+            }
+
+            if (isPost && action.Equals("login", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleCurrencyLogin(form, response);
+                return;
+            }
+
+            if (session == null)
+            {
+                SendCurrencyLogin(response, string.Empty, FormValue(form, "avatar"));
+                return;
+            }
+
+            if (isPost && action.Equals("buy", StringComparison.OrdinalIgnoreCase))
+            {
+                string message;
+                string severity;
+                HandleCurrencyBuy(session, form, out message, out severity);
+                SendCurrencyDashboard(response, session, message, severity);
+                return;
+            }
+
+            if (isPost && action.Equals("transfer", StringComparison.OrdinalIgnoreCase))
+            {
+                string message;
+                string severity;
+                HandleCurrencyTransfer(session, form, out message, out severity);
+                SendCurrencyDashboard(response, session, message, severity);
+                return;
+            }
+
+            SendCurrencyDashboard(response, session, string.Empty, string.Empty);
+        }
+
+        private void HandleCurrencyTokenRequest(Dictionary<string, string> form, IOSHttpResponse response)
+        {
+            string avatarName = FormValue(form, "avatar");
+            if (!TryResolveAvatar(avatarName, out UUID agentID, out string displayName))
+            {
+                SendCurrencyLogin(response, "Avatar not found. Use the full avatar name, for example First Last.", avatarName);
+                return;
+            }
+
+            if (!TryFindOnlineClient(agentID, out IClientAPI client))
+            {
+                SendCurrencyLogin(response, "Avatar resolved, but it must be online in one of these regions to receive the token inworld.", displayName);
+                return;
+            }
+
+            string token = GenerateCurrencyChallengeToken();
+            DateTime expires = DateTime.UtcNow.AddMinutes(m_currencyChallengeMinutes);
+            lock (m_currencyAuthLock)
+            {
+                CleanupCurrencyAuthLocked();
+                m_currencyChallenges[token] = new CurrencyLoginChallenge
+                {
+                    AgentID = agentID,
+                    DisplayName = displayName,
+                    Token = token,
+                    ExpiresUTC = expires
+                };
+            }
+
+            string message = "RegionWeb wallet login token for " + displayName + ": " + token
+                + " (expires in " + m_currencyChallengeMinutes.ToString(CultureInfo.InvariantCulture) + " minutes).";
+            try
+            {
+                client.SendBlueBoxMessage(UUID.Zero, "RegionWeb", message);
+            }
+            catch
+            {
+                client.SendAgentAlertMessage(message, false);
+            }
+
+            SendCurrencyLogin(response, "Token sent inworld to " + displayName + ". Enter it below to open the wallet.", displayName);
+        }
+
+        private void HandleCurrencyLogin(Dictionary<string, string> form, IOSHttpResponse response)
+        {
+            string avatarName = FormValue(form, "avatar");
+            string token = FormValue(form, "token").Trim().ToUpperInvariant();
+            if (string.IsNullOrEmpty(token))
+            {
+                SendCurrencyLogin(response, "Enter the token received inworld.", avatarName);
+                return;
+            }
+
+            if (!TryResolveAvatar(avatarName, out UUID agentID, out string displayName))
+            {
+                SendCurrencyLogin(response, "Avatar not found. Request a new token using the exact avatar name.", avatarName);
+                return;
+            }
+
+            CurrencyLoginChallenge challenge;
+            lock (m_currencyAuthLock)
+            {
+                CleanupCurrencyAuthLocked();
+                if (!m_currencyChallenges.TryGetValue(token, out challenge))
+                {
+                    SendCurrencyLogin(response, "Invalid or expired token. Request a new one inworld.", displayName);
+                    return;
+                }
+
+                if (challenge.AgentID != agentID)
+                {
+                    SendCurrencyLogin(response, "That token belongs to a different avatar.", displayName);
+                    return;
+                }
+
+                m_currencyChallenges.Remove(token);
+            }
+
+            string sessionToken = GenerateCurrencySessionToken();
+            CurrencyWebSession session = new CurrencyWebSession
+            {
+                AgentID = agentID,
+                DisplayName = challenge.DisplayName,
+                ExpiresUTC = DateTime.UtcNow.AddHours(m_currencySessionHours)
+            };
+
+            lock (m_currencyAuthLock)
+            {
+                CleanupCurrencyAuthLocked();
+                m_currencySessions[sessionToken] = session;
+            }
+
+            SetCurrencySessionCookie(response, sessionToken, session.ExpiresUTC);
+            SendCurrencyDashboard(response, session, "Login successful.", "ok");
+        }
+
+        private void HandleCurrencyBuy(CurrencyWebSession session, Dictionary<string, string> form, out string message, out string severity)
+        {
+            severity = "error";
+            if (!TryParsePositiveAmount(FormValue(form, "amount"), m_currencyBuyLimit, out int amount, out message))
+                return;
+
+            IMoneyModule money = GetCurrencyMoneyModule();
+            if (money == null)
+            {
+                message = "Currency module is not active.";
+                return;
+            }
+
+            if (InvokeWebBuyCurrency(money, session.AgentID, amount, out string reason))
+            {
+                severity = "ok";
+                message = "Purchased " + amount.ToString(CultureInfo.InvariantCulture) + " tokens.";
+            }
+            else
+            {
+                message = string.IsNullOrWhiteSpace(reason) ? "Token purchase failed." : reason;
+            }
+        }
+
+        private void HandleCurrencyTransfer(CurrencyWebSession session, Dictionary<string, string> form, out string message, out string severity)
+        {
+            severity = "error";
+            if (!TryParsePositiveAmount(FormValue(form, "amount"), 0, out int amount, out message))
+                return;
+
+            string recipient = FormValue(form, "recipient");
+            if (!TryResolveAvatar(recipient, out UUID recipientID, out string recipientName))
+            {
+                message = "Recipient avatar not found. Use the full avatar name.";
+                return;
+            }
+
+            string description = FormValue(form, "description");
+            if (description.Length > 160)
+                description = description.Substring(0, 160);
+
+            IMoneyModule money = GetCurrencyMoneyModule();
+            if (money == null)
+            {
+                message = "Currency module is not active.";
+                return;
+            }
+
+            if (InvokeWebTransfer(money, session.AgentID, recipientID, amount, description, out string reason))
+            {
+                severity = "ok";
+                message = "Transferred " + amount.ToString(CultureInfo.InvariantCulture) + " tokens to " + recipientName + ".";
+            }
+            else
+            {
+                message = string.IsNullOrWhiteSpace(reason) ? "Transfer failed." : reason;
+            }
+        }
+
+        private void SendCurrencyLogin(IOSHttpResponse response, string message, string avatarName)
+        {
+            EstatePageContent estate = LoadEstateContent();
+            StringBuilder html = BeginPage("Avatar Wallet - " + estate.Title);
+            html.Append("<main class=\"wrap wallet-page\"><a class=\"back\" href=\"")
+                .Append(Html(m_basePath)).Append("/\">Back to estate</a>")
+                .Append("<p class=\"feature-kicker\">Reserved area</p><h1>Avatar Wallet</h1>")
+                .Append("<p class=\"lead\">Request a one-time token inworld, then use it here to view your balance, statement, token purchases and avatar transfers.</p>");
+
+            AppendCurrencyMessage(html, message, string.IsNullOrEmpty(message) || message.StartsWith("Token sent", StringComparison.Ordinal) || message.StartsWith("You have", StringComparison.Ordinal) ? "ok" : "error");
+
+            html.Append("<section class=\"wallet-grid\"><article class=\"wallet-card\"><h2>1. Request inworld token</h2>")
+                .Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/\">")
+                .Append("<input type=\"hidden\" name=\"action\" value=\"request-token\">")
+                .Append("<label>Avatar name<input name=\"avatar\" value=\"").Append(Html(avatarName)).Append("\" required placeholder=\"First Last\"></label>")
+                .Append("<button type=\"submit\">Send token inworld</button></form>")
+                .Append("<p class=\"wallet-note\">The avatar must be online in one of the loaded regions so RegionWeb can deliver the token through the viewer.</p></article>");
+
+            html.Append("<article class=\"wallet-card\"><h2>2. Login</h2>")
+                .Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/\">")
+                .Append("<input type=\"hidden\" name=\"action\" value=\"login\">")
+                .Append("<label>Avatar name<input name=\"avatar\" value=\"").Append(Html(avatarName)).Append("\" required placeholder=\"First Last\"></label>")
+                .Append("<label>Token<input name=\"token\" required autocomplete=\"one-time-code\" placeholder=\"8-character token\"></label>")
+                .Append("<button type=\"submit\">Open wallet</button></form></article></section></main>")
+                .Append(EndPage());
+
+            SendHtml(response, html.ToString());
+        }
+
+        private void SendCurrencyDashboard(IOSHttpResponse response, CurrencyWebSession session, string message, string severity)
+        {
+            EstatePageContent estate = LoadEstateContent();
+            IMoneyModule money = GetCurrencyMoneyModule();
+            int balance = 0;
+            bool hasBalance = false;
+            if (money != null)
+            {
+                try
+                {
+                    balance = money.GetBalance(session.AgentID);
+                    hasBalance = true;
+                }
+                catch
+                {
+                    hasBalance = false;
+                }
+            }
+
+            StringBuilder html = BeginPage("Avatar Wallet - " + estate.Title);
+            html.Append("<main class=\"wrap wallet-page\"><a class=\"back\" href=\"")
+                .Append(Html(m_basePath)).Append("/\">Back to estate</a>")
+                .Append("<p class=\"feature-kicker\">Reserved area</p><h1>Avatar Wallet</h1>");
+
+            AppendCurrencyMessage(html, message, severity);
+
+            html.Append("<section class=\"wallet-summary\"><div><span>Avatar</span><strong>")
+                .Append(Html(session.DisplayName)).Append("</strong></div><div><span>Balance</span><strong>")
+                .Append(hasBalance ? balance.ToString(CultureInfo.InvariantCulture) : "Unavailable")
+                .Append("</strong></div><div><span>Session expires</span><strong>")
+                .Append(Html(session.ExpiresUTC.ToLocalTime().ToString("dd MMM HH:mm", CultureInfo.InvariantCulture)))
+                .Append("</strong></div></section>");
+
+            if (money == null)
+            {
+                html.Append("<p class=\"wallet-message error\">Currency module is not active. Enable BetaGridLikeMoneyModule in [Economy].</p>");
+            }
+            else
+            {
+                html.Append("<section class=\"wallet-grid\"><article class=\"wallet-card\"><h2>Buy tokens</h2>")
+                    .Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/\">")
+                    .Append("<input type=\"hidden\" name=\"action\" value=\"buy\">")
+                    .Append("<label>Amount<input name=\"amount\" type=\"number\" min=\"1\" max=\"")
+                    .Append(m_currencyBuyLimit.ToString(CultureInfo.InvariantCulture)).Append("\" required></label>")
+                    .Append("<button type=\"submit\">Buy tokens</button></form>")
+                    .Append("<p class=\"wallet-note\">This credits the local simulator ledger and updates the viewer-visible balance.</p></article>");
+
+                html.Append("<article class=\"wallet-card\"><h2>Transfer</h2>")
+                    .Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/\">")
+                    .Append("<input type=\"hidden\" name=\"action\" value=\"transfer\">")
+                    .Append("<label>Recipient avatar<input name=\"recipient\" required placeholder=\"First Last\"></label>")
+                    .Append("<label>Amount<input name=\"amount\" type=\"number\" min=\"1\" required></label>")
+                    .Append("<label>Description<input name=\"description\" maxlength=\"160\" placeholder=\"Optional note\"></label>")
+                    .Append("<button type=\"submit\">Transfer tokens</button></form></article></section>");
+
+                AppendCurrencyStatement(html, money, session.AgentID);
+            }
+
+            html.Append("<form class=\"wallet-logout\" method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/\">")
+                .Append("<input type=\"hidden\" name=\"action\" value=\"logout\"><button type=\"submit\">Logout</button></form>")
+                .Append("</main>").Append(EndPage());
+            SendHtml(response, html.ToString());
+        }
+
+        private void AppendCurrencyStatement(StringBuilder html, IMoneyModule money, UUID agentID)
+        {
+            List<Dictionary<string, string>> rows = GetCurrencyStatement(money, agentID);
+            html.Append("<section class=\"wallet-card wallet-statement\"><h2>Statement</h2>");
+            if (rows.Count == 0)
+            {
+                html.Append("<p class=\"wallet-note\">No ledger entries yet.</p></section>");
+                return;
+            }
+
+            html.Append("<div class=\"wallet-table\"><table><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Balance</th><th>Description</th></tr></thead><tbody>");
+            string agentText = agentID.ToString();
+            foreach (Dictionary<string, string> row in rows)
+            {
+                string amount = RowValue(row, "amount");
+                string source = RowValue(row, "source");
+                string destination = RowValue(row, "destination");
+                bool credit = destination.Equals(agentText, StringComparison.OrdinalIgnoreCase)
+                    && !source.Equals(agentText, StringComparison.OrdinalIgnoreCase);
+                bool debit = source.Equals(agentText, StringComparison.OrdinalIgnoreCase)
+                    && !destination.Equals(agentText, StringComparison.OrdinalIgnoreCase);
+                string signedAmount = (credit ? "+" : (debit ? "-" : string.Empty)) + amount;
+
+                html.Append("<tr><td>").Append(Html(FormatUtc(RowValue(row, "utc")))).Append("</td><td>")
+                    .Append(Html(RowValue(row, "action"))).Append("</td><td class=\"")
+                    .Append(credit ? "credit" : (debit ? "debit" : string.Empty)).Append("\">")
+                    .Append(Html(signedAmount)).Append("</td><td>")
+                    .Append(Html(RowValue(row, "balance"))).Append("</td><td>")
+                    .Append(Html(RowValue(row, "description"))).Append("</td></tr>");
+            }
+
+            html.Append("</tbody></table></div></section>");
+        }
+
+        private void AppendCurrencyMessage(StringBuilder html, string message, string severity)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+                return;
+
+            string css = string.IsNullOrWhiteSpace(severity) ? "ok" : severity;
+            html.Append("<p class=\"wallet-message ").Append(Html(css)).Append("\">")
+                .Append(Html(message)).Append("</p>");
+        }
+
+        private IMoneyModule GetCurrencyMoneyModule()
+        {
+            foreach (Scene scene in GetSceneSnapshot())
+            {
+                IMoneyModule money = scene.RequestModuleInterface<IMoneyModule>();
+                if (money != null)
+                    return money;
+            }
+
+            return null;
+        }
+
+        private bool InvokeWebBuyCurrency(IMoneyModule money, UUID agentID, int amount, out string reason)
+        {
+            reason = string.Empty;
+            MethodInfo method = money.GetType().GetMethod("WebBuyCurrency", BindingFlags.Public | BindingFlags.Instance);
+            if (method == null)
+            {
+                reason = "Currency module does not expose RegionWeb purchases.";
+                return false;
+            }
+
+            object[] args = new object[] { agentID, amount, reason };
+            try
+            {
+                bool result = method.Invoke(money, args) is bool b && b;
+                reason = args[2] as string ?? string.Empty;
+                return result;
+            }
+            catch (Exception e)
+            {
+                reason = e.InnerException != null ? e.InnerException.Message : e.Message;
+                return false;
+            }
+        }
+
+        private bool InvokeWebTransfer(IMoneyModule money, UUID fromUser, UUID toUser, int amount, string description, out string reason)
+        {
+            reason = string.Empty;
+            MethodInfo method = money.GetType().GetMethod("WebTransfer", BindingFlags.Public | BindingFlags.Instance);
+            if (method == null)
+                method = money.GetType().GetMethod("WebTransferCurrency", BindingFlags.Public | BindingFlags.Instance);
+            if (method == null)
+            {
+                reason = "Currency module does not expose RegionWeb transfers.";
+                return false;
+            }
+
+            object[] args = new object[] { fromUser, toUser, amount, description, reason };
+            try
+            {
+                bool result = method.Invoke(money, args) is bool b && b;
+                reason = args[4] as string ?? string.Empty;
+                return result;
+            }
+            catch (Exception e)
+            {
+                reason = e.InnerException != null ? e.InnerException.Message : e.Message;
+                return false;
+            }
+        }
+
+        private List<Dictionary<string, string>> GetCurrencyStatement(IMoneyModule money, UUID agentID)
+        {
+            List<Dictionary<string, string>> rows = new List<Dictionary<string, string>>();
+            MethodInfo method = money.GetType().GetMethod("GetCurrencyStatement", BindingFlags.Public | BindingFlags.Instance);
+            if (method == null)
+                return rows;
+
+            try
+            {
+                object result = method.Invoke(money, new object[] { agentID, m_currencyStatementLimit });
+                if (result is IEnumerable<Dictionary<string, string>> enumerable)
+                    rows.AddRange(enumerable);
+            }
+            catch
+            {
+            }
+
+            return rows;
+        }
+
+        private bool TryParsePositiveAmount(string text, int maxAmount, out int amount, out string reason)
+        {
+            amount = 0;
+            reason = string.Empty;
+            if (!int.TryParse((text ?? string.Empty).Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out amount) || amount <= 0)
+            {
+                reason = "Amount must be a positive whole number.";
+                return false;
+            }
+
+            if (maxAmount > 0 && amount > maxAmount)
+            {
+                reason = "Amount cannot exceed " + maxAmount.ToString(CultureInfo.InvariantCulture) + ".";
+                return false;
+            }
+
+            return true;
+        }
+
+        private CurrencyWebSession GetCurrencySession(IOSHttpRequest request)
+        {
+            string token = ReadCookie(request, CurrencySessionCookie);
+            if (string.IsNullOrEmpty(token))
+                return null;
+
+            lock (m_currencyAuthLock)
+            {
+                CleanupCurrencyAuthLocked();
+                if (m_currencySessions.TryGetValue(token, out CurrencyWebSession session))
+                    return session;
+            }
+
+            return null;
+        }
+
+        private void CleanupCurrencyAuthLocked()
+        {
+            DateTime now = DateTime.UtcNow;
+            List<string> expiredChallenges = new List<string>();
+            foreach (KeyValuePair<string, CurrencyLoginChallenge> entry in m_currencyChallenges)
+            {
+                if (entry.Value.ExpiresUTC <= now)
+                    expiredChallenges.Add(entry.Key);
+            }
+            foreach (string token in expiredChallenges)
+                m_currencyChallenges.Remove(token);
+
+            List<string> expiredSessions = new List<string>();
+            foreach (KeyValuePair<string, CurrencyWebSession> entry in m_currencySessions)
+            {
+                if (entry.Value.ExpiresUTC <= now)
+                    expiredSessions.Add(entry.Key);
+            }
+            foreach (string token in expiredSessions)
+                m_currencySessions.Remove(token);
+        }
+
+        private void SetCurrencySessionCookie(IOSHttpResponse response, string token, DateTime expiresUTC)
+        {
+            response.AddHeader("Set-Cookie", CurrencySessionCookie + "=" + token
+                + "; Path=" + m_basePath + "; Expires=" + expiresUTC.ToString("R", CultureInfo.InvariantCulture)
+                + "; HttpOnly; SameSite=Lax");
+        }
+
+        private void ClearCurrencySessionCookie(IOSHttpResponse response)
+        {
+            response.AddHeader("Set-Cookie", CurrencySessionCookie
+                + "=; Path=" + m_basePath + "; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax");
+        }
+
+        private static string ReadCookie(IOSHttpRequest request, string name)
+        {
+            string cookies = request.Headers["cookie"] ?? request.Headers["Cookie"];
+            if (string.IsNullOrEmpty(cookies))
+                return string.Empty;
+
+            string[] parts = cookies.Split(';');
+            foreach (string raw in parts)
+            {
+                string part = raw.Trim();
+                int equals = part.IndexOf('=');
+                if (equals <= 0)
+                    continue;
+                if (part.Substring(0, equals).Trim().Equals(name, StringComparison.Ordinal))
+                    return part.Substring(equals + 1).Trim();
+            }
+
+            return string.Empty;
+        }
+
+        private Dictionary<string, string> ReadForm(IOSHttpRequest request)
+        {
+            Dictionary<string, string> form = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (request.QueryAsDictionary != null)
+            {
+                foreach (KeyValuePair<string, string> entry in request.QueryAsDictionary)
+                    form[entry.Key] = entry.Value ?? string.Empty;
+            }
+
+            if (request.HasEntityBody && request.InputStream != null)
+            {
+                Encoding encoding = request.ContentEncoding ?? Encoding.UTF8;
+                using (StreamReader reader = new StreamReader(request.InputStream, encoding))
+                {
+                    string body = reader.ReadToEnd();
+                    if (!string.IsNullOrEmpty(body))
+                    {
+                        Dictionary<string, object> parsed = ServerUtils.ParseQueryString(body);
+                        foreach (KeyValuePair<string, object> entry in parsed)
+                            form[entry.Key] = entry.Value == null ? string.Empty : entry.Value.ToString();
+                    }
+                }
+            }
+
+            return form;
+        }
+
+        private static string FormValue(Dictionary<string, string> form, string name)
+        {
+            if (form != null && form.TryGetValue(name, out string value))
+                return value == null ? string.Empty : value.Trim();
+            return string.Empty;
+        }
+
+        private bool TryResolveAvatar(string value, out UUID agentID, out string displayName)
+        {
+            agentID = UUID.Zero;
+            displayName = string.Empty;
+            string name = (value ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(name))
+                return false;
+
+            if (UUID.TryParse(name, out agentID))
+            {
+                displayName = LookupAvatarName(agentID);
+                if (string.IsNullOrWhiteSpace(displayName))
+                    displayName = agentID.ToString();
+                return true;
+            }
+
+            if (TryFindOnlineClientByName(name, out IClientAPI client))
+            {
+                agentID = client.AgentId;
+                displayName = client.Name;
+                return true;
+            }
+
+            if (!SplitAvatarName(name, out string firstName, out string lastName))
+                return false;
+
+            foreach (Scene scene in GetSceneSnapshot())
+            {
+                IUserAccountService accounts = scene.UserAccountService;
+                if (accounts == null)
+                    continue;
+
+                UserAccount account = accounts.GetUserAccount(scene.RegionInfo.ScopeID, firstName, lastName)
+                    ?? accounts.GetUserAccount(UUID.Zero, firstName, lastName);
+                if (account == null)
+                    continue;
+
+                agentID = account.PrincipalID;
+                displayName = account.Name;
+                return true;
+            }
+
+            return false;
+        }
+
+        private string LookupAvatarName(UUID agentID)
+        {
+            if (TryFindOnlineClient(agentID, out IClientAPI client))
+                return client.Name;
+
+            foreach (Scene scene in GetSceneSnapshot())
+            {
+                IUserAccountService accounts = scene.UserAccountService;
+                if (accounts == null)
+                    continue;
+
+                UserAccount account = accounts.GetUserAccount(scene.RegionInfo.ScopeID, agentID)
+                    ?? accounts.GetUserAccount(UUID.Zero, agentID);
+                if (account != null)
+                    return account.Name;
+            }
+
+            return string.Empty;
+        }
+
+        private bool TryFindOnlineClient(UUID agentID, out IClientAPI client)
+        {
+            client = null;
+            foreach (Scene scene in GetSceneSnapshot())
+            {
+                if (scene.TryGetScenePresence(agentID, out ScenePresence presence)
+                    && TryGetRootClient(presence, out client))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private bool TryFindOnlineClientByName(string name, out IClientAPI client)
+        {
+            client = null;
+            if (!SplitAvatarName(name, out string firstName, out string lastName))
+                return false;
+
+            foreach (Scene scene in GetSceneSnapshot())
+            {
+                ScenePresence presence = scene.GetScenePresence(firstName, lastName);
+                if (TryGetRootClient(presence, out client))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryGetRootClient(ScenePresence presence, out IClientAPI client)
+        {
+            client = null;
+            if (presence == null || presence.IsDeleted || presence.IsChildAgent || presence.ControllingClient == null)
+                return false;
+
+            client = presence.ControllingClient;
+            return client.IsActive;
+        }
+
+        private List<Scene> GetSceneSnapshot()
+        {
+            lock (m_sync)
+                return new List<Scene>(m_scenesByID.Values);
+        }
+
+        private static bool SplitAvatarName(string name, out string firstName, out string lastName)
+        {
+            firstName = string.Empty;
+            lastName = string.Empty;
+            string[] parts = (name ?? string.Empty).Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0)
+                return false;
+
+            firstName = parts[0];
+            if (parts.Length == 1)
+                lastName = "Resident";
+            else
+                lastName = string.Join(" ", parts.Skip(1).ToArray());
+
+            return true;
+        }
+
+        private static string GenerateCurrencyChallengeToken()
+        {
+            return UUID.Random().ToString().Replace("-", string.Empty).Substring(0, 8).ToUpperInvariant();
+        }
+
+        private static string GenerateCurrencySessionToken()
+        {
+            return UUID.Random().ToString().Replace("-", string.Empty) + UUID.Random().ToString().Replace("-", string.Empty);
+        }
+
+        private static string RowValue(Dictionary<string, string> row, string key)
+        {
+            if (row != null && row.TryGetValue(key, out string value))
+                return value ?? string.Empty;
+            return string.Empty;
+        }
+
+        private static string FormatUtc(string value)
+        {
+            if (DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out DateTime parsed))
+                return parsed.ToLocalTime().ToString("dd MMM HH:mm", CultureInfo.InvariantCulture);
+            return value;
         }
 
         private static void AppendScriptCompatibilitySummary(StringBuilder html, ScriptFunctionDoc[] docs)
@@ -970,12 +1710,13 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Usage.Add("Keep AllowNegativeBalances = false for normal viewer currency behavior unless you deliberately want overdraft-style testing.");
                     content.Usage.Add("Set the LoginService Currency value to the viewer-facing currency name you want users to see beside their balance.");
                     content.Usage.Add("Use console commands such as money show, money balance, money set, money give, money take, money transfer, money export and money import for estate administration.");
+                    content.Usage.Add("Open /regionweb/currency/ for the reserved avatar wallet area: users request an inworld token, log in on RegionWeb, view balance/statement, buy tokens and transfer to another avatar.");
                     content.Usage.Add("Restart the region after changing economy settings, then log in or request the balance in the viewer to receive the latest MoneyBalanceReply.");
                     content.Notes.Add("Balances are local to this simulator/grid configuration and are intended for estate/gameplay currency, not real-money production payment processing.");
                     content.Notes.Add("Scripted llGiveMoney and llTransferLindenDollars still require owner-granted PERMISSION_DEBIT before money leaves the object owner.");
                     content.Notes.Add("Object payments trigger the normal money event path, so in-world vendors and donation jars can react when the viewer pays an object.");
                     content.Notes.Add("Land/object purchases and upload/group charges use the same ledger, so users see the result immediately in the viewer balance.");
-                    content.Notes.Add("RegionWeb region pages show live economy totals when this local money module is active.");
+                    content.Notes.Add("RegionWeb region pages show live economy totals when this local money module is active, and the wallet login uses a one-time inworld token instead of trusting only a typed avatar name.");
                     break;
 
                 case "viewer-polish":
@@ -1400,7 +2141,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             html.Append("<section class=\"stats\"><h2>Economy</h2><dl>");
             foreach (KeyValuePair<string, string> entry in stats)
                 html.Append(Stat(entry.Key, entry.Value));
-            html.Append("</dl></section>");
+            html.Append("</dl><p><a href=\"")
+                .Append(Html(m_basePath)).Append("/currency/\">Open avatar wallet</a></p></section>");
         }
 
         private void AppendParcels(StringBuilder html, RegionWebStats stats)
@@ -1763,7 +2505,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 .Append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
                 .Append("<title>").Append(Html(title)).Append("</title>")
                 .Append("<style>")
-                .Append("body{margin:0;background:#101417;color:#e9efec;font:16px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}a{color:#9bd3e6;text-decoration:none}img{max-width:100%;display:block}.wrap{max-width:1180px;margin:0 auto;padding:0 24px}.estate-hero{min-height:520px;background-size:cover;background-position:center;display:flex;align-items:flex-end}.estate-hero-plain{background:linear-gradient(135deg,#11252b,#1e2927 52%,#3a3526)}.estate-hero .wrap{padding-top:110px;padding-bottom:72px}.estate-hero p{max-width:760px;color:#d9e5e1;font-size:19px}.estate-hero>div>p:first-child,.hero p,.feature-kicker{margin:0 0 10px;color:#b9d8d3;text-transform:uppercase;font-size:13px;letter-spacing:.08em}.estate-hero h1{max-width:900px;margin:0;font-size:clamp(44px,8vw,96px);line-height:.92}.estate-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}.estate-actions a{background:#d7e4df;color:#101417;padding:10px 15px;font-weight:700}.estate-actions a+a{background:#223239;color:#dbe7e4}.estate-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;margin-top:28px;background:#2a363a}.estate-stats div{background:#171e22;padding:18px}.estate-stats strong{display:block;font-size:30px}.estate-stats span{color:#aebbb9}.feature-section{padding-top:48px}.feature-section h2,.list h2{font-size:34px;margin:0 0 20px}.feature-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}.feature-card{display:block;background:#171e22;border:1px solid #263136;color:#e9efec;padding:18px;min-height:190px}.feature-card:hover{border-color:#6da8b7;background:#1a2428}.feature-card h3{margin:0 0 8px;font-size:21px}.feature-card p{margin:0;color:#c7d2cf}.feature-card span{display:inline-block;margin-top:18px;color:#9bd3e6;font-weight:700}.feature-page{padding-top:42px;padding-bottom:70px;max-width:900px}.feature-page h1{font-size:clamp(38px,7vw,68px);line-height:1;margin:0 0 18px}.feature-page .lead,.script-reference .lead{font-size:21px;color:#d4dfdc;margin:0 0 20px}.feature-page section{border-top:1px solid #2a363a;padding-top:24px;margin-top:26px}.feature-page h2{font-size:28px;margin:0 0 12px}.feature-page li{margin:0 0 10px;color:#d2dcda}.hero{min-height:360px;background-size:cover;background-position:center;display:flex;align-items:flex-end}.hero .wrap{padding-top:90px;padding-bottom:46px}.hero h1{margin:0;font-size:clamp(38px,7vw,82px);line-height:.94}.meta{margin-top:16px;color:#cfd8d5}.layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:36px;padding-top:36px;padding-bottom:56px}.story{min-width:0}.story>p{font-size:19px;color:#d5dfdc}.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin:30px 0}.gallery figure{margin:0;background:#182025}.gallery img{aspect-ratio:4/3;object-fit:cover}.gallery figcaption{padding:10px;color:#c7d0ce;font-size:14px}.panel{align-self:start}.map{width:100%;aspect-ratio:1;object-fit:cover;border:1px solid #2a363a}.stats,.parcels{margin-top:18px;background:#171e22;border:1px solid #263136;padding:18px}.stats h2,.parcels h2,.story h2{margin:0 0 14px}.stats dl{display:grid;grid-template-columns:1fr auto;gap:7px 16px;margin:0}.stats dt{color:#9facad}.stats dd{margin:0;font-weight:700}.parcels div{display:flex;justify-content:space-between;gap:12px;border-top:1px solid #263136;padding:9px 0}.parcels div:first-of-type{border-top:0}.parcels span{color:#aab6b8}.post{border-top:1px solid #2a363a;padding:22px 0}.post img{width:100%;max-height:360px;object-fit:cover;margin-bottom:14px}.post time{color:#9facad;font-size:13px}.post h3{margin:4px 0 8px;font-size:24px}.post p{color:#cbd5d2}.post-page{padding-top:36px;padding-bottom:60px;max-width:850px}.post.full h1{font-size:46px;line-height:1.05;margin:6px 0 22px}.post.full p{font-size:18px}.back{display:inline-block;margin-bottom:18px}.region-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}.list{padding-top:42px;padding-bottom:60px}.region-card{background:#171e22;border:1px solid #263136;color:#e9efec}.region-card img{aspect-ratio:16/9;object-fit:cover}.region-card strong,.region-card span{display:block;padding:0 14px}.region-card strong{padding-top:13px;font-size:20px}.region-card span{padding-bottom:14px;color:#abb8b8}.empty code{word-break:break-all}.script-reference{padding-top:42px;padding-bottom:70px}.script-reference h1{font-size:clamp(38px,7vw,68px);line-height:1;margin:0 0 18px}.script-source{max-width:880px;color:#b8c6c3}.script-toc{border-top:1px solid #2a363a;margin-top:30px;padding-top:22px}.script-toc h2,.script-group h2{font-size:28px;margin:0 0 14px}.script-toc div{display:flex;flex-wrap:wrap;gap:10px}.script-toc a{background:#172229;border:1px solid #2c3a41;padding:9px 12px;color:#dce7e4}.script-toc span{color:#98b5bd}.script-group{border-top:1px solid #2a363a;margin-top:30px;padding-top:24px}.script-card{background:#161e22;border:1px solid #263238;padding:18px;margin:0 0 14px}.script-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.script-card h3{font-size:22px;margin:0}.script-card-head span{color:#9cb7bd;font-size:13px;text-align:right}.signature{margin:12px 0;color:#dbe7e4}.signature code,.script-card pre{background:#0c1114;border:1px solid #263238}.signature code{display:block;overflow:auto;padding:10px}.script-detail{margin:8px 0;color:#cbd6d3}.script-detail strong{color:#eef7f3}.script-card details{margin-top:12px}.script-card summary{cursor:pointer;color:#9bd3e6;font-weight:700}.script-card pre{overflow:auto;padding:12px;color:#dfeae7}.script-focus{border-top:1px solid #2a363a;margin-top:28px;padding-top:24px}@media(max-width:820px){.layout,.estate-stats{grid-template-columns:1fr}.hero{min-height:300px}.estate-hero{min-height:430px}.wrap{padding-left:16px;padding-right:16px}.script-card-head{display:block}.script-card-head span{text-align:left;display:block;margin-top:5px}}")
+                .Append("body{margin:0;background:#101417;color:#e9efec;font:16px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}a{color:#9bd3e6;text-decoration:none}img{max-width:100%;display:block}.wrap{max-width:1180px;margin:0 auto;padding:0 24px}.estate-hero{min-height:520px;background-size:cover;background-position:center;display:flex;align-items:flex-end}.estate-hero-plain{background:linear-gradient(135deg,#11252b,#1e2927 52%,#3a3526)}.estate-hero .wrap{padding-top:110px;padding-bottom:72px}.estate-hero p{max-width:760px;color:#d9e5e1;font-size:19px}.estate-hero>div>p:first-child,.hero p,.feature-kicker{margin:0 0 10px;color:#b9d8d3;text-transform:uppercase;font-size:13px;letter-spacing:.08em}.estate-hero h1{max-width:900px;margin:0;font-size:clamp(44px,8vw,96px);line-height:.92}.estate-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}.estate-actions a{background:#d7e4df;color:#101417;padding:10px 15px;font-weight:700}.estate-actions a+a{background:#223239;color:#dbe7e4}.estate-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;margin-top:28px;background:#2a363a}.estate-stats div{background:#171e22;padding:18px}.estate-stats strong{display:block;font-size:30px}.estate-stats span{color:#aebbb9}.feature-section{padding-top:48px}.feature-section h2,.list h2{font-size:34px;margin:0 0 20px}.feature-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}.feature-card{display:block;background:#171e22;border:1px solid #263136;color:#e9efec;padding:18px;min-height:190px}.feature-card:hover{border-color:#6da8b7;background:#1a2428}.feature-card h3{margin:0 0 8px;font-size:21px}.feature-card p{margin:0;color:#c7d2cf}.feature-card span{display:inline-block;margin-top:18px;color:#9bd3e6;font-weight:700}.feature-page{padding-top:42px;padding-bottom:70px;max-width:900px}.feature-page h1{font-size:clamp(38px,7vw,68px);line-height:1;margin:0 0 18px}.feature-page .lead,.script-reference .lead,.wallet-page .lead{font-size:21px;color:#d4dfdc;margin:0 0 20px}.feature-page section{border-top:1px solid #2a363a;padding-top:24px;margin-top:26px}.feature-page h2{font-size:28px;margin:0 0 12px}.feature-page li{margin:0 0 10px;color:#d2dcda}.hero{min-height:360px;background-size:cover;background-position:center;display:flex;align-items:flex-end}.hero .wrap{padding-top:90px;padding-bottom:46px}.hero h1{margin:0;font-size:clamp(38px,7vw,82px);line-height:.94}.meta{margin-top:16px;color:#cfd8d5}.layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:36px;padding-top:36px;padding-bottom:56px}.story{min-width:0}.story>p{font-size:19px;color:#d5dfdc}.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin:30px 0}.gallery figure{margin:0;background:#182025}.gallery img{aspect-ratio:4/3;object-fit:cover}.gallery figcaption{padding:10px;color:#c7d0ce;font-size:14px}.panel{align-self:start}.map{width:100%;aspect-ratio:1;object-fit:cover;border:1px solid #2a363a}.stats,.parcels{margin-top:18px;background:#171e22;border:1px solid #263136;padding:18px}.stats h2,.parcels h2,.story h2{margin:0 0 14px}.stats dl{display:grid;grid-template-columns:1fr auto;gap:7px 16px;margin:0}.stats dt{color:#9facad}.stats dd{margin:0;font-weight:700}.parcels div{display:flex;justify-content:space-between;gap:12px;border-top:1px solid #263136;padding:9px 0}.parcels div:first-of-type{border-top:0}.parcels span{color:#aab6b8}.post{border-top:1px solid #2a363a;padding:22px 0}.post img{width:100%;max-height:360px;object-fit:cover;margin-bottom:14px}.post time{color:#9facad;font-size:13px}.post h3{margin:4px 0 8px;font-size:24px}.post p{color:#cbd5d2}.post-page{padding-top:36px;padding-bottom:60px;max-width:850px}.post.full h1{font-size:46px;line-height:1.05;margin:6px 0 22px}.post.full p{font-size:18px}.back{display:inline-block;margin-bottom:18px}.region-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}.list{padding-top:42px;padding-bottom:60px}.region-card{background:#171e22;border:1px solid #263136;color:#e9efec}.region-card img{aspect-ratio:16/9;object-fit:cover}.region-card strong,.region-card span{display:block;padding:0 14px}.region-card strong{padding-top:13px;font-size:20px}.region-card span{padding-bottom:14px;color:#abb8b8}.empty code{word-break:break-all}.script-reference,.wallet-page{padding-top:42px;padding-bottom:70px}.script-reference h1,.wallet-page h1{font-size:clamp(38px,7vw,68px);line-height:1;margin:0 0 18px}.script-source{max-width:880px;color:#b8c6c3}.script-toc{border-top:1px solid #2a363a;margin-top:30px;padding-top:22px}.script-toc h2,.script-group h2{font-size:28px;margin:0 0 14px}.script-toc div{display:flex;flex-wrap:wrap;gap:10px}.script-toc a{background:#172229;border:1px solid #2c3a41;padding:9px 12px;color:#dce7e4}.script-toc span{color:#98b5bd}.script-group{border-top:1px solid #2a363a;margin-top:30px;padding-top:24px}.script-card{background:#161e22;border:1px solid #263238;padding:18px;margin:0 0 14px}.script-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.script-card h3{font-size:22px;margin:0}.script-card-head span{color:#9cb7bd;font-size:13px;text-align:right}.signature{margin:12px 0;color:#dbe7e4}.signature code,.script-card pre{background:#0c1114;border:1px solid #263238}.signature code{display:block;overflow:auto;padding:10px}.script-detail{margin:8px 0;color:#cbd6d3}.script-detail strong{color:#eef7f3}.script-card details{margin-top:12px}.script-card summary{cursor:pointer;color:#9bd3e6;font-weight:700}.script-card pre{overflow:auto;padding:12px;color:#dfeae7}.script-focus{border-top:1px solid #2a363a;margin-top:28px;padding-top:24px}.wallet-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:24px}.wallet-card,.wallet-summary{background:#171e22;border:1px solid #263136;padding:18px}.wallet-card h2{margin:0 0 14px;font-size:24px}.wallet-card label{display:block;color:#b8c6c3;font-weight:700;margin:0 0 12px}.wallet-card input{box-sizing:border-box;width:100%;margin-top:6px;background:#0d1215;border:1px solid #334349;color:#eef7f3;padding:10px;font:inherit}.wallet-card button,.wallet-logout button{border:0;background:#d7e4df;color:#101417;padding:10px 14px;font-weight:800;cursor:pointer}.wallet-card button:hover,.wallet-logout button:hover{background:#9bd3e6}.wallet-note{color:#aab7b6;margin:12px 0 0}.wallet-message{border:1px solid #345042;background:#17251e;color:#d9f4de;padding:12px 14px}.wallet-message.error{border-color:#6d3737;background:#2b1818;color:#ffd6d6}.wallet-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:24px}.wallet-summary div{background:#11181b;padding:16px}.wallet-summary span{display:block;color:#a9b7b5}.wallet-summary strong{display:block;font-size:26px;word-break:break-word}.wallet-statement{margin-top:18px}.wallet-table{overflow:auto}.wallet-table table{width:100%;border-collapse:collapse}.wallet-table th,.wallet-table td{text-align:left;border-top:1px solid #29373c;padding:9px;white-space:nowrap}.wallet-table td:last-child{white-space:normal}.wallet-table .credit{color:#90e2a6}.wallet-table .debit{color:#f0a2a2}.wallet-logout{margin-top:18px}@media(max-width:820px){.layout,.estate-stats,.wallet-summary{grid-template-columns:1fr}.hero{min-height:300px}.estate-hero{min-height:430px}.wrap{padding-left:16px;padding-right:16px}.script-card-head{display:block}.script-card-head span{text-align:left;display:block;margin-top:5px}}")
                 .Append("</style></head><body>");
             return html;
         }
@@ -2422,6 +3164,21 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             public string Summary;
             public string Image;
             public string Body;
+        }
+
+        private class CurrencyLoginChallenge
+        {
+            public UUID AgentID;
+            public string DisplayName;
+            public string Token;
+            public DateTime ExpiresUTC;
+        }
+
+        private class CurrencyWebSession
+        {
+            public UUID AgentID;
+            public string DisplayName;
+            public DateTime ExpiresUTC;
         }
 
         private class RegionWebStats
