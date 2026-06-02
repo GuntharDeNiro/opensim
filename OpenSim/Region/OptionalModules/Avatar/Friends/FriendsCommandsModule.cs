@@ -185,7 +185,7 @@ namespace OpenSim.Region.OptionalModules.Avatar.Friends
                 else
                     friendName = friend.Friend;
 
-                OpenSim.Services.Interfaces.PresenceInfo[] pi = m_presenceService.GetAgents(new string[] { friend.Friend });
+                PresenceInfo[] pi = m_presenceService.GetAgents(new string[] { friend.Friend });
                 if (pi.Length > 0)
                     onlineText = "online";
                 else

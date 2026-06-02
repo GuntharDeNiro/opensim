@@ -1170,7 +1170,7 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
                 if (!string.IsNullOrEmpty(directory))
                     Directory.CreateDirectory(directory);
 
-                bool writeHeader = !File.Exists(m_transactionLogPath) || File.GetLength(m_transactionLogPath) == 0;
+                bool writeHeader = !File.Exists(m_transactionLogPath) || new FileInfo(m_transactionLogPath).Length == 0;
                 StringBuilder line = new StringBuilder();
                 if (writeHeader)
                     line.Append("# utc\tsequence\taction\tsource\tdestination\tamount\ttransaction_type\tsuccess\tsource_balance\tdestination_balance\tdescription\n");
@@ -1258,8 +1258,8 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
             Dictionary<string, string> stats = GetCurrencyStats();
             MainConsole.Instance.Output("[MONEY]: Local currency ledger");
             foreach (KeyValuePair<string, string> entry in stats)
-                MainConsole.Instance.OutputFormat("[MONEY]: {0}: {1}", entry.Key, entry.Value);
-            MainConsole.Instance.OutputFormat("[MONEY]: Audit path: {0}", m_transactionLogPath);
+                MainConsole.Instance.Output("[MONEY]: {0}: {1}", entry.Key, entry.Value);
+            MainConsole.Instance.Output("[MONEY]: Audit path: {0}", m_transactionLogPath);
         }
 
         private void HandleMoneyList(string[] cmd)
@@ -1278,9 +1278,9 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
             }
 
             entries.Sort((a, b) => b.Value.CompareTo(a.Value));
-            MainConsole.Instance.OutputFormat("[MONEY]: Showing {0} of {1} accounts", Math.Min(limit, entries.Count), entries.Count);
+            MainConsole.Instance.Output("[MONEY]: Showing {0} of {1} accounts", Math.Min(limit, entries.Count), entries.Count);
             for (int i = 0; i < entries.Count && i < limit; i++)
-                MainConsole.Instance.OutputFormat("[MONEY]: {0} {1}", entries[i].Key, entries[i].Value);
+                MainConsole.Instance.Output("[MONEY]: {0} {1}", entries[i].Key, entries[i].Value);
         }
 
         private void HandleMoneyBalance(string[] cmd)
@@ -1295,7 +1295,7 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
             if (!TryResolveAgent(agentText, out UUID agentID, out string displayName))
                 return;
 
-            MainConsole.Instance.OutputFormat("[MONEY]: {0} ({1}) balance: {2}", displayName, agentID, GetFundsForAgentID(agentID));
+            MainConsole.Instance.Output("[MONEY]: {0} ({1}) balance: {2}", displayName, agentID, GetFundsForAgentID(agentID));
         }
 
         private void HandleMoneySet(string[] cmd)
@@ -1322,7 +1322,7 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
             }
 
             SendBalanceUpdateTo(agentID, UUID.Zero, agentID, true, "Console balance set", (int)TransactionType.SystemGenerated, amount);
-            MainConsole.Instance.OutputFormat("[MONEY]: Set {0} ({1}) balance to {2}", displayName, agentID, newBalance);
+            MainConsole.Instance.Output("[MONEY]: Set {0} ({1}) balance to {2}", displayName, agentID, newBalance);
         }
 
         private void HandleMoneyGive(string[] cmd, bool credit)
@@ -1337,13 +1337,13 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
             {
                 Credit(agentID, amount, (int)TransactionType.SystemGenerated, "Console credit");
                 SendBalanceUpdateTo(agentID, UUID.Zero, agentID, true, "Console credit", (int)TransactionType.SystemGenerated, amount);
-                MainConsole.Instance.OutputFormat("[MONEY]: Credited {0} to {1} ({2}); balance {3}", amount, displayName, agentID, GetFundsForAgentID(agentID));
+                MainConsole.Instance.Output("[MONEY]: Credited {0} to {1} ({2}); balance {3}", amount, displayName, agentID, GetFundsForAgentID(agentID));
             }
             else
             {
                 bool result = Debit(agentID, amount, out string reason, (int)TransactionType.SystemGenerated, "Console debit");
                 SendBalanceUpdateTo(agentID, agentID, UUID.Zero, result, result ? "Console debit" : reason, (int)TransactionType.SystemGenerated, amount);
-                MainConsole.Instance.OutputFormat(result
+                MainConsole.Instance.Output(result
                     ? "[MONEY]: Debited {0} from {1} ({2}); balance {3}"
                     : "[MONEY]: Could not debit {0} from {1} ({2}): {3}",
                     amount, displayName, agentID, result ? GetFundsForAgentID(agentID).ToString(CultureInfo.InvariantCulture) : reason);
@@ -1387,7 +1387,7 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
 
             bool result = TransferMoney(fromID, toID, amount, (int)TransactionType.SystemGenerated, "Console transfer", out string reason);
             BalanceUpdate(fromID, toID, result, result ? "Console transfer" : reason, (int)TransactionType.SystemGenerated, amount);
-            MainConsole.Instance.OutputFormat(result
+            MainConsole.Instance.Output(result
                 ? "[MONEY]: Transferred {0} from {1} ({2}) to {3} ({4})"
                 : "[MONEY]: Transfer of {0} failed from {1} ({2}) to {3} ({4}): {5}",
                 amount, fromName, fromID, toName, toID, reason);
@@ -1408,11 +1408,11 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
                 if (!string.IsNullOrEmpty(directory))
                     Directory.CreateDirectory(directory);
                 File.Copy(m_balanceStoragePath, path, true);
-                MainConsole.Instance.OutputFormat("[MONEY]: Exported ledger to {0}", path);
+                MainConsole.Instance.Output("[MONEY]: Exported ledger to {0}", path);
             }
             catch (Exception e)
             {
-                MainConsole.Instance.OutputFormat("[MONEY]: Export failed: {0}", e.Message);
+                MainConsole.Instance.Output("[MONEY]: Export failed: {0}", e.Message);
             }
         }
 
@@ -1429,7 +1429,7 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
             {
                 if (!File.Exists(path))
                 {
-                    MainConsole.Instance.OutputFormat("[MONEY]: Import file not found: {0}", path);
+                    MainConsole.Instance.Output("[MONEY]: Import file not found: {0}", path);
                     return;
                 }
 
@@ -1448,12 +1448,12 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
                     RecordTransactionLocked("import", UUID.Zero, UUID.Zero, imported.Count, (int)TransactionType.SystemGenerated, true, "Console ledger import from " + path, 0, 0);
                 }
 
-                MainConsole.Instance.OutputFormat("[MONEY]: Imported {0} balances from {1}", imported.Count, path);
-                MainConsole.Instance.OutputFormat("[MONEY]: Previous ledger backup: {0}", backup);
+                MainConsole.Instance.Output("[MONEY]: Imported {0} balances from {1}", imported.Count, path);
+                MainConsole.Instance.Output("[MONEY]: Previous ledger backup: {0}", backup);
             }
             catch (Exception e)
             {
-                MainConsole.Instance.OutputFormat("[MONEY]: Import failed: {0}", e.Message);
+                MainConsole.Instance.Output("[MONEY]: Import failed: {0}", e.Message);
             }
         }
 
@@ -1503,7 +1503,7 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
             UserAccount account = scene.UserAccountService.GetUserAccount(scene.RegionInfo.ScopeID, firstName, lastName);
             if (account == null)
             {
-                MainConsole.Instance.OutputFormat("[MONEY]: Avatar not found: {0}", value);
+                MainConsole.Instance.Output("[MONEY]: Avatar not found: {0}", value);
                 return false;
             }
 
