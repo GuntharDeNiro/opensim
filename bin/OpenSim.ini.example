@@ -1527,7 +1527,7 @@
     ;# {CurrencyBuyEnabled} {CurrencyPortalEnabled} {Allow wallet token purchases} {true false} true
     ; CurrencyBuyEnabled = true
 
-    ;# {CurrencyBuyMode} {CurrencyPortalEnabled} {How wallet token purchases are handled: grant credits immediately, request stores pending console approval, disabled hides purchases} {grant request disabled} grant
+    ;# {CurrencyBuyMode} {CurrencyPortalEnabled} {How wallet token purchases are handled: grant credits immediately, request stores pending console approval, paypal uses PayPal checkout/capture, disabled hides purchases} {grant request paypal disabled} grant
     ; CurrencyBuyMode = "grant"
 
     ;# {CurrencyPurchaseStorage} {CurrencyPortalEnabled} {TSV file for pending RegionWeb wallet purchase requests} {} Currency/regionweb-purchases.tsv
@@ -1550,6 +1550,30 @@
 
     ;# {CurrencyBuyLimit} {CurrencyPortalEnabled} {Maximum tokens purchasable in one RegionWeb wallet action} {} 100000
     ; CurrencyBuyLimit = 100000
+
+    ;# {PayPalEnabled} {CurrencyPortalEnabled} {Enable PayPal checkout for CurrencyBuyMode = paypal} {true false} false
+    ; PayPalEnabled = false
+
+    ;# {PayPalEnvironment} {PayPalEnabled} {PayPal API environment} {sandbox live} sandbox
+    ; PayPalEnvironment = "sandbox"
+
+    ;# {PayPalClientID} {PayPalEnabled} {PayPal REST app client id} {} ""
+    ; PayPalClientID = ""
+
+    ;# {PayPalClientSecret} {PayPalEnabled} {PayPal REST app client secret} {} ""
+    ; PayPalClientSecret = ""
+
+    ;# {PayPalCurrencyCode} {PayPalEnabled} {PayPal checkout currency code} {} EUR
+    ; PayPalCurrencyCode = "EUR"
+
+    ;# {PayPalPricePerToken} {PayPalEnabled} {Fiat price per one local currency token} {} 0.01
+    ; PayPalPricePerToken = "0.01"
+
+    ;# {PayPalReturnBaseUrl} {PayPalEnabled} {Public RegionWeb base URL used for PayPal return/cancel callbacks, for example https://example.com/regionweb} {} ""
+    ; PayPalReturnBaseUrl = ""
+
+    ;# {PayPalOrderStorage} {PayPalEnabled} {TSV file for RegionWeb PayPal checkout order audit} {} Currency/regionweb-paypal-orders.tsv
+    ; PayPalOrderStorage = "Currency/regionweb-paypal-orders.tsv"
 
 
 [TextBuild]

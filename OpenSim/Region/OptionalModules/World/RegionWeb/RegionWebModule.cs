@@ -37,6 +37,7 @@ using log4net;
 using Mono.Addins;
 using Nini.Config;
 using OpenMetaverse;
+using OpenMetaverse.StructuredData;
 using OpenSim.Framework;
 using OpenSim.Framework.Console;
 using OpenSim.Framework.Servers;
@@ -70,10 +71,12 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private const string CurrencySessionCookie = "RegionWebCurrency";
         private readonly object m_currencyAuthLock = new object();
         private readonly object m_currencyPurchaseLock = new object();
+        private readonly object m_currencyPayPalLock = new object();
         private readonly Dictionary<string, CurrencyLoginChallenge> m_currencyChallenges = new Dictionary<string, CurrencyLoginChallenge>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, CurrencyWebSession> m_currencySessions = new Dictionary<string, CurrencyWebSession>(StringComparer.Ordinal);
         private readonly Dictionary<UUID, DateTime> m_currencyLastChallengeUTCByAgent = new Dictionary<UUID, DateTime>();
         private readonly Dictionary<string, CurrencyPurchaseRequest> m_currencyPurchaseRequests = new Dictionary<string, CurrencyPurchaseRequest>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, CurrencyPayPalOrder> m_currencyPayPalOrders = new Dictionary<string, CurrencyPayPalOrder>(StringComparer.OrdinalIgnoreCase);
 
         private bool m_enabled;
         private bool m_handlerRegistered;
@@ -84,6 +87,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private bool m_currencyPortalEnabled = true;
         private bool m_currencyBuyEnabled = true;
         private bool m_currencyTransferEnabled = true;
+        private bool m_payPalEnabled;
         private int m_postsPerPage;
         private int m_currencyChallengeMinutes = 10;
         private int m_currencyChallengeCooldownSeconds = 20;
@@ -95,8 +99,16 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private string m_contentDirectory = "RegionWeb";
         private string m_currencyBuyMode = "grant";
         private string m_currencyPurchaseStoragePath = "Currency/regionweb-purchases.tsv";
+        private string m_payPalEnvironment = "sandbox";
+        private string m_payPalClientID = string.Empty;
+        private string m_payPalClientSecret = string.Empty;
+        private string m_payPalCurrencyCode = "EUR";
+        private string m_payPalReturnBaseUrl = string.Empty;
+        private string m_payPalOrderStoragePath = "Currency/regionweb-paypal-orders.tsv";
         private string m_absoluteContentDirectory;
         private string m_absoluteCurrencyPurchaseStoragePath;
+        private string m_absolutePayPalOrderStoragePath;
+        private decimal m_payPalPricePerToken = 0.01m;
 
         public string Name { get { return "RegionWebModule"; } }
 
@@ -126,6 +138,14 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             m_currencyBuyLimit = Math.Max(1, config.GetInt("CurrencyBuyLimit", 100000));
             m_currencyBuyMode = NormalizeCurrencyBuyMode(config.GetString("CurrencyBuyMode", "grant"));
             m_currencyPurchaseStoragePath = config.GetString("CurrencyPurchaseStorage", "Currency/regionweb-purchases.tsv").Trim();
+            m_payPalEnabled = config.GetBoolean("PayPalEnabled", false);
+            m_payPalEnvironment = NormalizePayPalEnvironment(config.GetString("PayPalEnvironment", "sandbox"));
+            m_payPalClientID = config.GetString("PayPalClientID", string.Empty).Trim();
+            m_payPalClientSecret = config.GetString("PayPalClientSecret", string.Empty).Trim();
+            m_payPalCurrencyCode = NormalizePayPalCurrency(config.GetString("PayPalCurrencyCode", "EUR"));
+            m_payPalPricePerToken = ParsePositiveDecimal(config.GetString("PayPalPricePerToken", "0.01"), 0.01m);
+            m_payPalReturnBaseUrl = config.GetString("PayPalReturnBaseUrl", string.Empty).Trim();
+            m_payPalOrderStoragePath = config.GetString("PayPalOrderStorage", "Currency/regionweb-paypal-orders.tsv").Trim();
             m_defaultEstateTitle = config.GetString("EstateTitle", "OpenSimulator Estate").Trim();
             if (string.IsNullOrEmpty(m_defaultEstateTitle))
                 m_defaultEstateTitle = "OpenSimulator Estate";
@@ -134,6 +154,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 m_contentDirectory = "RegionWeb";
             if (string.IsNullOrEmpty(m_currencyPurchaseStoragePath))
                 m_currencyPurchaseStoragePath = "Currency/regionweb-purchases.tsv";
+            if (string.IsNullOrEmpty(m_payPalOrderStoragePath))
+                m_payPalOrderStoragePath = "Currency/regionweb-paypal-orders.tsv";
 
             m_absoluteContentDirectory = Path.IsPathRooted(m_contentDirectory)
                 ? m_contentDirectory
@@ -141,6 +163,9 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             m_absoluteCurrencyPurchaseStoragePath = Path.IsPathRooted(m_currencyPurchaseStoragePath)
                 ? m_currencyPurchaseStoragePath
                 : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, m_currencyPurchaseStoragePath);
+            m_absolutePayPalOrderStoragePath = Path.IsPathRooted(m_payPalOrderStoragePath)
+                ? m_payPalOrderStoragePath
+                : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, m_payPalOrderStoragePath);
         }
 
         public void PostInitialise()
@@ -154,6 +179,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 if (m_autoCreateContent)
                     EnsureEstateContent();
                 LoadCurrencyPurchaseRequests();
+                LoadCurrencyPayPalOrders();
 
                 IHttpServer server = MainServer.GetHttpServer(0);
                 server.AddSimpleStreamHandler(new SimpleStreamHandler(m_basePath, HandleRequest, "RegionWeb"));
@@ -257,6 +283,9 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             lock (m_currencyPurchaseLock)
                 m_currencyPurchaseRequests.Clear();
+
+            lock (m_currencyPayPalLock)
+                m_currencyPayPalOrders.Clear();
         }
 
         private void AddOrUpdateScene(Scene scene)
@@ -632,6 +661,27 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             CurrencyWebSession session = GetCurrencySession(request);
 
+            if (!isPost && adminPath && parts.Length >= 3)
+            {
+                if (!IsCurrencyAdminSession(session))
+                {
+                    SendCurrencyAdminLogin(response, "Login before downloading admin exports.", FormValue(form, "avatar"));
+                    return;
+                }
+
+                if (parts[2].Equals("requests.csv", StringComparison.OrdinalIgnoreCase))
+                {
+                    SendCurrencyAdminRequestsCsv(response);
+                    return;
+                }
+
+                if (parts[2].Equals("balances.csv", StringComparison.OrdinalIgnoreCase))
+                {
+                    SendCurrencyAdminBalancesCsv(response);
+                    return;
+                }
+            }
+
             if (!isPost && action.Equals("statement.csv", StringComparison.OrdinalIgnoreCase))
             {
                 if (session == null)
@@ -641,6 +691,30 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 }
 
                 SendCurrencyStatementCsv(response, session);
+                return;
+            }
+
+            if (!isPost && action.Equals("paypal-return", StringComparison.OrdinalIgnoreCase))
+            {
+                if (session == null)
+                {
+                    SendCurrencyLogin(response, "Login again, then reopen the PayPal return URL to finish the token purchase.", FormValue(form, "avatar"));
+                    return;
+                }
+
+                HandleCurrencyPayPalReturn(session, form, response);
+                return;
+            }
+
+            if (!isPost && action.Equals("paypal-cancel", StringComparison.OrdinalIgnoreCase))
+            {
+                if (session == null)
+                {
+                    SendCurrencyLogin(response, "PayPal checkout was cancelled. Login again to return to the wallet.", FormValue(form, "avatar"));
+                    return;
+                }
+
+                HandleCurrencyPayPalCancel(session, form, response);
                 return;
             }
 
@@ -730,7 +804,15 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 string message;
                 string severity;
                 if (ValidateCurrencyCsrf(session, form, out message))
+                {
+                    if (m_currencyBuyMode.Equals("paypal", StringComparison.OrdinalIgnoreCase))
+                    {
+                        HandleCurrencyPayPalBuy(session, form, response);
+                        return;
+                    }
+
                     HandleCurrencyBuy(session, form, out message, out severity);
+                }
                 else
                     severity = "error";
                 SendCurrencyDashboard(response, session, message, severity);
@@ -1109,6 +1191,12 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             if (!TryParsePositiveAmount(FormValue(form, "amount"), m_currencyBuyLimit, out int amount, out message))
                 return;
 
+            if (m_currencyBuyMode.Equals("paypal", StringComparison.OrdinalIgnoreCase))
+            {
+                message = "PayPal purchases must start from the wallet checkout button.";
+                return;
+            }
+
             if (m_currencyBuyMode.Equals("request", StringComparison.OrdinalIgnoreCase))
             {
                 CurrencyPurchaseRequest request = CreateCurrencyPurchaseRequest(session, amount);
@@ -1136,6 +1224,144 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             {
                 message = string.IsNullOrWhiteSpace(reason) ? "Token purchase failed." : reason;
             }
+        }
+
+        private void HandleCurrencyPayPalBuy(CurrencyWebSession session, Dictionary<string, string> form, IOSHttpResponse response)
+        {
+            string message;
+            if (!m_currencyBuyEnabled || m_currencyBuyMode.Equals("disabled", StringComparison.OrdinalIgnoreCase))
+            {
+                SendCurrencyDashboard(response, session, "Token purchases are disabled on this RegionWeb portal.", "error");
+                return;
+            }
+
+            if (!TryParsePositiveAmount(FormValue(form, "amount"), m_currencyBuyLimit, out int amount, out message))
+            {
+                SendCurrencyDashboard(response, session, message, "error");
+                return;
+            }
+
+            if (!IsPayPalConfigured(out string configReason))
+            {
+                SendCurrencyDashboard(response, session, configReason, "error");
+                return;
+            }
+
+            decimal fiatAmount = Decimal.Round(m_payPalPricePerToken * amount, 2, MidpointRounding.AwayFromZero);
+            if (fiatAmount <= 0m)
+            {
+                SendCurrencyDashboard(response, session, "PayPalPricePerToken produces a zero checkout amount.", "error");
+                return;
+            }
+
+            CurrencyPayPalOrder order = new CurrencyPayPalOrder
+            {
+                LocalID = GenerateCurrencyPayPalOrderID(),
+                AgentID = session.AgentID,
+                DisplayName = session.DisplayName,
+                TokenAmount = amount,
+                FiatAmount = fiatAmount,
+                CurrencyCode = m_payPalCurrencyCode,
+                Status = "creating",
+                CreatedUTC = DateTime.UtcNow,
+                UpdatedUTC = DateTime.UtcNow,
+                Note = string.Empty
+            };
+
+            if (!CreatePayPalOrder(order, out string approvalUrl, out string reason))
+            {
+                order.Status = "failed";
+                order.UpdatedUTC = DateTime.UtcNow;
+                order.Note = reason;
+                StoreCurrencyPayPalOrder(order);
+                SendCurrencyDashboard(response, session, string.IsNullOrWhiteSpace(reason) ? "PayPal order creation failed." : reason, "error");
+                return;
+            }
+
+            order.Status = "created";
+            order.UpdatedUTC = DateTime.UtcNow;
+            StoreCurrencyPayPalOrder(order);
+            NotifyCurrencyAvatar(session.AgentID, "RegionWeb PayPal checkout " + order.LocalID + " created for "
+                + amount.ToString(CultureInfo.InvariantCulture) + " tokens.");
+            response.Redirect(approvalUrl, HttpStatusCode.Redirect);
+        }
+
+        private void HandleCurrencyPayPalReturn(CurrencyWebSession session, Dictionary<string, string> form, IOSHttpResponse response)
+        {
+            string orderID = FormValue(form, "token");
+            string localID = FormValue(form, "local");
+            CurrencyPayPalOrder order = FindCurrencyPayPalOrder(orderID, localID);
+            if (order == null)
+            {
+                SendCurrencyDashboard(response, session, "PayPal order not found in RegionWeb storage.", "error");
+                return;
+            }
+
+            if (order.AgentID != session.AgentID)
+            {
+                SendCurrencyDashboard(response, session, "PayPal order belongs to a different avatar session.", "error");
+                return;
+            }
+
+            if ((order.Status ?? string.Empty).Equals("completed", StringComparison.OrdinalIgnoreCase))
+            {
+                SendCurrencyDashboard(response, session, "PayPal order " + order.LocalID + " was already completed.", "ok");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(order.PayPalOrderID))
+            {
+                SendCurrencyDashboard(response, session, "PayPal order has no remote order id.", "error");
+                return;
+            }
+
+            bool alreadyCaptured = (order.Status ?? string.Empty).Equals("capture_pending_credit", StringComparison.OrdinalIgnoreCase);
+            if (!alreadyCaptured)
+            {
+                MarkCurrencyPayPalOrder(order.LocalID, "capturing", "Capture requested from PayPal return.");
+                if (!CapturePayPalOrder(order.PayPalOrderID, out string captureReason))
+                {
+                    MarkCurrencyPayPalOrder(order.LocalID, "capture_failed", captureReason);
+                    SendCurrencyDashboard(response, session, string.IsNullOrWhiteSpace(captureReason) ? "PayPal capture failed." : captureReason, "error");
+                    return;
+                }
+            }
+
+            IMoneyModule money = GetCurrencyMoneyModule();
+            if (money == null)
+            {
+                MarkCurrencyPayPalOrder(order.LocalID, "capture_pending_credit", "PayPal captured, but currency module is not active.");
+                SendCurrencyDashboard(response, session, "PayPal payment captured, but the currency module is not active. Admin can credit from the order log.", "error");
+                return;
+            }
+
+            if (!InvokeWebBuyCurrency(money, order.AgentID, order.TokenAmount, out string creditReason))
+            {
+                string failure = string.IsNullOrWhiteSpace(creditReason) ? "Currency credit failed after PayPal capture." : creditReason;
+                MarkCurrencyPayPalOrder(order.LocalID, "capture_pending_credit", failure);
+                SendCurrencyDashboard(response, session, failure, "error");
+                return;
+            }
+
+            MarkCurrencyPayPalOrder(order.LocalID, "completed", "PayPal captured and tokens credited.");
+            NotifyCurrencyAvatar(session.AgentID, "RegionWeb PayPal checkout " + order.LocalID + " completed: "
+                + order.TokenAmount.ToString(CultureInfo.InvariantCulture) + " tokens credited.");
+            SendCurrencyDashboard(response, session, "PayPal payment captured. Credited "
+                + order.TokenAmount.ToString(CultureInfo.InvariantCulture) + " tokens.", "ok");
+        }
+
+        private void HandleCurrencyPayPalCancel(CurrencyWebSession session, Dictionary<string, string> form, IOSHttpResponse response)
+        {
+            string orderID = FormValue(form, "token");
+            string localID = FormValue(form, "local");
+            CurrencyPayPalOrder order = FindCurrencyPayPalOrder(orderID, localID);
+            if (order != null && order.AgentID == session.AgentID
+                && !(order.Status ?? string.Empty).Equals("completed", StringComparison.OrdinalIgnoreCase))
+            {
+                MarkCurrencyPayPalOrder(order.LocalID, "cancelled", "User cancelled PayPal approval.");
+            }
+
+            SendCurrencyDashboard(response, session, "PayPal checkout cancelled.", "ok");
         }
 
         private void HandleCurrencyTransfer(CurrencyWebSession session, Dictionary<string, string> form, out string message, out string severity)
@@ -1289,16 +1515,24 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                         .Append("<label>Amount<input name=\"amount\" type=\"number\" min=\"1\" max=\"")
                         .Append(m_currencyBuyLimit.ToString(CultureInfo.InvariantCulture)).Append("\" required></label>")
                         .Append("<button type=\"submit\">")
-                        .Append(m_currencyBuyMode.Equals("request", StringComparison.OrdinalIgnoreCase) ? "Request tokens" : "Buy tokens")
+                        .Append(m_currencyBuyMode.Equals("request", StringComparison.OrdinalIgnoreCase) ? "Request tokens"
+                            : (m_currencyBuyMode.Equals("paypal", StringComparison.OrdinalIgnoreCase) ? "Pay with PayPal" : "Buy tokens"))
                         .Append("</button></form>");
                     if (m_currencyBuyMode.Equals("request", StringComparison.OrdinalIgnoreCase))
                         html.Append("<p class=\"wallet-note\">This creates a pending purchase request for estate staff approval from the console.</p>");
+                    else if (m_currencyBuyMode.Equals("paypal", StringComparison.OrdinalIgnoreCase))
+                        html.Append("<p class=\"wallet-note\">Checkout uses PayPal, then credits the local simulator ledger after payment capture. Price: ")
+                            .Append(Html(m_payPalPricePerToken.ToString("0.00##", CultureInfo.InvariantCulture))).Append(" ")
+                            .Append(Html(m_payPalCurrencyCode)).Append(" per token.</p>");
                     else
                         html.Append("<p class=\"wallet-note\">This credits the local simulator ledger and updates the viewer-visible balance.</p>");
                 }
                 else
                 {
-                    html.Append("<p class=\"wallet-note\">Token purchases are disabled on this portal.</p>");
+                    if (m_currencyBuyMode.Equals("paypal", StringComparison.OrdinalIgnoreCase) && !IsPayPalConfigured(out string payPalReason))
+                        html.Append("<p class=\"wallet-note\">").Append(Html(payPalReason)).Append("</p>");
+                    else
+                        html.Append("<p class=\"wallet-note\">Token purchases are disabled on this portal.</p>");
                 }
                 html.Append("</article>");
 
@@ -1354,6 +1588,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             else
             {
                 AppendCurrencyAdminRequests(html, session);
+                AppendCurrencyAdminPayPalOrders(html);
 
                 html.Append("<section class=\"wallet-grid\"><article class=\"wallet-card\"><h2>Set balance</h2>")
                     .Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/admin\">")
@@ -1477,6 +1712,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     .ToList();
 
             html.Append("<section class=\"wallet-card wallet-statement\"><h2>Pending purchase requests</h2>");
+            html.Append("<p class=\"wallet-note\"><a href=\"").Append(Html(m_basePath))
+                .Append("/currency/admin/requests.csv\">Download requests CSV</a></p>");
             if (pending.Count == 0)
             {
                 html.Append("<p class=\"wallet-note\">No pending token purchase requests.</p></section>");
@@ -1507,10 +1744,42 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             html.Append("</tbody></table></div></section>");
         }
 
+        private void AppendCurrencyAdminPayPalOrders(StringBuilder html)
+        {
+            List<CurrencyPayPalOrder> orders;
+            lock (m_currencyPayPalLock)
+                orders = m_currencyPayPalOrders.Values
+                    .OrderByDescending(r => r.CreatedUTC)
+                    .Take(20)
+                    .ToList();
+
+            if (orders.Count == 0)
+                return;
+
+            html.Append("<section class=\"wallet-card wallet-statement\"><h2>Recent PayPal checkouts</h2>")
+                .Append("<div class=\"wallet-table\"><table><thead><tr><th>Date</th><th>ID</th><th>Avatar</th><th>Tokens</th><th>Payment</th><th>Status</th><th>Note</th></tr></thead><tbody>");
+            foreach (CurrencyPayPalOrder order in orders)
+            {
+                html.Append("<tr><td>")
+                    .Append(Html(order.CreatedUTC.ToLocalTime().ToString("dd MMM HH:mm", CultureInfo.InvariantCulture))).Append("</td><td>")
+                    .Append(Html(order.LocalID)).Append("<br><span>").Append(Html(order.PayPalOrderID)).Append("</span></td><td>")
+                    .Append(Html(order.DisplayName)).Append("</td><td>")
+                    .Append(order.TokenAmount.ToString(CultureInfo.InvariantCulture)).Append("</td><td>")
+                    .Append(Html(order.FiatAmount.ToString("0.00", CultureInfo.InvariantCulture))).Append(' ')
+                    .Append(Html(order.CurrencyCode)).Append("</td><td>")
+                    .Append(Html(order.Status)).Append("</td><td>")
+                    .Append(Html(order.Note)).Append("</td></tr>");
+            }
+
+            html.Append("</tbody></table></div></section>");
+        }
+
         private void AppendCurrencyAdminBalances(StringBuilder html, IMoneyModule money)
         {
             List<Dictionary<string, string>> rows = GetCurrencyBalances(money, 50);
             html.Append("<section class=\"wallet-card wallet-statement\"><h2>Top balances</h2>");
+            html.Append("<p class=\"wallet-note\"><a href=\"").Append(Html(m_basePath))
+                .Append("/currency/admin/balances.csv\">Download balances CSV</a></p>");
             if (rows.Count == 0)
             {
                 html.Append("<p class=\"wallet-note\">No balance rows yet.</p></section>");
@@ -1572,6 +1841,72 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             response.StatusCode = (int)HttpStatusCode.OK;
             response.ContentType = "text/csv";
             response.AddHeader("Content-Disposition", "attachment; filename=\"currency-statement-" + MakeSlug(session.DisplayName) + ".csv\"");
+            response.RawBuffer = Encoding.UTF8.GetBytes(csv.ToString());
+        }
+
+        private void SendCurrencyAdminRequestsCsv(IOSHttpResponse response)
+        {
+            List<CurrencyPurchaseRequest> requests;
+            lock (m_currencyPurchaseLock)
+                requests = m_currencyPurchaseRequests.Values
+                    .OrderByDescending(r => r.RequestedUTC)
+                    .ToList();
+
+            StringBuilder csv = new StringBuilder();
+            csv.Append("request_id,requested_utc,local_time,agent_id,display_name,amount,status,updated_utc,operator,note\n");
+            foreach (CurrencyPurchaseRequest request in requests)
+            {
+                csv.Append(Csv(request.RequestID)).Append(',')
+                    .Append(Csv(request.RequestedUTC.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture))).Append(',')
+                    .Append(Csv(request.RequestedUTC.ToLocalTime().ToString("dd MMM HH:mm", CultureInfo.InvariantCulture))).Append(',')
+                    .Append(Csv(request.AgentID.ToString())).Append(',')
+                    .Append(Csv(request.DisplayName)).Append(',')
+                    .Append(request.Amount.ToString(CultureInfo.InvariantCulture)).Append(',')
+                    .Append(Csv(request.Status)).Append(',')
+                    .Append(Csv(request.UpdatedUTC.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture))).Append(',')
+                    .Append(Csv(request.OperatorName)).Append(',')
+                    .Append(Csv(request.Note)).Append('\n');
+            }
+
+            response.StatusCode = (int)HttpStatusCode.OK;
+            response.ContentType = "text/csv";
+            response.AddHeader("Content-Disposition", "attachment; filename=\"currency-admin-requests.csv\"");
+            response.RawBuffer = Encoding.UTF8.GetBytes(csv.ToString());
+        }
+
+        private void SendCurrencyAdminBalancesCsv(IOSHttpResponse response)
+        {
+            IMoneyModule money = GetCurrencyMoneyModule();
+            if (money == null)
+            {
+                response.StatusCode = (int)HttpStatusCode.ServiceUnavailable;
+                response.ContentType = "text/plain";
+                response.RawBuffer = Encoding.UTF8.GetBytes("Currency module is not active.");
+                return;
+            }
+
+            List<Dictionary<string, string>> rows = GetCurrencyBalances(money, 10000);
+            StringBuilder csv = new StringBuilder();
+            csv.Append("agent_id,display_name,balance\n");
+            foreach (Dictionary<string, string> row in rows)
+            {
+                string agentText = RowValue(row, "agent_id");
+                string displayName = agentText;
+                if (UUID.TryParse(agentText, out UUID agentID))
+                {
+                    string resolved = LookupAvatarName(agentID);
+                    if (!string.IsNullOrWhiteSpace(resolved))
+                        displayName = resolved;
+                }
+
+                csv.Append(Csv(agentText)).Append(',')
+                    .Append(Csv(displayName)).Append(',')
+                    .Append(Csv(RowValue(row, "balance"))).Append('\n');
+            }
+
+            response.StatusCode = (int)HttpStatusCode.OK;
+            response.ContentType = "text/csv";
+            response.AddHeader("Content-Disposition", "attachment; filename=\"currency-admin-balances.csv\"");
             response.RawBuffer = Encoding.UTF8.GetBytes(csv.ToString());
         }
 
@@ -1884,6 +2219,288 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             }
 
             return rows;
+        }
+
+        private bool IsPayPalConfigured(out string reason)
+        {
+            reason = string.Empty;
+            if (!m_payPalEnabled)
+            {
+                reason = "PayPal checkout is disabled. Set PayPalEnabled = true in [RegionWeb].";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(m_payPalClientID) || string.IsNullOrWhiteSpace(m_payPalClientSecret))
+            {
+                reason = "PayPal checkout needs PayPalClientID and PayPalClientSecret in [RegionWeb].";
+                return false;
+            }
+
+            if (!IsAbsoluteWebUrl(GetCurrencyPublicBaseUrl()))
+            {
+                reason = "PayPal checkout needs PayPalReturnBaseUrl set to the public RegionWeb URL, for example https://example.com/regionweb.";
+                return false;
+            }
+
+            if (m_payPalPricePerToken <= 0m)
+            {
+                reason = "PayPalPricePerToken must be greater than zero.";
+                return false;
+            }
+
+            return true;
+        }
+
+        private bool CreatePayPalOrder(CurrencyPayPalOrder order, out string approvalUrl, out string reason)
+        {
+            approvalUrl = string.Empty;
+            reason = string.Empty;
+
+            if (!GetPayPalAccessToken(out string accessToken, out reason))
+                return false;
+
+            string publicBase = GetCurrencyPublicBaseUrl().TrimEnd('/');
+            string returnUrl = publicBase + "/currency/paypal-return?local=" + Url(order.LocalID);
+            string cancelUrl = publicBase + "/currency/paypal-cancel?local=" + Url(order.LocalID);
+            string amount = order.FiatAmount.ToString("0.00", CultureInfo.InvariantCulture);
+            string description = "RegionWeb wallet tokens for " + order.DisplayName;
+            string customID = order.AgentID + ":" + order.TokenAmount.ToString(CultureInfo.InvariantCulture) + ":" + order.LocalID;
+
+            string body =
+                "{"
+                + "\"intent\":\"CAPTURE\","
+                + "\"purchase_units\":[{"
+                + "\"reference_id\":\"" + Json(order.LocalID) + "\","
+                + "\"description\":\"" + Json(description) + "\","
+                + "\"custom_id\":\"" + Json(customID) + "\","
+                + "\"amount\":{\"currency_code\":\"" + Json(order.CurrencyCode) + "\",\"value\":\"" + Json(amount) + "\"}"
+                + "}],"
+                + "\"application_context\":{"
+                + "\"brand_name\":\"RegionWeb\","
+                + "\"landing_page\":\"LOGIN\","
+                + "\"user_action\":\"PAY_NOW\","
+                + "\"return_url\":\"" + Json(returnUrl) + "\","
+                + "\"cancel_url\":\"" + Json(cancelUrl) + "\""
+                + "}"
+                + "}";
+
+            if (!PayPalPost("/v2/checkout/orders", body, "application/json", accessToken, out string responseText, out reason))
+                return false;
+
+            if (!TryParseJsonMap(responseText, out OSDMap map, out reason))
+                return false;
+
+            if (!map.TryGetValue("id", out OSD idOSD) || string.IsNullOrWhiteSpace(idOSD.AsString()))
+            {
+                reason = "PayPal order response did not include an order id.";
+                return false;
+            }
+
+            order.PayPalOrderID = idOSD.AsString();
+            approvalUrl = ExtractPayPalApprovalUrl(map);
+            if (string.IsNullOrWhiteSpace(approvalUrl))
+            {
+                reason = "PayPal order response did not include an approval URL.";
+                return false;
+            }
+
+            return true;
+        }
+
+        private bool CapturePayPalOrder(string paypalOrderID, out string reason)
+        {
+            reason = string.Empty;
+            if (string.IsNullOrWhiteSpace(paypalOrderID))
+            {
+                reason = "PayPal order id is empty.";
+                return false;
+            }
+
+            if (!GetPayPalAccessToken(out string accessToken, out reason))
+                return false;
+
+            string path = "/v2/checkout/orders/" + Url(paypalOrderID) + "/capture";
+            if (!PayPalPost(path, "{}", "application/json", accessToken, out string responseText, out reason))
+                return false;
+
+            if (!TryParseJsonMap(responseText, out OSDMap map, out reason))
+                return false;
+
+            if (map.TryGetValue("status", out OSD statusOSD)
+                && statusOSD.AsString().Equals("COMPLETED", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            reason = "PayPal capture did not return COMPLETED status.";
+            return false;
+        }
+
+        private bool GetPayPalAccessToken(out string accessToken, out string reason)
+        {
+            accessToken = string.Empty;
+            reason = string.Empty;
+            string credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes(m_payPalClientID + ":" + m_payPalClientSecret));
+            if (!PayPalPost("/v1/oauth2/token", "grant_type=client_credentials", "application/x-www-form-urlencoded", "Basic " + credentials, out string responseText, out reason))
+                return false;
+
+            if (!TryParseJsonMap(responseText, out OSDMap map, out reason))
+                return false;
+
+            if (!map.TryGetValue("access_token", out OSD tokenOSD) || string.IsNullOrWhiteSpace(tokenOSD.AsString()))
+            {
+                reason = "PayPal OAuth response did not include an access token.";
+                return false;
+            }
+
+            accessToken = tokenOSD.AsString();
+            return true;
+        }
+
+        private bool PayPalPost(string path, string body, string contentType, string authorization, out string responseText, out string reason)
+        {
+            responseText = string.Empty;
+            reason = string.Empty;
+
+            try
+            {
+                string url = GetPayPalBaseUrl().TrimEnd('/') + path;
+                HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+                request.Method = "POST";
+                request.ContentType = contentType;
+                request.Accept = "application/json";
+                request.Timeout = 20000;
+                request.ReadWriteTimeout = 20000;
+                if (!string.IsNullOrWhiteSpace(authorization))
+                {
+                    if (authorization.StartsWith("Basic ", StringComparison.Ordinal) || authorization.StartsWith("Bearer ", StringComparison.Ordinal))
+                        request.Headers.Add("Authorization", authorization);
+                    else
+                        request.Headers.Add("Authorization", "Bearer " + authorization);
+                }
+
+                byte[] payload = Encoding.UTF8.GetBytes(body ?? string.Empty);
+                request.ContentLength = payload.Length;
+                using (Stream stream = request.GetRequestStream())
+                    stream.Write(payload, 0, payload.Length);
+
+                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                {
+                    responseText = ReadHttpResponse(response);
+                    int code = (int)response.StatusCode;
+                    if (code >= 200 && code < 300)
+                        return true;
+
+                    reason = "PayPal returned HTTP " + code.ToString(CultureInfo.InvariantCulture) + ".";
+                    return false;
+                }
+            }
+            catch (WebException e)
+            {
+                if (e.Response is HttpWebResponse response)
+                {
+                    responseText = ReadHttpResponse(response);
+                    reason = "PayPal returned HTTP " + ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture)
+                        + (string.IsNullOrWhiteSpace(responseText) ? string.Empty : ": " + TrimForLog(responseText, 240));
+                    return false;
+                }
+
+                reason = "PayPal request failed: " + e.Message;
+                return false;
+            }
+            catch (Exception e)
+            {
+                reason = "PayPal request failed: " + e.Message;
+                return false;
+            }
+        }
+
+        private static string ReadHttpResponse(HttpWebResponse response)
+        {
+            if (response == null)
+                return string.Empty;
+
+            using (Stream stream = response.GetResponseStream())
+            {
+                if (stream == null)
+                    return string.Empty;
+
+                using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
+                    return reader.ReadToEnd();
+            }
+        }
+
+        private static bool TryParseJsonMap(string json, out OSDMap map, out string reason)
+        {
+            map = null;
+            reason = string.Empty;
+
+            try
+            {
+                map = OSDParser.DeserializeJson(json ?? string.Empty) as OSDMap;
+            }
+            catch (Exception e)
+            {
+                reason = "Could not parse PayPal JSON response: " + e.Message;
+                return false;
+            }
+
+            if (map == null)
+            {
+                reason = "PayPal JSON response was not an object.";
+                return false;
+            }
+
+            return true;
+        }
+
+        private static string ExtractPayPalApprovalUrl(OSDMap map)
+        {
+            if (map == null || !map.TryGetValue("links", out OSD linksOSD) || !(linksOSD is OSDArray links))
+                return string.Empty;
+
+            foreach (OSD item in links)
+            {
+                if (!(item is OSDMap link))
+                    continue;
+
+                string rel = link.TryGetValue("rel", out OSD relOSD) ? relOSD.AsString() : string.Empty;
+                if (!rel.Equals("approve", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (link.TryGetValue("href", out OSD hrefOSD))
+                    return hrefOSD.AsString();
+            }
+
+            return string.Empty;
+        }
+
+        private string GetPayPalBaseUrl()
+        {
+            return m_payPalEnvironment.Equals("live", StringComparison.OrdinalIgnoreCase)
+                ? "https://api-m.paypal.com"
+                : "https://api-m.sandbox.paypal.com";
+        }
+
+        private string GetCurrencyPublicBaseUrl()
+        {
+            string configured = (m_payPalReturnBaseUrl ?? string.Empty).Trim().TrimEnd('/');
+            if (IsAbsoluteWebUrl(configured))
+                return configured;
+
+            foreach (Scene scene in GetSceneSnapshot())
+            {
+                string serverURI = (scene.RegionInfo.ServerURI ?? string.Empty).Trim().TrimEnd('/');
+                if (IsAbsoluteWebUrl(serverURI))
+                    return serverURI + m_basePath;
+            }
+
+            return string.Empty;
+        }
+
+        private static bool IsAbsoluteWebUrl(string value)
+        {
+            return Uri.TryCreate(value, UriKind.Absolute, out Uri uri)
+                && (uri.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase)
+                    || uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase));
         }
 
         private bool TryParsePositiveAmount(string text, int maxAmount, out int amount, out string reason)
@@ -2199,19 +2816,58 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 + "-" + UUID.Random().ToString().Replace("-", string.Empty).Substring(0, 6).ToUpperInvariant();
         }
 
+        private static string GenerateCurrencyPayPalOrderID()
+        {
+            return "PP" + DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture)
+                + "-" + UUID.Random().ToString().Replace("-", string.Empty).Substring(0, 6).ToUpperInvariant();
+        }
+
         private static string NormalizeCurrencyBuyMode(string value)
         {
             string mode = (value ?? string.Empty).Trim().ToLowerInvariant();
             if (mode == "request" || mode == "approval" || mode == "approve")
                 return "request";
+            if (mode == "paypal" || mode == "pay-pal" || mode == "checkout")
+                return "paypal";
             if (mode == "disabled" || mode == "disable" || mode == "off" || mode == "false")
                 return "disabled";
             return "grant";
         }
 
+        private static string NormalizePayPalEnvironment(string value)
+        {
+            string mode = (value ?? string.Empty).Trim().ToLowerInvariant();
+            return mode == "live" || mode == "production" ? "live" : "sandbox";
+        }
+
+        private static string NormalizePayPalCurrency(string value)
+        {
+            string currency = (value ?? string.Empty).Trim().ToUpperInvariant();
+            if (currency.Length != 3 || currency.Any(c => c < 'A' || c > 'Z'))
+                return "EUR";
+            return currency;
+        }
+
+        private static decimal ParsePositiveDecimal(string value, decimal fallback)
+        {
+            if (decimal.TryParse((value ?? string.Empty).Trim(), NumberStyles.Number, CultureInfo.InvariantCulture, out decimal parsed)
+                && parsed > 0m)
+                return parsed;
+
+            if (decimal.TryParse((value ?? string.Empty).Trim(), NumberStyles.Number, CultureInfo.CurrentCulture, out parsed)
+                && parsed > 0m)
+                return parsed;
+
+            return fallback;
+        }
+
         private bool IsCurrencyBuyAvailable()
         {
-            return m_currencyBuyEnabled && !m_currencyBuyMode.Equals("disabled", StringComparison.OrdinalIgnoreCase);
+            if (!m_currencyBuyEnabled || m_currencyBuyMode.Equals("disabled", StringComparison.OrdinalIgnoreCase))
+                return false;
+            if (m_currencyBuyMode.Equals("paypal", StringComparison.OrdinalIgnoreCase))
+                return IsPayPalConfigured(out _);
+            return true;
         }
 
         private void NotifyCurrencyAvatar(UUID agentID, string message)
@@ -2271,6 +2927,50 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             bool mustQuote = value.IndexOfAny(new[] { ',', '"', '\r', '\n' }) >= 0;
             string escaped = value.Replace("\"", "\"\"");
             return mustQuote ? "\"" + escaped + "\"" : escaped;
+        }
+
+        private static string Json(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return string.Empty;
+
+            StringBuilder escaped = new StringBuilder(value.Length + 8);
+            foreach (char c in value)
+            {
+                switch (c)
+                {
+                    case '\\':
+                        escaped.Append("\\\\");
+                        break;
+                    case '"':
+                        escaped.Append("\\\"");
+                        break;
+                    case '\r':
+                        escaped.Append("\\r");
+                        break;
+                    case '\n':
+                        escaped.Append("\\n");
+                        break;
+                    case '\t':
+                        escaped.Append("\\t");
+                        break;
+                    default:
+                        if (c < ' ')
+                            escaped.Append("\\u").Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
+                        else
+                            escaped.Append(c);
+                        break;
+                }
+            }
+
+            return escaped.ToString();
+        }
+
+        private static string TrimForLog(string value, int maxLength)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+                return value ?? string.Empty;
+            return value.Substring(0, Math.Max(0, maxLength)) + "...";
         }
 
         private void LoadCurrencyPurchaseRequests()
@@ -2359,6 +3059,152 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             catch (Exception e)
             {
                 m_log.WarnFormat("[REGION WEB]: Could not save currency purchase requests to {0}: {1}", m_absoluteCurrencyPurchaseStoragePath, e.Message);
+            }
+        }
+
+        private void LoadCurrencyPayPalOrders()
+        {
+            lock (m_currencyPayPalLock)
+            {
+                m_currencyPayPalOrders.Clear();
+
+                if (string.IsNullOrWhiteSpace(m_absolutePayPalOrderStoragePath)
+                    || !File.Exists(m_absolutePayPalOrderStoragePath))
+                    return;
+
+                try
+                {
+                    foreach (string line in File.ReadAllLines(m_absolutePayPalOrderStoragePath))
+                    {
+                        if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#", StringComparison.Ordinal))
+                            continue;
+
+                        string[] parts = line.Split('\t');
+                        if (parts.Length < 11 || !UUID.TryParse(parts[2], out UUID agentID))
+                            continue;
+
+                        if (!int.TryParse(parts[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out int tokenAmount))
+                            continue;
+
+                        if (!decimal.TryParse(parts[5], NumberStyles.Number, CultureInfo.InvariantCulture, out decimal fiatAmount))
+                            fiatAmount = 0m;
+
+                        DateTime createdUTC;
+                        DateTime updatedUTC;
+                        if (!DateTime.TryParse(parts[8], CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out createdUTC))
+                            createdUTC = DateTime.UtcNow;
+                        if (!DateTime.TryParse(parts[9], CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out updatedUTC))
+                            updatedUTC = createdUTC;
+
+                        CurrencyPayPalOrder order = new CurrencyPayPalOrder
+                        {
+                            LocalID = parts[0],
+                            PayPalOrderID = parts[1],
+                            AgentID = agentID,
+                            DisplayName = parts[3],
+                            TokenAmount = tokenAmount,
+                            FiatAmount = fiatAmount,
+                            CurrencyCode = string.IsNullOrWhiteSpace(parts[6]) ? m_payPalCurrencyCode : parts[6],
+                            Status = string.IsNullOrWhiteSpace(parts[7]) ? "created" : parts[7],
+                            CreatedUTC = createdUTC.ToUniversalTime(),
+                            UpdatedUTC = updatedUTC.ToUniversalTime(),
+                            Note = parts[10]
+                        };
+
+                        if (!string.IsNullOrWhiteSpace(order.LocalID))
+                            m_currencyPayPalOrders[order.LocalID] = order;
+                    }
+                }
+                catch (Exception e)
+                {
+                    m_log.WarnFormat("[REGION WEB]: Could not load PayPal currency orders from {0}: {1}", m_absolutePayPalOrderStoragePath, e.Message);
+                }
+            }
+        }
+
+        private void StoreCurrencyPayPalOrder(CurrencyPayPalOrder order)
+        {
+            if (order == null || string.IsNullOrWhiteSpace(order.LocalID))
+                return;
+
+            lock (m_currencyPayPalLock)
+            {
+                m_currencyPayPalOrders[order.LocalID] = order;
+                SaveCurrencyPayPalOrdersLocked();
+            }
+        }
+
+        private CurrencyPayPalOrder FindCurrencyPayPalOrder(string paypalOrderID, string localID)
+        {
+            lock (m_currencyPayPalLock)
+            {
+                if (!string.IsNullOrWhiteSpace(localID)
+                    && m_currencyPayPalOrders.TryGetValue(localID, out CurrencyPayPalOrder byLocal))
+                    return byLocal;
+
+                if (!string.IsNullOrWhiteSpace(paypalOrderID))
+                {
+                    foreach (CurrencyPayPalOrder order in m_currencyPayPalOrders.Values)
+                    {
+                        if ((order.PayPalOrderID ?? string.Empty).Equals(paypalOrderID, StringComparison.OrdinalIgnoreCase))
+                            return order;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private void MarkCurrencyPayPalOrder(string localID, string status, string note)
+        {
+            if (string.IsNullOrWhiteSpace(localID))
+                return;
+
+            lock (m_currencyPayPalLock)
+            {
+                if (!m_currencyPayPalOrders.TryGetValue(localID, out CurrencyPayPalOrder order))
+                    return;
+
+                order.Status = status ?? order.Status;
+                order.Note = note ?? string.Empty;
+                order.UpdatedUTC = DateTime.UtcNow;
+                SaveCurrencyPayPalOrdersLocked();
+            }
+        }
+
+        private void SaveCurrencyPayPalOrdersLocked()
+        {
+            if (string.IsNullOrWhiteSpace(m_absolutePayPalOrderStoragePath))
+                return;
+
+            try
+            {
+                string directory = Path.GetDirectoryName(m_absolutePayPalOrderStoragePath);
+                if (!string.IsNullOrEmpty(directory))
+                    Directory.CreateDirectory(directory);
+
+                StringBuilder rows = new StringBuilder();
+                rows.Append("# local_id\tpaypal_order_id\tagent_id\tdisplay_name\ttokens\tfiat_amount\tcurrency\tstatus\tcreated_utc\tupdated_utc\tnote\n");
+                foreach (CurrencyPayPalOrder order in m_currencyPayPalOrders.Values.OrderBy(r => r.CreatedUTC))
+                {
+                    rows.Append(Tsv(order.LocalID)).Append('\t')
+                        .Append(Tsv(order.PayPalOrderID)).Append('\t')
+                        .Append(order.AgentID).Append('\t')
+                        .Append(Tsv(order.DisplayName)).Append('\t')
+                        .Append(order.TokenAmount.ToString(CultureInfo.InvariantCulture)).Append('\t')
+                        .Append(order.FiatAmount.ToString("0.00", CultureInfo.InvariantCulture)).Append('\t')
+                        .Append(Tsv(order.CurrencyCode)).Append('\t')
+                        .Append(Tsv(order.Status)).Append('\t')
+                        .Append(order.CreatedUTC.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture)).Append('\t')
+                        .Append(order.UpdatedUTC.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture)).Append('\t')
+                        .Append(Tsv(order.Note)).Append('\n');
+                }
+
+                File.WriteAllText(m_absolutePayPalOrderStoragePath, rows.ToString(), Encoding.UTF8);
+            }
+            catch (Exception e)
+            {
+                m_log.WarnFormat("[REGION WEB]: Could not save PayPal currency orders to {0}: {1}", m_absolutePayPalOrderStoragePath, e.Message);
             }
         }
 
@@ -2859,6 +3705,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Usage.Add("Estate owners can open /regionweb/currency/admin, request an inworld admin token and manage pending token requests plus avatar balances.");
                     content.Usage.Add("Use CurrencyBuyEnabled, CurrencyTransferEnabled, CurrencyChallengeCooldownSeconds, CurrencyStatementLimit and CurrencyBuyLimit in [RegionWeb] to tune the wallet.");
                     content.Usage.Add("Set CurrencyBuyMode = request if purchases should become pending wallet requests instead of immediate credits.");
+                    content.Usage.Add("Set CurrencyBuyMode = paypal plus PayPalEnabled, PayPalClientID, PayPalClientSecret, PayPalCurrencyCode, PayPalPricePerToken and PayPalReturnBaseUrl to route wallet token purchases through PayPal Checkout before crediting the local ledger.");
+                    content.Usage.Add("From /regionweb/currency/admin, use requests.csv and balances.csv to export pending purchase requests and avatar balances for external audit.");
                     content.Usage.Add("Use regionweb currency pending, regionweb currency approve <request-id> and regionweb currency deny <request-id> to manage pending wallet purchase requests from the simulator console.");
                     content.Usage.Add("Restart the region after changing economy settings, then log in or request the balance in the viewer to receive the latest MoneyBalanceReply.");
                     content.Notes.Add("Balances are local to this simulator/grid configuration and are intended for estate/gameplay currency, not real-money production payment processing.");
@@ -2868,6 +3716,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Notes.Add("RegionWeb region pages show live economy totals when this local money module is active, and the wallet login uses a one-time inworld token instead of trusting only a typed avatar name.");
                     content.Notes.Add("Wallet buy, transfer and logout forms are protected by a session CSRF token, and the statement can be downloaded as CSV.");
                     content.Notes.Add("Pending wallet purchase requests are stored in CurrencyPurchaseStorage as TSV so they survive simulator restarts.");
+                    content.Notes.Add("PayPal checkout orders are stored in PayPalOrderStorage as TSV; tokens are credited only after the PayPal order capture returns completed.");
                     break;
 
                 case "viewer-polish":
@@ -4345,6 +5194,21 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             public string Status;
             public DateTime UpdatedUTC;
             public string OperatorName;
+            public string Note;
+        }
+
+        private class CurrencyPayPalOrder
+        {
+            public string LocalID;
+            public string PayPalOrderID;
+            public UUID AgentID;
+            public string DisplayName;
+            public int TokenAmount;
+            public decimal FiatAmount;
+            public string CurrencyCode;
+            public string Status;
+            public DateTime CreatedUTC;
+            public DateTime UpdatedUTC;
             public string Note;
         }
 
