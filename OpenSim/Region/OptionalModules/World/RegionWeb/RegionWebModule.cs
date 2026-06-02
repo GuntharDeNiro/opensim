@@ -71,6 +71,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private readonly object m_currencyAuthLock = new object();
         private readonly Dictionary<string, CurrencyLoginChallenge> m_currencyChallenges = new Dictionary<string, CurrencyLoginChallenge>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, CurrencyWebSession> m_currencySessions = new Dictionary<string, CurrencyWebSession>(StringComparer.Ordinal);
+        private readonly Dictionary<UUID, DateTime> m_currencyLastChallengeUTCByAgent = new Dictionary<UUID, DateTime>();
 
         private bool m_enabled;
         private bool m_handlerRegistered;
@@ -79,8 +80,11 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private bool m_showStats;
         private bool m_showParcels;
         private bool m_currencyPortalEnabled = true;
+        private bool m_currencyBuyEnabled = true;
+        private bool m_currencyTransferEnabled = true;
         private int m_postsPerPage;
         private int m_currencyChallengeMinutes = 10;
+        private int m_currencyChallengeCooldownSeconds = 20;
         private int m_currencySessionHours = 12;
         private int m_currencyStatementLimit = 30;
         private int m_currencyBuyLimit = 100000;
@@ -108,7 +112,10 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             m_showParcels = config.GetBoolean("ShowParcels", true);
             m_postsPerPage = Math.Max(1, config.GetInt("PostsPerPage", 5));
             m_currencyPortalEnabled = config.GetBoolean("CurrencyPortalEnabled", true);
+            m_currencyBuyEnabled = config.GetBoolean("CurrencyBuyEnabled", true);
+            m_currencyTransferEnabled = config.GetBoolean("CurrencyTransferEnabled", true);
             m_currencyChallengeMinutes = Math.Max(1, config.GetInt("CurrencyChallengeMinutes", 10));
+            m_currencyChallengeCooldownSeconds = Math.Max(0, config.GetInt("CurrencyChallengeCooldownSeconds", 20));
             m_currencySessionHours = Math.Max(1, config.GetInt("CurrencySessionHours", 12));
             m_currencyStatementLimit = Math.Max(1, config.GetInt("CurrencyStatementLimit", 30));
             m_currencyBuyLimit = Math.Max(1, config.GetInt("CurrencyBuyLimit", 100000));
@@ -208,6 +215,13 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             {
                 m_scenesByID.Clear();
                 m_regionIDsBySlug.Clear();
+            }
+
+            lock (m_currencyAuthLock)
+            {
+                m_currencyChallenges.Clear();
+                m_currencySessions.Clear();
+                m_currencyLastChallengeUTCByAgent.Clear();
             }
         }
 
@@ -522,8 +536,26 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             CurrencyWebSession session = GetCurrencySession(request);
 
+            if (!isPost && action.Equals("statement.csv", StringComparison.OrdinalIgnoreCase))
+            {
+                if (session == null)
+                {
+                    SendCurrencyLogin(response, "Login before downloading the statement.", FormValue(form, "avatar"));
+                    return;
+                }
+
+                SendCurrencyStatementCsv(response, session);
+                return;
+            }
+
             if (action.Equals("logout", StringComparison.OrdinalIgnoreCase))
             {
+                if (session != null && !ValidateCurrencyCsrf(session, form, out string csrfMessage))
+                {
+                    SendCurrencyDashboard(response, session, csrfMessage, "error");
+                    return;
+                }
+
                 string sessionToken = ReadCookie(request, CurrencySessionCookie);
                 if (!string.IsNullOrEmpty(sessionToken))
                 {
@@ -558,7 +590,10 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             {
                 string message;
                 string severity;
-                HandleCurrencyBuy(session, form, out message, out severity);
+                if (ValidateCurrencyCsrf(session, form, out message))
+                    HandleCurrencyBuy(session, form, out message, out severity);
+                else
+                    severity = "error";
                 SendCurrencyDashboard(response, session, message, severity);
                 return;
             }
@@ -567,7 +602,10 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             {
                 string message;
                 string severity;
-                HandleCurrencyTransfer(session, form, out message, out severity);
+                if (ValidateCurrencyCsrf(session, form, out message))
+                    HandleCurrencyTransfer(session, form, out message, out severity);
+                else
+                    severity = "error";
                 SendCurrencyDashboard(response, session, message, severity);
                 return;
             }
@@ -595,6 +633,14 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             lock (m_currencyAuthLock)
             {
                 CleanupCurrencyAuthLocked();
+                if (m_currencyChallengeCooldownSeconds > 0
+                    && m_currencyLastChallengeUTCByAgent.TryGetValue(agentID, out DateTime lastChallengeUTC)
+                    && (DateTime.UtcNow - lastChallengeUTC).TotalSeconds < m_currencyChallengeCooldownSeconds)
+                {
+                    SendCurrencyLogin(response, "Token already sent recently. Wait a few seconds before requesting another one.", displayName);
+                    return;
+                }
+
                 m_currencyChallenges[token] = new CurrencyLoginChallenge
                 {
                     AgentID = agentID,
@@ -602,6 +648,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     Token = token,
                     ExpiresUTC = expires
                 };
+                m_currencyLastChallengeUTCByAgent[agentID] = DateTime.UtcNow;
             }
 
             string message = "RegionWeb wallet login token for " + displayName + ": " + token
@@ -658,6 +705,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             {
                 AgentID = agentID,
                 DisplayName = challenge.DisplayName,
+                CsrfToken = GenerateCurrencySessionToken(),
                 ExpiresUTC = DateTime.UtcNow.AddHours(m_currencySessionHours)
             };
 
@@ -674,6 +722,12 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private void HandleCurrencyBuy(CurrencyWebSession session, Dictionary<string, string> form, out string message, out string severity)
         {
             severity = "error";
+            if (!m_currencyBuyEnabled)
+            {
+                message = "Token purchases are disabled on this RegionWeb portal.";
+                return;
+            }
+
             if (!TryParsePositiveAmount(FormValue(form, "amount"), m_currencyBuyLimit, out int amount, out message))
                 return;
 
@@ -698,6 +752,12 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private void HandleCurrencyTransfer(CurrencyWebSession session, Dictionary<string, string> form, out string message, out string severity)
         {
             severity = "error";
+            if (!m_currencyTransferEnabled)
+            {
+                message = "Wallet transfers are disabled on this RegionWeb portal.";
+                return;
+            }
+
             if (!TryParsePositiveAmount(FormValue(form, "amount"), 0, out int amount, out message))
                 return;
 
@@ -798,27 +858,47 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             }
             else
             {
-                html.Append("<section class=\"wallet-grid\"><article class=\"wallet-card\"><h2>Buy tokens</h2>")
-                    .Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/\">")
-                    .Append("<input type=\"hidden\" name=\"action\" value=\"buy\">")
-                    .Append("<label>Amount<input name=\"amount\" type=\"number\" min=\"1\" max=\"")
-                    .Append(m_currencyBuyLimit.ToString(CultureInfo.InvariantCulture)).Append("\" required></label>")
-                    .Append("<button type=\"submit\">Buy tokens</button></form>")
-                    .Append("<p class=\"wallet-note\">This credits the local simulator ledger and updates the viewer-visible balance.</p></article>");
+                html.Append("<section class=\"wallet-grid\"><article class=\"wallet-card\"><h2>Buy tokens</h2>");
+                if (m_currencyBuyEnabled)
+                {
+                    html.Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/\">")
+                        .Append("<input type=\"hidden\" name=\"action\" value=\"buy\">")
+                        .Append("<input type=\"hidden\" name=\"csrf\" value=\"").Append(Html(session.CsrfToken)).Append("\">")
+                        .Append("<label>Amount<input name=\"amount\" type=\"number\" min=\"1\" max=\"")
+                        .Append(m_currencyBuyLimit.ToString(CultureInfo.InvariantCulture)).Append("\" required></label>")
+                        .Append("<button type=\"submit\">Buy tokens</button></form>")
+                        .Append("<p class=\"wallet-note\">This credits the local simulator ledger and updates the viewer-visible balance.</p>");
+                }
+                else
+                {
+                    html.Append("<p class=\"wallet-note\">Token purchases are disabled on this portal.</p>");
+                }
+                html.Append("</article>");
 
-                html.Append("<article class=\"wallet-card\"><h2>Transfer</h2>")
-                    .Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/\">")
-                    .Append("<input type=\"hidden\" name=\"action\" value=\"transfer\">")
-                    .Append("<label>Recipient avatar<input name=\"recipient\" required placeholder=\"First Last\"></label>")
-                    .Append("<label>Amount<input name=\"amount\" type=\"number\" min=\"1\" required></label>")
-                    .Append("<label>Description<input name=\"description\" maxlength=\"160\" placeholder=\"Optional note\"></label>")
-                    .Append("<button type=\"submit\">Transfer tokens</button></form></article></section>");
+                html.Append("<article class=\"wallet-card\"><h2>Transfer</h2>");
+                if (m_currencyTransferEnabled)
+                {
+                    html.Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/\">")
+                        .Append("<input type=\"hidden\" name=\"action\" value=\"transfer\">")
+                        .Append("<input type=\"hidden\" name=\"csrf\" value=\"").Append(Html(session.CsrfToken)).Append("\">")
+                        .Append("<label>Recipient avatar<input name=\"recipient\" required placeholder=\"First Last\"></label>")
+                        .Append("<label>Amount<input name=\"amount\" type=\"number\" min=\"1\" required></label>")
+                        .Append("<label>Description<input name=\"description\" maxlength=\"160\" placeholder=\"Optional note\"></label>")
+                        .Append("<button type=\"submit\">Transfer tokens</button></form>");
+                }
+                else
+                {
+                    html.Append("<p class=\"wallet-note\">Avatar-to-avatar wallet transfers are disabled on this portal.</p>");
+                }
+                html.Append("</article></section>");
 
                 AppendCurrencyStatement(html, money, session.AgentID);
             }
 
             html.Append("<form class=\"wallet-logout\" method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/\">")
-                .Append("<input type=\"hidden\" name=\"action\" value=\"logout\"><button type=\"submit\">Logout</button></form>")
+                .Append("<input type=\"hidden\" name=\"action\" value=\"logout\">")
+                .Append("<input type=\"hidden\" name=\"csrf\" value=\"").Append(Html(session.CsrfToken)).Append("\">")
+                .Append("<button type=\"submit\">Logout</button></form>")
                 .Append("</main>").Append(EndPage());
             SendHtml(response, html.ToString());
         }
@@ -833,6 +913,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 return;
             }
 
+            html.Append("<p class=\"wallet-note\"><a href=\"").Append(Html(m_basePath))
+                .Append("/currency/statement.csv\">Download CSV statement</a></p>");
             html.Append("<div class=\"wallet-table\"><table><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Balance</th><th>Description</th></tr></thead><tbody>");
             string agentText = agentID.ToString();
             foreach (Dictionary<string, string> row in rows)
@@ -857,6 +939,44 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             html.Append("</tbody></table></div></section>");
         }
 
+        private void SendCurrencyStatementCsv(IOSHttpResponse response, CurrencyWebSession session)
+        {
+            IMoneyModule money = GetCurrencyMoneyModule();
+            if (money == null)
+            {
+                response.StatusCode = (int)HttpStatusCode.ServiceUnavailable;
+                response.ContentType = "text/plain";
+                response.RawBuffer = Encoding.UTF8.GetBytes("Currency module is not active.");
+                return;
+            }
+
+            List<Dictionary<string, string>> rows = GetCurrencyStatement(money, session.AgentID);
+            StringBuilder csv = new StringBuilder();
+            csv.Append("utc,local_time,action,direction,amount,balance,description,source,destination,success\n");
+            string agentText = session.AgentID.ToString();
+            foreach (Dictionary<string, string> row in rows)
+            {
+                string source = RowValue(row, "source");
+                string destination = RowValue(row, "destination");
+                string direction = GetCurrencyDirection(agentText, source, destination);
+                csv.Append(Csv(RowValue(row, "utc"))).Append(',')
+                    .Append(Csv(FormatUtc(RowValue(row, "utc")))).Append(',')
+                    .Append(Csv(RowValue(row, "action"))).Append(',')
+                    .Append(Csv(direction)).Append(',')
+                    .Append(Csv(RowValue(row, "amount"))).Append(',')
+                    .Append(Csv(RowValue(row, "balance"))).Append(',')
+                    .Append(Csv(RowValue(row, "description"))).Append(',')
+                    .Append(Csv(source)).Append(',')
+                    .Append(Csv(destination)).Append(',')
+                    .Append(Csv(RowValue(row, "success"))).Append('\n');
+            }
+
+            response.StatusCode = (int)HttpStatusCode.OK;
+            response.ContentType = "text/csv";
+            response.AddHeader("Content-Disposition", "attachment; filename=\"currency-statement-" + MakeSlug(session.DisplayName) + ".csv\"");
+            response.RawBuffer = Encoding.UTF8.GetBytes(csv.ToString());
+        }
+
         private void AppendCurrencyMessage(StringBuilder html, string message, string severity)
         {
             if (string.IsNullOrWhiteSpace(message))
@@ -865,6 +985,20 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             string css = string.IsNullOrWhiteSpace(severity) ? "ok" : severity;
             html.Append("<p class=\"wallet-message ").Append(Html(css)).Append("\">")
                 .Append(Html(message)).Append("</p>");
+        }
+
+        private static bool ValidateCurrencyCsrf(CurrencyWebSession session, Dictionary<string, string> form, out string message)
+        {
+            message = string.Empty;
+            string token = FormValue(form, "csrf");
+            if (session == null || string.IsNullOrEmpty(session.CsrfToken)
+                || !session.CsrfToken.Equals(token, StringComparison.Ordinal))
+            {
+                message = "Security token expired. Reload the wallet page and try again.";
+                return false;
+            }
+
+            return true;
         }
 
         private IMoneyModule GetCurrencyMoneyModule()
@@ -1004,6 +1138,19 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             }
             foreach (string token in expiredSessions)
                 m_currencySessions.Remove(token);
+
+            if (m_currencyChallengeCooldownSeconds > 0)
+            {
+                double keepSeconds = Math.Max(3600, m_currencyChallengeCooldownSeconds * 4);
+                List<UUID> oldRequests = new List<UUID>();
+                foreach (KeyValuePair<UUID, DateTime> entry in m_currencyLastChallengeUTCByAgent)
+                {
+                    if ((now - entry.Value).TotalSeconds > keepSeconds)
+                        oldRequests.Add(entry.Key);
+                }
+                foreach (UUID agentID in oldRequests)
+                    m_currencyLastChallengeUTCByAgent.Remove(agentID);
+            }
         }
 
         private void SetCurrencySessionCookie(IOSHttpResponse response, string token, DateTime expiresUTC)
@@ -1217,11 +1364,32 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             return string.Empty;
         }
 
+        private static string GetCurrencyDirection(string agentText, string source, string destination)
+        {
+            if (destination.Equals(agentText, StringComparison.OrdinalIgnoreCase)
+                && !source.Equals(agentText, StringComparison.OrdinalIgnoreCase))
+                return "credit";
+            if (source.Equals(agentText, StringComparison.OrdinalIgnoreCase)
+                && !destination.Equals(agentText, StringComparison.OrdinalIgnoreCase))
+                return "debit";
+            return "internal";
+        }
+
         private static string FormatUtc(string value)
         {
             if (DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out DateTime parsed))
                 return parsed.ToLocalTime().ToString("dd MMM HH:mm", CultureInfo.InvariantCulture);
             return value;
+        }
+
+        private static string Csv(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return string.Empty;
+
+            bool mustQuote = value.IndexOfAny(new[] { ',', '"', '\r', '\n' }) >= 0;
+            string escaped = value.Replace("\"", "\"\"");
+            return mustQuote ? "\"" + escaped + "\"" : escaped;
         }
 
         private static void AppendScriptCompatibilitySummary(StringBuilder html, ScriptFunctionDoc[] docs)
@@ -1711,12 +1879,14 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Usage.Add("Set the LoginService Currency value to the viewer-facing currency name you want users to see beside their balance.");
                     content.Usage.Add("Use console commands such as money show, money balance, money set, money give, money take, money transfer, money export and money import for estate administration.");
                     content.Usage.Add("Open /regionweb/currency/ for the reserved avatar wallet area: users request an inworld token, log in on RegionWeb, view balance/statement, buy tokens and transfer to another avatar.");
+                    content.Usage.Add("Use CurrencyBuyEnabled, CurrencyTransferEnabled, CurrencyChallengeCooldownSeconds, CurrencyStatementLimit and CurrencyBuyLimit in [RegionWeb] to tune the wallet.");
                     content.Usage.Add("Restart the region after changing economy settings, then log in or request the balance in the viewer to receive the latest MoneyBalanceReply.");
                     content.Notes.Add("Balances are local to this simulator/grid configuration and are intended for estate/gameplay currency, not real-money production payment processing.");
                     content.Notes.Add("Scripted llGiveMoney and llTransferLindenDollars still require owner-granted PERMISSION_DEBIT before money leaves the object owner.");
                     content.Notes.Add("Object payments trigger the normal money event path, so in-world vendors and donation jars can react when the viewer pays an object.");
                     content.Notes.Add("Land/object purchases and upload/group charges use the same ledger, so users see the result immediately in the viewer balance.");
                     content.Notes.Add("RegionWeb region pages show live economy totals when this local money module is active, and the wallet login uses a one-time inworld token instead of trusting only a typed avatar name.");
+                    content.Notes.Add("Wallet buy, transfer and logout forms are protected by a session CSRF token, and the statement can be downloaded as CSV.");
                     break;
 
                 case "viewer-polish":
@@ -3178,6 +3348,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         {
             public UUID AgentID;
             public string DisplayName;
+            public string CsrfToken;
             public DateTime ExpiresUTC;
         }
 

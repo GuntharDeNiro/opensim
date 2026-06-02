@@ -1524,8 +1524,17 @@
     ;; balance, statement, token purchases and avatar-to-avatar transfers.
     ; CurrencyPortalEnabled = true
 
+    ;# {CurrencyBuyEnabled} {CurrencyPortalEnabled} {Allow wallet token purchases} {true false} true
+    ; CurrencyBuyEnabled = true
+
+    ;# {CurrencyTransferEnabled} {CurrencyPortalEnabled} {Allow wallet avatar-to-avatar transfers} {true false} true
+    ; CurrencyTransferEnabled = true
+
     ;# {CurrencyChallengeMinutes} {CurrencyPortalEnabled} {Minutes before an inworld wallet login token expires} {} 10
     ; CurrencyChallengeMinutes = 10
+
+    ;# {CurrencyChallengeCooldownSeconds} {CurrencyPortalEnabled} {Minimum seconds between inworld token requests for the same avatar} {} 20
+    ; CurrencyChallengeCooldownSeconds = 20
 
     ;# {CurrencySessionHours} {CurrencyPortalEnabled} {Hours before a wallet web session expires} {} 12
     ; CurrencySessionHours = 12
