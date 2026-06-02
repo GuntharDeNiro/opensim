@@ -41,10 +41,10 @@ using static OpenMetaverse.Primitive.RenderMaterials;
 using OpenMetaverse.StructuredData;
 
 using OpenSim.Framework;
-using OpenSim.Framework.Capabilities;
 using OpenSim.Framework.Servers.HttpServer;
 using OpenSim.Region.Framework.Interfaces;
 using OpenSim.Region.Framework.Scenes;
+using OpenSimCaps = global::OpenSim.Framework.Capabilities.Caps;
 
 using Ionic.Zlib;
 
@@ -234,7 +234,7 @@ namespace OpenSim.Region.OptionalModules.Materials
             }
         }
 
-        private void OnRegisterCaps(UUID agentID, Caps caps)
+        private void OnRegisterCaps(UUID agentID, OpenSimCaps caps)
         {
             caps.RegisterSimpleHandler("RenderMaterials", 
                 new SimpleStreamHandler("/" + UUID.Random(),

@@ -3821,7 +3821,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 return 0;
             }
 
-            if (!World.TryGetScenePresence(toID, out _) &&
+            bool destinationInScene = World.TryGetScenePresence(toID, out ScenePresence destinationPresence) && destinationPresence is not null;
+            if (!destinationInScene &&
                     (m_userAccountService is null || m_userAccountService.GetUserAccount(RegionScopeID, toID) is null))
             {
                 Error("llGiveMoney", "Destination avatar not found");
@@ -12463,13 +12464,14 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public LSL_List llGetStaticPath(LSL_Vector start, LSL_Vector end, LSL_Float radius, LSL_List parameters)
         {
-            if (!TryGetDirectNavPoint(start, radius, false, out Vector3 startPoint))
+            float navRadius = (float)radius;
+            if (!TryGetDirectNavPoint(start, navRadius, false, out Vector3 startPoint))
                 return new LSL_List(new LSL_Integer(ScriptBaseClass.PU_FAILURE_INVALID_START));
 
-            if (!TryGetDirectNavPoint(end, radius, false, out Vector3 endPoint))
+            if (!TryGetDirectNavPoint(end, navRadius, false, out Vector3 endPoint))
                 return new LSL_List(new LSL_Integer(ScriptBaseClass.PU_FAILURE_INVALID_GOAL));
 
-            if (!TryBuildNavPath(startPoint, endPoint, (float)radius, out List<Vector3> path))
+            if (!TryBuildNavPath(startPoint, endPoint, navRadius, out List<Vector3> path))
                 return new LSL_List(new LSL_Integer(ScriptBaseClass.PU_FAILURE_UNREACHABLE));
 
             LSL_List result = new(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED));
