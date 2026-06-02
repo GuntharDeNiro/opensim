@@ -39,6 +39,20 @@ For your current server, do not pass `-InstallFreshRegions`. The standalone
 switcher will only replace `OpenSim.ini`, and it will leave your existing
 `Regions\Regions.ini` untouched.
 
+Databases
+---------
+
+The standalone Hypergrid profile includes and switches
+`config-include\storage\SQLiteStandalone.ini` to dedicated SQLite files under
+`bin\StandaloneHG\`. It also writes the local currency balance, transaction,
+wallet-request and PayPal-order files under `bin\StandaloneHG\Currency\`. That
+keeps standalone users, inventory, assets, friends and local currency state
+separate from the OSGrid profile.
+
+The capture command stores your current `OpenSim.ini` and current
+`config-include\storage\SQLiteStandalone.ini` under `config-profiles\osgrid\`.
+The OSGrid switch restores both files when that captured storage profile exists.
+
 For a new clean lab only, you can install the sample region too:
 
 ```powershell

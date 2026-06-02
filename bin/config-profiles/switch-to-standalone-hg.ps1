@@ -10,6 +10,10 @@ $BinRoot = Split-Path -Parent $ProfileRoot
 $BackupDir = Join-Path $ProfileRoot "backups"
 $Template = Join-Path $ProfileRoot "standalone-hg\OpenSim.ini"
 $Target = Join-Path $BinRoot "OpenSim.ini"
+$StorageTemplate = Join-Path $ProfileRoot "standalone-hg\config-include\storage\SQLiteStandalone.ini"
+$StorageTarget = Join-Path $BinRoot "config-include\storage\SQLiteStandalone.ini"
+$StandaloneDatabaseDir = Join-Path $BinRoot "StandaloneHG"
+$StandaloneCurrencyDir = Join-Path $StandaloneDatabaseDir "Currency"
 $RegionTemplate = Join-Path $ProfileRoot "standalone-hg\Regions\Regions.ini"
 $RegionTargetDir = Join-Path $BinRoot "Regions"
 $RegionTarget = Join-Path $RegionTargetDir "Regions.ini"
@@ -45,6 +49,16 @@ if ($openSimIni.Contains("CHANGE_ME_PUBLIC_HOST")) {
 Backup-File $Target
 Set-Content -Encoding UTF8 -Path $Target -Value $openSimIni
 
+if (-not (Test-Path $StorageTemplate)) {
+    throw "Cannot find standalone storage profile $StorageTemplate."
+}
+
+New-Item -ItemType Directory -Force -Path $StandaloneDatabaseDir | Out-Null
+New-Item -ItemType Directory -Force -Path $StandaloneCurrencyDir | Out-Null
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $StorageTarget) | Out-Null
+Backup-File $StorageTarget
+Copy-Item -Force $StorageTemplate $StorageTarget
+
 if ($InstallFreshRegions) {
     if (-not (Test-Path $RegionTemplate)) {
         throw "Cannot find sample region template $RegionTemplate."
@@ -63,6 +77,7 @@ if ($InstallFreshRegions) {
 }
 
 Write-Host "Switched OpenSim.ini to standalone Hypergrid."
+Write-Host "Switched SQLite and currency storage to dedicated bin\StandaloneHG files."
 Write-Host "Hypergrid address:"
 if ($HostName.Trim().Length -gt 0) {
     Write-Host "  http://$($HostName.Trim()):9000/"
