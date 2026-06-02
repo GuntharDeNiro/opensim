@@ -644,7 +644,10 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             }
 
             if (m_showStats)
+            {
                 AppendStats(html, stats);
+                AppendEconomy(html, scene);
+            }
 
             if (m_showParcels && stats.Parcels.Count > 0)
                 AppendParcels(html, stats);
@@ -963,13 +966,16 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Usage.Add("Enable the economy module with economymodule = BetaGridLikeMoneyModule in [Economy].");
                     content.Usage.Add("Set InitialBalance to the amount a new avatar should receive the first time they appear in the ledger.");
                     content.Usage.Add("Set BalanceStorage to choose where the persistent TSV balance ledger is stored; relative paths live under the OpenSim bin folder.");
+                    content.Usage.Add("Set TransactionLog and AuditEnabled to control the TSV transaction audit trail.");
                     content.Usage.Add("Keep AllowNegativeBalances = false for normal viewer currency behavior unless you deliberately want overdraft-style testing.");
                     content.Usage.Add("Set the LoginService Currency value to the viewer-facing currency name you want users to see beside their balance.");
+                    content.Usage.Add("Use console commands such as money show, money balance, money set, money give, money take, money transfer, money export and money import for estate administration.");
                     content.Usage.Add("Restart the region after changing economy settings, then log in or request the balance in the viewer to receive the latest MoneyBalanceReply.");
                     content.Notes.Add("Balances are local to this simulator/grid configuration and are intended for estate/gameplay currency, not real-money production payment processing.");
                     content.Notes.Add("Scripted llGiveMoney and llTransferLindenDollars still require owner-granted PERMISSION_DEBIT before money leaves the object owner.");
                     content.Notes.Add("Object payments trigger the normal money event path, so in-world vendors and donation jars can react when the viewer pays an object.");
                     content.Notes.Add("Land/object purchases and upload/group charges use the same ledger, so users see the result immediately in the viewer balance.");
+                    content.Notes.Add("RegionWeb region pages show live economy totals when this local money module is active.");
                     break;
 
                 case "viewer-polish":
@@ -1366,6 +1372,35 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 .Append(Stat("Parcels", stats.ParcelCount.ToString(CultureInfo.InvariantCulture)))
                 .Append(Stat("Sim FPS", stats.SimFPS.ToString("0.0", CultureInfo.InvariantCulture)))
                 .Append("</dl></section>");
+        }
+
+        private void AppendEconomy(StringBuilder html, Scene scene)
+        {
+            IMoneyModule money = scene.RequestModuleInterface<IMoneyModule>();
+            if (money == null)
+                return;
+
+            MethodInfo method = money.GetType().GetMethod("GetCurrencyStats", BindingFlags.Public | BindingFlags.Instance);
+            if (method == null)
+                return;
+
+            IDictionary<string, string> stats;
+            try
+            {
+                stats = method.Invoke(money, null) as IDictionary<string, string>;
+            }
+            catch
+            {
+                return;
+            }
+
+            if (stats == null || stats.Count == 0)
+                return;
+
+            html.Append("<section class=\"stats\"><h2>Economy</h2><dl>");
+            foreach (KeyValuePair<string, string> entry in stats)
+                html.Append(Stat(entry.Key, entry.Value));
+            html.Append("</dl></section>");
         }
 
         private void AppendParcels(StringBuilder html, RegionWebStats stats)

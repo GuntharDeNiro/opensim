@@ -28,8 +28,11 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
 using System.Net;
 using System.Reflection;
+using System.Text;
 using log4net;
 using Nini.Config;
 using Nwc.XmlRpc;
@@ -37,6 +40,7 @@ using Mono.Addins;
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
 using OpenSim.Framework;
+using OpenSim.Framework.Console;
 using OpenSim.Framework.Servers;
 using OpenSim.Framework.Servers.HttpServer;
 using OpenSim.Region.Framework.Interfaces;
@@ -71,9 +75,13 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
         private readonly object m_balanceLock = new object();
         private readonly Dictionary<UUID, int> m_balances = new Dictionary<UUID, int>();
         private string m_balanceStoragePath = "Currency/balances.tsv";
+        private string m_transactionLogPath = "Currency/transactions.tsv";
         private bool m_balancesLoaded;
         private bool m_allowNegativeBalances;
+        private bool m_auditEnabled = true;
+        private bool m_consoleCommandsRegistered;
         private int m_initialBalance = 1000;
+        private long m_transactionSequence;
 
         private float EnergyEfficiency = 1f;
         // private ObjectPaid handerOnObjectPaid;
@@ -213,7 +221,7 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
                 return;
 
             string description = string.IsNullOrWhiteSpace(extraData) ? type.ToString() : extraData;
-            bool result = Debit(agentID, amount, out string reason);
+            bool result = Debit(agentID, amount, out string reason, (int)type, description);
             SendBalanceUpdateTo(agentID, agentID, UUID.Zero, result, result ? description : reason, (int)type, amount);
             if (!result && !string.IsNullOrWhiteSpace(reason))
             {
@@ -233,7 +241,7 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
                 return;
 
             string description = string.IsNullOrWhiteSpace(text) ? "Asset upload" : text;
-            bool result = Debit(agentID, amount, out string reason);
+            bool result = Debit(agentID, amount, out string reason, 0, description);
             SendBalanceUpdateTo(agentID, agentID, UUID.Zero, result, result ? description : reason, 0, amount);
             if (!result && !string.IsNullOrWhiteSpace(reason))
             {
@@ -257,6 +265,46 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
 
         public void PostInitialise()
         {
+            if (!m_enabled || m_consoleCommandsRegistered)
+                return;
+
+            m_consoleCommandsRegistered = true;
+            MainConsole.Instance.Commands.AddCommand("Money", false, "money show",
+                "money show",
+                "Show local currency ledger status.",
+                HandleMoneyCommand);
+            MainConsole.Instance.Commands.AddCommand("Money", false, "money list",
+                "money list [limit]",
+                "List local currency accounts and balances.",
+                HandleMoneyCommand);
+            MainConsole.Instance.Commands.AddCommand("Money", false, "money balance",
+                "money balance <avatar uuid|first last>",
+                "Show an avatar's local currency balance.",
+                HandleMoneyCommand);
+            MainConsole.Instance.Commands.AddCommand("Money", false, "money set",
+                "money set <avatar uuid|first last> <amount>",
+                "Set an avatar's local currency balance.",
+                HandleMoneyCommand);
+            MainConsole.Instance.Commands.AddCommand("Money", false, "money give",
+                "money give <avatar uuid|first last> <amount>",
+                "Credit local currency to an avatar.",
+                HandleMoneyCommand);
+            MainConsole.Instance.Commands.AddCommand("Money", false, "money take",
+                "money take <avatar uuid|first last> <amount>",
+                "Debit local currency from an avatar.",
+                HandleMoneyCommand);
+            MainConsole.Instance.Commands.AddCommand("Money", false, "money transfer",
+                "money transfer <from uuid|first last> to <to uuid|first last> <amount>",
+                "Transfer local currency between avatars.",
+                HandleMoneyCommand);
+            MainConsole.Instance.Commands.AddCommand("Money", false, "money export",
+                "money export [path]",
+                "Export the local currency ledger TSV.",
+                HandleMoneyCommand);
+            MainConsole.Instance.Commands.AddCommand("Money", false, "money import",
+                "money import <path>",
+                "Import a local currency ledger TSV, backing up the current ledger first.",
+                HandleMoneyCommand);
         }
 
         public void Close()
@@ -310,8 +358,7 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
 
             if(economyConfig == null)
             {
-                if (!Path.IsPathRooted(m_balanceStoragePath))
-                    m_balanceStoragePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, m_balanceStoragePath);
+                NormalizeCurrencyPaths();
                 return;
             }
 
@@ -333,11 +380,22 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
             m_sellEnabled = economyConfig.GetBoolean("SellEnabled", true);
             m_initialBalance = Math.Max(0, economyConfig.GetInt("InitialBalance", m_initialBalance));
             m_allowNegativeBalances = economyConfig.GetBoolean("AllowNegativeBalances", false);
+            m_auditEnabled = economyConfig.GetBoolean("AuditEnabled", true);
             m_balanceStoragePath = economyConfig.GetString("BalanceStorage", m_balanceStoragePath).Trim();
             if (string.IsNullOrWhiteSpace(m_balanceStoragePath))
                 m_balanceStoragePath = "Currency/balances.tsv";
+            m_transactionLogPath = economyConfig.GetString("TransactionLog", m_transactionLogPath).Trim();
+            if (string.IsNullOrWhiteSpace(m_transactionLogPath))
+                m_transactionLogPath = "Currency/transactions.tsv";
+            NormalizeCurrencyPaths();
+        }
+
+        private void NormalizeCurrencyPaths()
+        {
             if (!Path.IsPathRooted(m_balanceStoragePath))
                 m_balanceStoragePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, m_balanceStoragePath);
+            if (!Path.IsPathRooted(m_transactionLogPath))
+                m_transactionLogPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, m_transactionLogPath);
         }
 
         private void GetClientFunds(IClientAPI client)
@@ -436,6 +494,9 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
         {
             // try avatar username surname
             Scene scene = GetRandomScene();
+            if (scene == null || scene.UserAccountService == null)
+                return String.Empty;
+
             UserAccount account = scene.UserAccountService.GetUserAccount(scene.RegionInfo.ScopeID, agentID);
             if (account != null)
             {
@@ -581,7 +642,7 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
 
             if (agentId.IsNotZero() && amount > 0)
             {
-                Credit(agentId, amount);
+                Credit(agentId, amount, (int)TransactionType.SystemGenerated, "Currency purchase");
                 BalanceUpdate(UUID.Zero, agentId, true, "Currency purchase", (int)TransactionType.SystemGenerated, amount);
             }
 
@@ -662,6 +723,7 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
                 {
                     m_balances[agentID] = m_initialBalance;
                     SaveBalancesLocked();
+                    RecordTransactionLocked("create", UUID.Zero, agentID, m_initialBalance, (int)TransactionType.SystemGenerated, true, "Initial balance", 0, m_initialBalance);
                 }
             }
         }
@@ -684,6 +746,7 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
                     returnfunds = m_initialBalance;
                     m_balances[AgentID] = returnfunds;
                     SaveBalancesLocked();
+                    RecordTransactionLocked("create", UUID.Zero, AgentID, m_initialBalance, (int)TransactionType.SystemGenerated, true, "Initial balance", 0, returnfunds);
                 }
 
                 return returnfunds;
@@ -691,6 +754,11 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
         }
 
         private bool Debit(UUID agentID, int amount, out string reason)
+        {
+            return Debit(agentID, amount, out reason, 0, "Debit");
+        }
+
+        private bool Debit(UUID agentID, int amount, out string reason, int transactionType, string description)
         {
             reason = String.Empty;
             if (amount <= 0)
@@ -709,16 +777,24 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
                 if (!m_allowNegativeBalances && balance < amount)
                 {
                     reason = "Insufficient funds.";
+                    RecordTransactionLocked("debit", agentID, UUID.Zero, amount, transactionType, false, reason, balance, 0);
                     return false;
                 }
 
-                m_balances[agentID] = balance - amount;
+                int newBalance = balance - amount;
+                m_balances[agentID] = newBalance;
                 SaveBalancesLocked();
+                RecordTransactionLocked("debit", agentID, UUID.Zero, amount, transactionType, true, description, newBalance, 0);
                 return true;
             }
         }
 
         private void Credit(UUID agentID, int amount)
+        {
+            Credit(agentID, amount, 0, "Credit");
+        }
+
+        private void Credit(UUID agentID, int amount, int transactionType, string description)
         {
             if (amount <= 0 || agentID.IsZero())
                 return;
@@ -728,8 +804,10 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
                 EnsureBalancesLoaded();
                 if (!m_balances.TryGetValue(agentID, out int balance))
                     balance = m_initialBalance;
-                m_balances[agentID] = balance + amount;
+                int newBalance = balance + amount;
+                m_balances[agentID] = newBalance;
                 SaveBalancesLocked();
+                RecordTransactionLocked("credit", UUID.Zero, agentID, amount, transactionType, true, description, 0, newBalance);
             }
         }
 
@@ -754,21 +832,71 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
                 EnsureBalancesLoaded();
                 if (!m_balances.TryGetValue(fromUser, out int fromBalance))
                     fromBalance = m_initialBalance;
+                int toBalance = 0;
+                if (!toUser.IsZero() && !m_balances.TryGetValue(toUser, out toBalance))
+                    toBalance = m_initialBalance;
                 if (!m_allowNegativeBalances && fromBalance < amount)
                 {
                     reason = "Insufficient funds.";
+                    RecordTransactionLocked("transfer", fromUser, toUser, amount, transactionType, false, reason, fromBalance, toBalance);
                     return false;
                 }
 
-                if (!m_balances.TryGetValue(toUser, out int toBalance))
-                    toBalance = m_initialBalance;
-
-                m_balances[fromUser] = fromBalance - amount;
+                int newFromBalance = fromBalance - amount;
+                int newToBalance = toBalance;
+                m_balances[fromUser] = newFromBalance;
                 if (!toUser.IsZero() && toUser != fromUser)
-                    m_balances[toUser] = toBalance + amount;
+                {
+                    newToBalance = toBalance + amount;
+                    m_balances[toUser] = newToBalance;
+                }
                 SaveBalancesLocked();
+                RecordTransactionLocked("transfer", fromUser, toUser, amount, transactionType, true, text, newFromBalance, newToBalance);
                 return true;
             }
+        }
+
+        public Dictionary<string, string> GetCurrencyStats()
+        {
+            Dictionary<string, string> stats = new Dictionary<string, string>();
+            lock (m_balanceLock)
+            {
+                EnsureBalancesLoaded();
+
+                long total = 0;
+                int minimum = 0;
+                int maximum = 0;
+                bool first = true;
+
+                foreach (int balance in m_balances.Values)
+                {
+                    total += balance;
+                    if (first)
+                    {
+                        minimum = balance;
+                        maximum = balance;
+                        first = false;
+                    }
+                    else
+                    {
+                        if (balance < minimum)
+                            minimum = balance;
+                        if (balance > maximum)
+                            maximum = balance;
+                    }
+                }
+
+                stats["Accounts"] = m_balances.Count.ToString(CultureInfo.InvariantCulture);
+                stats["Total balance"] = total.ToString(CultureInfo.InvariantCulture);
+                stats["Minimum balance"] = first ? "0" : minimum.ToString(CultureInfo.InvariantCulture);
+                stats["Maximum balance"] = first ? "0" : maximum.ToString(CultureInfo.InvariantCulture);
+                stats["Initial balance"] = m_initialBalance.ToString(CultureInfo.InvariantCulture);
+                stats["Negative balances"] = m_allowNegativeBalances ? "allowed" : "blocked";
+                stats["Audit log"] = m_auditEnabled ? "enabled" : "disabled";
+                stats["Ledger"] = m_balanceStoragePath;
+            }
+
+            return stats;
         }
 
         private void EnsureBalancesLoaded()
@@ -786,18 +914,10 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
                 if (!File.Exists(m_balanceStoragePath))
                     return;
 
-                foreach (string rawLine in File.ReadAllLines(m_balanceStoragePath))
-                {
-                    string line = rawLine.Trim();
-                    if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal))
-                        continue;
-
-                    string[] parts = line.Split('\t');
-                    if (parts.Length < 2)
-                        continue;
-                    if (UUID.TryParse(parts[0], out UUID agentID) && int.TryParse(parts[1], out int balance))
-                        m_balances[agentID] = balance;
-                }
+                Dictionary<UUID, int> loaded = LoadBalanceFile(m_balanceStoragePath);
+                m_balances.Clear();
+                foreach (KeyValuePair<UUID, int> entry in loaded)
+                    m_balances[entry.Key] = entry.Value;
             }
             catch (Exception e)
             {
@@ -816,10 +936,10 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
                 List<string> lines = new List<string>();
                 lines.Add("# agent_id\tbalance");
                 foreach (KeyValuePair<UUID, int> entry in m_balances)
-                    lines.Add(entry.Key + "\t" + entry.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    lines.Add(entry.Key + "\t" + entry.Value.ToString(CultureInfo.InvariantCulture));
 
                 string tmp = m_balanceStoragePath + ".tmp";
-                File.WriteAllLines(tmp, lines);
+                File.WriteAllLines(tmp, lines.ToArray(), Encoding.UTF8);
                 if (File.Exists(m_balanceStoragePath))
                     File.Delete(m_balanceStoragePath);
                 File.Move(tmp, m_balanceStoragePath);
@@ -828,6 +948,396 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
             {
                 m_log.ErrorFormat("[MONEY]: Failed saving currency balances to {0}: {1}", m_balanceStoragePath, e.Message);
             }
+        }
+
+        private Dictionary<UUID, int> LoadBalanceFile(string path)
+        {
+            Dictionary<UUID, int> loaded = new Dictionary<UUID, int>();
+            if (!File.Exists(path))
+                return loaded;
+
+            foreach (string rawLine in File.ReadAllLines(path))
+            {
+                string line = rawLine.Trim();
+                if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal))
+                    continue;
+
+                string[] parts = line.Split('\t');
+                if (parts.Length < 2)
+                    continue;
+                if (UUID.TryParse(parts[0], out UUID agentID) && int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int balance))
+                    loaded[agentID] = balance;
+            }
+
+            return loaded;
+        }
+
+        private void RecordTransactionLocked(string action, UUID source, UUID destination, int amount, int transactionType, bool success, string description, int sourceBalance, int destinationBalance)
+        {
+            if (!m_auditEnabled)
+                return;
+
+            try
+            {
+                string directory = Path.GetDirectoryName(m_transactionLogPath);
+                if (!string.IsNullOrEmpty(directory))
+                    Directory.CreateDirectory(directory);
+
+                bool writeHeader = !File.Exists(m_transactionLogPath) || File.GetLength(m_transactionLogPath) == 0;
+                StringBuilder line = new StringBuilder();
+                if (writeHeader)
+                    line.Append("# utc\tsequence\taction\tsource\tdestination\tamount\ttransaction_type\tsuccess\tsource_balance\tdestination_balance\tdescription\n");
+
+                long sequence = ++m_transactionSequence;
+                line.Append(DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture)).Append('\t')
+                    .Append(sequence.ToString(CultureInfo.InvariantCulture)).Append('\t')
+                    .Append(EscapeTsv(action)).Append('\t')
+                    .Append(source).Append('\t')
+                    .Append(destination).Append('\t')
+                    .Append(amount.ToString(CultureInfo.InvariantCulture)).Append('\t')
+                    .Append(transactionType.ToString(CultureInfo.InvariantCulture)).Append('\t')
+                    .Append(success ? "1" : "0").Append('\t')
+                    .Append(sourceBalance.ToString(CultureInfo.InvariantCulture)).Append('\t')
+                    .Append(destinationBalance.ToString(CultureInfo.InvariantCulture)).Append('\t')
+                    .Append(EscapeTsv(description)).Append('\n');
+
+                File.AppendAllText(m_transactionLogPath, line.ToString(), Encoding.UTF8);
+            }
+            catch (Exception e)
+            {
+                m_log.ErrorFormat("[MONEY]: Failed writing transaction audit log {0}: {1}", m_transactionLogPath, e.Message);
+            }
+        }
+
+        private static string EscapeTsv(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return string.Empty;
+
+            return value.Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
+        }
+
+        private void HandleMoneyCommand(string module, string[] cmd)
+        {
+            if (cmd.Length < 2)
+            {
+                ShowMoneyHelp();
+                return;
+            }
+
+            string verb = cmd[1].ToLowerInvariant();
+            switch (verb)
+            {
+                case "show":
+                    HandleMoneyShow();
+                    return;
+                case "list":
+                    HandleMoneyList(cmd);
+                    return;
+                case "balance":
+                    HandleMoneyBalance(cmd);
+                    return;
+                case "set":
+                    HandleMoneySet(cmd);
+                    return;
+                case "give":
+                    HandleMoneyGive(cmd, true);
+                    return;
+                case "take":
+                    HandleMoneyGive(cmd, false);
+                    return;
+                case "transfer":
+                    HandleMoneyTransfer(cmd);
+                    return;
+                case "export":
+                    HandleMoneyExport(cmd);
+                    return;
+                case "import":
+                    HandleMoneyImport(cmd);
+                    return;
+                default:
+                    ShowMoneyHelp();
+                    return;
+            }
+        }
+
+        private void ShowMoneyHelp()
+        {
+            MainConsole.Instance.Output("[MONEY]: money show | money list [limit] | money balance <avatar> | money set <avatar> <amount> | money give <avatar> <amount> | money take <avatar> <amount> | money transfer <from> to <to> <amount> | money export [path] | money import <path>");
+        }
+
+        private void HandleMoneyShow()
+        {
+            Dictionary<string, string> stats = GetCurrencyStats();
+            MainConsole.Instance.Output("[MONEY]: Local currency ledger");
+            foreach (KeyValuePair<string, string> entry in stats)
+                MainConsole.Instance.OutputFormat("[MONEY]: {0}: {1}", entry.Key, entry.Value);
+            MainConsole.Instance.OutputFormat("[MONEY]: Audit path: {0}", m_transactionLogPath);
+        }
+
+        private void HandleMoneyList(string[] cmd)
+        {
+            int limit = 20;
+            if (cmd.Length >= 3)
+                Int32.TryParse(cmd[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out limit);
+            if (limit <= 0)
+                limit = 20;
+
+            List<KeyValuePair<UUID, int>> entries;
+            lock (m_balanceLock)
+            {
+                EnsureBalancesLoaded();
+                entries = new List<KeyValuePair<UUID, int>>(m_balances);
+            }
+
+            entries.Sort((a, b) => b.Value.CompareTo(a.Value));
+            MainConsole.Instance.OutputFormat("[MONEY]: Showing {0} of {1} accounts", Math.Min(limit, entries.Count), entries.Count);
+            for (int i = 0; i < entries.Count && i < limit; i++)
+                MainConsole.Instance.OutputFormat("[MONEY]: {0} {1}", entries[i].Key, entries[i].Value);
+        }
+
+        private void HandleMoneyBalance(string[] cmd)
+        {
+            if (cmd.Length < 3)
+            {
+                MainConsole.Instance.Output("[MONEY]: Usage: money balance <avatar uuid|first last>");
+                return;
+            }
+
+            string agentText = JoinArgs(cmd, 2, cmd.Length);
+            if (!TryResolveAgent(agentText, out UUID agentID, out string displayName))
+                return;
+
+            MainConsole.Instance.OutputFormat("[MONEY]: {0} ({1}) balance: {2}", displayName, agentID, GetFundsForAgentID(agentID));
+        }
+
+        private void HandleMoneySet(string[] cmd)
+        {
+            if (!TryParseAgentAndAmount(cmd, 2, out UUID agentID, out string displayName, out int amount))
+            {
+                MainConsole.Instance.Output("[MONEY]: Usage: money set <avatar uuid|first last> <amount>");
+                return;
+            }
+            if (amount < 0 && !m_allowNegativeBalances)
+            {
+                MainConsole.Instance.Output("[MONEY]: Negative balances are disabled.");
+                return;
+            }
+
+            int newBalance;
+            lock (m_balanceLock)
+            {
+                EnsureBalancesLoaded();
+                m_balances[agentID] = amount;
+                SaveBalancesLocked();
+                newBalance = amount;
+                RecordTransactionLocked("set", UUID.Zero, agentID, amount, (int)TransactionType.SystemGenerated, true, "Console balance set", 0, newBalance);
+            }
+
+            SendBalanceUpdateTo(agentID, UUID.Zero, agentID, true, "Console balance set", (int)TransactionType.SystemGenerated, amount);
+            MainConsole.Instance.OutputFormat("[MONEY]: Set {0} ({1}) balance to {2}", displayName, agentID, newBalance);
+        }
+
+        private void HandleMoneyGive(string[] cmd, bool credit)
+        {
+            if (!TryParseAgentAndAmount(cmd, 2, out UUID agentID, out string displayName, out int amount) || amount <= 0)
+            {
+                MainConsole.Instance.Output(credit ? "[MONEY]: Usage: money give <avatar uuid|first last> <amount>" : "[MONEY]: Usage: money take <avatar uuid|first last> <amount>");
+                return;
+            }
+
+            if (credit)
+            {
+                Credit(agentID, amount, (int)TransactionType.SystemGenerated, "Console credit");
+                SendBalanceUpdateTo(agentID, UUID.Zero, agentID, true, "Console credit", (int)TransactionType.SystemGenerated, amount);
+                MainConsole.Instance.OutputFormat("[MONEY]: Credited {0} to {1} ({2}); balance {3}", amount, displayName, agentID, GetFundsForAgentID(agentID));
+            }
+            else
+            {
+                bool result = Debit(agentID, amount, out string reason, (int)TransactionType.SystemGenerated, "Console debit");
+                SendBalanceUpdateTo(agentID, agentID, UUID.Zero, result, result ? "Console debit" : reason, (int)TransactionType.SystemGenerated, amount);
+                MainConsole.Instance.OutputFormat(result
+                    ? "[MONEY]: Debited {0} from {1} ({2}); balance {3}"
+                    : "[MONEY]: Could not debit {0} from {1} ({2}): {3}",
+                    amount, displayName, agentID, result ? GetFundsForAgentID(agentID).ToString(CultureInfo.InvariantCulture) : reason);
+            }
+        }
+
+        private void HandleMoneyTransfer(string[] cmd)
+        {
+            if (cmd.Length < 6)
+            {
+                MainConsole.Instance.Output("[MONEY]: Usage: money transfer <from uuid|first last> to <to uuid|first last> <amount>");
+                return;
+            }
+
+            if (!Int32.TryParse(cmd[cmd.Length - 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int amount) || amount <= 0)
+            {
+                MainConsole.Instance.Output("[MONEY]: Transfer amount must be greater than zero.");
+                return;
+            }
+
+            int toIndex = -1;
+            for (int i = 2; i < cmd.Length - 1; i++)
+            {
+                if (cmd[i].Equals("to", StringComparison.OrdinalIgnoreCase))
+                {
+                    toIndex = i;
+                    break;
+                }
+            }
+
+            if (toIndex <= 2 || toIndex >= cmd.Length - 2)
+            {
+                MainConsole.Instance.Output("[MONEY]: Usage: money transfer <from uuid|first last> to <to uuid|first last> <amount>");
+                return;
+            }
+
+            if (!TryResolveAgent(JoinArgs(cmd, 2, toIndex), out UUID fromID, out string fromName))
+                return;
+            if (!TryResolveAgent(JoinArgs(cmd, toIndex + 1, cmd.Length - 1), out UUID toID, out string toName))
+                return;
+
+            bool result = TransferMoney(fromID, toID, amount, (int)TransactionType.SystemGenerated, "Console transfer", out string reason);
+            BalanceUpdate(fromID, toID, result, result ? "Console transfer" : reason, (int)TransactionType.SystemGenerated, amount);
+            MainConsole.Instance.OutputFormat(result
+                ? "[MONEY]: Transferred {0} from {1} ({2}) to {3} ({4})"
+                : "[MONEY]: Transfer of {0} failed from {1} ({2}) to {3} ({4}): {5}",
+                amount, fromName, fromID, toName, toID, reason);
+        }
+
+        private void HandleMoneyExport(string[] cmd)
+        {
+            string path = cmd.Length >= 3 ? JoinArgs(cmd, 2, cmd.Length) : m_balanceStoragePath + ".export";
+            try
+            {
+                lock (m_balanceLock)
+                {
+                    EnsureBalancesLoaded();
+                    SaveBalancesLocked();
+                }
+
+                string directory = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(directory))
+                    Directory.CreateDirectory(directory);
+                File.Copy(m_balanceStoragePath, path, true);
+                MainConsole.Instance.OutputFormat("[MONEY]: Exported ledger to {0}", path);
+            }
+            catch (Exception e)
+            {
+                MainConsole.Instance.OutputFormat("[MONEY]: Export failed: {0}", e.Message);
+            }
+        }
+
+        private void HandleMoneyImport(string[] cmd)
+        {
+            if (cmd.Length < 3)
+            {
+                MainConsole.Instance.Output("[MONEY]: Usage: money import <path>");
+                return;
+            }
+
+            string path = JoinArgs(cmd, 2, cmd.Length);
+            try
+            {
+                if (!File.Exists(path))
+                {
+                    MainConsole.Instance.OutputFormat("[MONEY]: Import file not found: {0}", path);
+                    return;
+                }
+
+                Dictionary<UUID, int> imported = LoadBalanceFile(path);
+                string backup = m_balanceStoragePath + ".bak-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+
+                lock (m_balanceLock)
+                {
+                    EnsureBalancesLoaded();
+                    if (File.Exists(m_balanceStoragePath))
+                        File.Copy(m_balanceStoragePath, backup, true);
+                    m_balances.Clear();
+                    foreach (KeyValuePair<UUID, int> entry in imported)
+                        m_balances[entry.Key] = entry.Value;
+                    SaveBalancesLocked();
+                    RecordTransactionLocked("import", UUID.Zero, UUID.Zero, imported.Count, (int)TransactionType.SystemGenerated, true, "Console ledger import from " + path, 0, 0);
+                }
+
+                MainConsole.Instance.OutputFormat("[MONEY]: Imported {0} balances from {1}", imported.Count, path);
+                MainConsole.Instance.OutputFormat("[MONEY]: Previous ledger backup: {0}", backup);
+            }
+            catch (Exception e)
+            {
+                MainConsole.Instance.OutputFormat("[MONEY]: Import failed: {0}", e.Message);
+            }
+        }
+
+        private bool TryParseAgentAndAmount(string[] cmd, int start, out UUID agentID, out string displayName, out int amount)
+        {
+            agentID = UUID.Zero;
+            displayName = String.Empty;
+            amount = 0;
+            if (cmd.Length <= start + 1)
+                return false;
+
+            if (!Int32.TryParse(cmd[cmd.Length - 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out amount))
+                return false;
+
+            return TryResolveAgent(JoinArgs(cmd, start, cmd.Length - 1), out agentID, out displayName);
+        }
+
+        private bool TryResolveAgent(string value, out UUID agentID, out string displayName)
+        {
+            agentID = UUID.Zero;
+            displayName = value;
+            value = (value ?? String.Empty).Trim().Trim('"');
+            if (UUID.TryParse(value, out agentID))
+            {
+                displayName = resolveAgentName(agentID);
+                if (string.IsNullOrWhiteSpace(displayName))
+                    displayName = agentID.ToString();
+                return true;
+            }
+
+            string[] parts = value.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2)
+            {
+                MainConsole.Instance.Output("[MONEY]: Avatar must be a UUID or a first and last name.");
+                return false;
+            }
+
+            Scene scene = GetRandomScene();
+            if (scene == null || scene.UserAccountService == null)
+            {
+                MainConsole.Instance.Output("[MONEY]: No scene/user account service is available.");
+                return false;
+            }
+
+            string firstName = parts[0];
+            string lastName = String.Join(" ", parts, 1, parts.Length - 1);
+            UserAccount account = scene.UserAccountService.GetUserAccount(scene.RegionInfo.ScopeID, firstName, lastName);
+            if (account == null)
+            {
+                MainConsole.Instance.OutputFormat("[MONEY]: Avatar not found: {0}", value);
+                return false;
+            }
+
+            agentID = account.PrincipalID;
+            displayName = account.Name;
+            return true;
+        }
+
+        private static string JoinArgs(string[] cmd, int start, int endExclusive)
+        {
+            if (endExclusive <= start)
+                return String.Empty;
+
+            StringBuilder builder = new StringBuilder();
+            for (int i = start; i < endExclusive; i++)
+            {
+                if (builder.Length > 0)
+                    builder.Append(' ');
+                builder.Append(cmd[i]);
+            }
+            return builder.ToString();
         }
 
 
@@ -968,7 +1478,7 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
 
                 if (e.final && e.landValidated && e.amountDebited <= 0)
                 {
-                    if (Debit(e.agentId, e.parcelPrice, out string reason))
+                    if (TransferMoney(e.agentId, e.parcelOwnerID, e.parcelPrice, (int)TransactionType.Purchase, "Land purchase", out string reason))
                     {
                         e.amountDebited = e.parcelPrice;
                         e.transactionID = UUID.Random().GetHashCode() & Int32.MaxValue;
@@ -995,7 +1505,7 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
                 if (!e.final || !e.landValidated || !e.economyValidated || e.parcelPrice <= 0 || e.amountDebited > 0)
                     return;
 
-                if (Debit(e.agentId, e.parcelPrice, out string reason))
+                if (TransferMoney(e.agentId, e.parcelOwnerID, e.parcelPrice, (int)TransactionType.Purchase, "Land purchase", out string reason))
                 {
                     e.amountDebited = e.parcelPrice;
                     e.transactionID = UUID.Random().GetHashCode() & Int32.MaxValue;
@@ -1155,18 +1665,47 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
                 return;
 
             UUID sellerID = part.OwnerID;
-            if (salePrice > 0 && !AmountCovered(remoteClient.AgentId, salePrice))
+            if (salePrice <= 0)
             {
-                remoteClient.SendAgentAlertMessage("Insufficient funds.", false);
-                BalanceUpdate(remoteClient.AgentId, sellerID, false, "Insufficient funds.", (int)TransactionType.Purchase, salePrice);
+                module.BuyObject(remoteClient, categoryID, localID, saleType, salePrice);
                 return;
             }
 
-            if (module.BuyObject(remoteClient, categoryID, localID, saleType, salePrice) && salePrice > 0)
+            if (!TransferMoney(remoteClient.AgentId, sellerID, salePrice, (int)TransactionType.Purchase, "Object purchase", out string reason))
             {
-                bool result = TransferMoney(remoteClient.AgentId, sellerID, salePrice, (int)TransactionType.Purchase, "Object purchase", out string reason);
-                BalanceUpdate(remoteClient.AgentId, sellerID, result, result ? "Object purchase" : reason, (int)TransactionType.Purchase, salePrice);
+                remoteClient.SendAgentAlertMessage(reason, false);
+                BalanceUpdate(remoteClient.AgentId, sellerID, false, reason, (int)TransactionType.Purchase, salePrice);
+                return;
             }
+
+            bool buySucceeded = false;
+            try
+            {
+                buySucceeded = module.BuyObject(remoteClient, categoryID, localID, saleType, salePrice);
+            }
+            catch (Exception e)
+            {
+                m_log.WarnFormat("[MONEY]: Object purchase failed after payment reserve: {0}", e.Message);
+            }
+
+            if (buySucceeded)
+            {
+                BalanceUpdate(remoteClient.AgentId, sellerID, true, "Object purchase", (int)TransactionType.Purchase, salePrice);
+                return;
+            }
+
+            bool refunded = false;
+            if (sellerID.IsNotZero())
+                refunded = TransferMoney(sellerID, remoteClient.AgentId, salePrice, (int)TransactionType.Purchase, "Object purchase refund", out string refundReason);
+            else
+            {
+                Credit(remoteClient.AgentId, salePrice, (int)TransactionType.Purchase, "Object purchase refund");
+                refunded = true;
+            }
+
+            string message = refunded ? "Object purchase failed; funds refunded." : "Object purchase failed; refund failed.";
+            remoteClient.SendAgentAlertMessage(message, false);
+            BalanceUpdate(remoteClient.AgentId, sellerID, false, message, (int)TransactionType.Purchase, salePrice);
         }
 
         public void MoveMoney(UUID fromUser, UUID toUser, int amount, string text)
