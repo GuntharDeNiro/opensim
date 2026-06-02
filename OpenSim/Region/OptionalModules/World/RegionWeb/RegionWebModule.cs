@@ -57,6 +57,11 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             "The script engine is moving closer to Second Life behavior with Experience-Lite permissions, scripted sit controls, key-value stores, linkset data, environment, estate-return, parcel media, parcel prim counts/details, guarded money transfer, inventory transfer, damage, RSA, attachment filter, identity lookup, privacy-aware agent language lookup, animation-state introspection, physics energy readback, object-detail cost readback, script memory/profiler diagnostics, GLTF material and physics primitive-param helpers, plus a RegionWeb compatibility center and in-world regression lab.";
         private const string ScriptEngineFeatureOverview =
             "The script engine now includes a wider Second Life-style scripting surface for modern estate systems. Trusted estate scripts can use Experience-Lite permissions, persistent experience key-value storage, linkset data with linkset_data events, scripted sit controls, linked sound controls, region and parcel environment helpers, estate return and terrain helpers, parcel media controls, same-owner simulator-wide parcel prim counts/details, guarded debit-permission money transfer, direct inventory and ownership transfer, direct damage helpers with Combat2-style pre-application damage transactions, cached identity lookup, privacy-aware agent language lookup, animation-state introspection, physics energy readback, object-detail cost/render/selection readback, script memory limit/profiler diagnostics, GLTF/render material primitive params with stored override readback, physics material primitive params, secure hashing/HMAC/RSA helpers, parameterized rez/derez workflows, filtered attachment inspection and HUD coordinate helpers without relying on brittle scripted workarounds. Second Life pathfinding character calls now provide persistent character option state, baked terrain navmesh caching, terrain-aware A* routing, parcel-stay handling and dynamic object/avatar obstacle avoidance where OpenSim does not expose the proprietary SL navmesh service. RegionWeb exposes a script compatibility center, and the example suite includes an in-world regression controller for post-build checks.";
+        private const string CurrencyFeatureTitle = "Viewer-visible local currency";
+        private const string CurrencyFeatureBody =
+            "The estate can run a local persistent currency ledger that sends live balances to the viewer, handles transfers, object payments, land/object purchases and simulator economy charges without requiring a separate currency server.";
+        private const string CurrencyFeatureOverview =
+            "The bundled BetaGridLikeMoneyModule now works as a lightweight local economy backend. It persists avatar balances in a tab-separated ledger, grants a configurable first-use balance, pushes MoneyBalanceReply updates so compatible viewers show the current balance, and applies the same balance path to viewer transfers, scripted money calls, object payments, land/object purchases, upload charges and group creation charges.";
 
         private readonly object m_sync = new object();
         private readonly Dictionary<UUID, Scene> m_scenesByID = new Dictionary<UUID, Scene>();
@@ -335,6 +340,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 .Append(Html(content.Title)).Append("</h1>")
                 .Append(Paragraphs(content.Description))
                 .Append("<div class=\"estate-actions\"><a href=\"#regions\">Explore regions</a><a href=\"#features\">New features</a><a href=\"")
+                .Append(Html(m_basePath)).Append("/feature/").Append(Url(MakeSlug(CurrencyFeatureTitle))).Append("/\">Currency</a><a href=\"")
                 .Append(Html(m_basePath)).Append("/scripts\">LSL scripts</a></div>")
                 .Append("</div></header>");
 
@@ -771,6 +777,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 "If an avatar becomes a cloud, the server automatically handles the recovery and restores the normal appearance within a few seconds.");
             EnsureFeature(content.Features, "Group auto invite",
                 "Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects.");
+            EnsureFeature(content.Features, CurrencyFeatureTitle, CurrencyFeatureBody);
             EnsureFeature(content.Features, "Viewer polish",
                 "Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.");
             EnsureFeature(content.Features, ScriptEngineFeatureTitle, ScriptEngineFeatureBody);
@@ -944,6 +951,25 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Usage.Add("Optionally set InviterID, RoleID, InviteDelaySeconds and a custom InviteMessage.");
                     content.Usage.Add("Keep InviteOncePerSession enabled if visitors should not be spammed after teleports or relogs.");
                     content.Notes.Add("The module sends an invitation; it does not force users to join.");
+                    break;
+
+                case "viewer-visible-local-currency":
+                case "local-currency-economy":
+                case "currency":
+                case "money-module":
+                    content.Title = CurrencyFeatureTitle;
+                    content.Summary = CurrencyFeatureBody;
+                    content.Overview = CurrencyFeatureOverview;
+                    content.Usage.Add("Enable the economy module with economymodule = BetaGridLikeMoneyModule in [Economy].");
+                    content.Usage.Add("Set InitialBalance to the amount a new avatar should receive the first time they appear in the ledger.");
+                    content.Usage.Add("Set BalanceStorage to choose where the persistent TSV balance ledger is stored; relative paths live under the OpenSim bin folder.");
+                    content.Usage.Add("Keep AllowNegativeBalances = false for normal viewer currency behavior unless you deliberately want overdraft-style testing.");
+                    content.Usage.Add("Set the LoginService Currency value to the viewer-facing currency name you want users to see beside their balance.");
+                    content.Usage.Add("Restart the region after changing economy settings, then log in or request the balance in the viewer to receive the latest MoneyBalanceReply.");
+                    content.Notes.Add("Balances are local to this simulator/grid configuration and are intended for estate/gameplay currency, not real-money production payment processing.");
+                    content.Notes.Add("Scripted llGiveMoney and llTransferLindenDollars still require owner-granted PERMISSION_DEBIT before money leaves the object owner.");
+                    content.Notes.Add("Object payments trigger the normal money event path, so in-world vendors and donation jars can react when the viewer pays an object.");
+                    content.Notes.Add("Land/object purchases and upload/group charges use the same ledger, so users see the result immediately in the viewer balance.");
                     break;
 
                 case "viewer-polish":
@@ -1231,8 +1257,9 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 + "Feature7 = \"AI-connected text build tools|Estate builders can use text commands connected to AI or uploaded cartography textures to plan, generate and refine terrain or building ideas directly from the simulator workflow.\"\n"
                 + "Feature8 = \"Automatic cloud avatar recovery|If an avatar becomes a cloud, the server automatically handles the recovery and restores the normal appearance within a few seconds.\"\n"
                 + "Feature9 = \"Group auto invite|Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects.\"\n"
-                + "Feature10 = \"Viewer polish|Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.\"\n"
-                + "Feature11 = \"" + ScriptEngineFeatureTitle + "|" + ScriptEngineFeatureBody + "\"\n",
+                + "Feature10 = \"" + CurrencyFeatureTitle + "|" + CurrencyFeatureBody + "\"\n"
+                + "Feature11 = \"Viewer polish|Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.\"\n"
+                + "Feature12 = \"" + ScriptEngineFeatureTitle + "|" + ScriptEngineFeatureBody + "\"\n",
                 new UTF8Encoding(false));
         }
 
@@ -1456,6 +1483,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             List<FeatureItem> normalized = new List<FeatureItem>();
             bool mapFeatureAdded = false;
             bool scriptEngineFeatureAdded = false;
+            bool currencyFeatureAdded = false;
 
             foreach (FeatureItem feature in features)
             {
@@ -1484,6 +1512,21 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                             Body = ScriptEngineFeatureBody
                         });
                         scriptEngineFeatureAdded = true;
+                    }
+
+                    continue;
+                }
+
+                if (IsCurrencyFeature(feature.Title))
+                {
+                    if (!currencyFeatureAdded)
+                    {
+                        normalized.Add(new FeatureItem
+                        {
+                            Title = CurrencyFeatureTitle,
+                            Body = CurrencyFeatureBody
+                        });
+                        currencyFeatureAdded = true;
                     }
 
                     continue;
@@ -1549,6 +1592,22 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 || normalized == "scripted sit controls";
         }
 
+        private static bool IsCurrencyFeature(string title)
+        {
+            if (string.IsNullOrEmpty(title))
+                return false;
+
+            string normalized = title.Trim().ToLowerInvariant();
+            return normalized == "viewer-visible local currency"
+                || normalized == "local currency"
+                || normalized == "local currency economy"
+                || normalized == "currency"
+                || normalized == "economy"
+                || normalized == "money module"
+                || normalized == "viewer balance"
+                || normalized == "viewer-visible currency";
+        }
+
         private static void AddDefaultFeatures(List<FeatureItem> features)
         {
             features.Add(new FeatureItem
@@ -1598,6 +1657,11 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             });
             features.Add(new FeatureItem
             {
+                Title = CurrencyFeatureTitle,
+                Body = CurrencyFeatureBody
+            });
+            features.Add(new FeatureItem
+            {
                 Title = "Viewer polish",
                 Body = "Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent."
             });
@@ -1614,7 +1678,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             {
                 if (feature.Title.Equals(title, StringComparison.OrdinalIgnoreCase))
                 {
-                    if (IsScriptEngineFeature(title))
+                    if (IsScriptEngineFeature(title) || IsCurrencyFeature(title))
                         feature.Body = body;
                     return;
                 }
