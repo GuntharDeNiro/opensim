@@ -44,6 +44,7 @@ using OpenSim.Region.Framework.Interfaces;
 using OpenSim.Region.Framework.Scenes;
 using OpenSim.Services.Interfaces;
 using FriendInfo = OpenSim.Services.Interfaces.FriendInfo;
+using ServicePresenceInfo = global::OpenSim.Services.Interfaces.PresenceInfo;
 
 namespace OpenSim.Region.OptionalModules.Avatar.Friends
 {
@@ -185,7 +186,7 @@ namespace OpenSim.Region.OptionalModules.Avatar.Friends
                 else
                     friendName = friend.Friend;
 
-                PresenceInfo[] pi = m_presenceService.GetAgents(new string[] { friend.Friend });
+                ServicePresenceInfo[] pi = m_presenceService.GetAgents(new string[] { friend.Friend });
                 if (pi.Length > 0)
                     onlineText = "online";
                 else
