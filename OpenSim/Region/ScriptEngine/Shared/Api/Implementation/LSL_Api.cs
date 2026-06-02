@@ -11283,7 +11283,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             return true;
         }
 
-        private LSL_Vector ToLSLVector(Vector3 vector)
+        private static LSL_Vector ToPathLSLVector(Vector3 vector)
         {
             return new LSL_Vector(vector.X, vector.Y, vector.Z);
         }
@@ -12167,7 +12167,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
             if (frames.Count == 0)
             {
-                PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), new LSL_List(ToLSLVector(finalGoal)));
+                PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), new LSL_List(ToPathLSLVector(finalGoal)));
                 return true;
             }
 
@@ -12176,9 +12176,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             group.RootPart.KeyframeMotion.SetKeyframes(frames.ToArray());
             group.RootPart.KeyframeMotion.Start();
 
-            LSL_List route = new(ToLSLVector(finalGoal));
+            LSL_List route = new(ToPathLSLVector(finalGoal));
             for (int i = 1; i < path.Count - 1 && i < 12; ++i)
-                route.Add(ToLSLVector(path[i]));
+                route.Add(ToPathLSLVector(path[i]));
 
             UUID motionID = UUID.Random();
             lock (state.Sync)
@@ -12269,7 +12269,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     {
                         Vector3 pos = group.AbsolutePosition + new Vector3(0f, 0f, 2f);
                         group.UpdateGroupPosition(pos);
-                        PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), new LSL_List(ToLSLVector(pos)));
+                        PostPathUpdate(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED), new LSL_List(ToPathLSLVector(pos)));
                     }
                     else
                     {
@@ -12415,7 +12415,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 }
             }
 
-            llNavigateTo(ToLSLVector(targetPos), options);
+            llNavigateTo(ToPathLSLVector(targetPos), options);
         }
 
         public void llEvade(LSL_Key target, LSL_List options)
@@ -12443,7 +12443,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 source = part.AbsolutePosition;
             }
 
-            llFleeFrom(ToLSLVector(source), 10.0, options);
+            llFleeFrom(ToPathLSLVector(source), 10.0, options);
         }
 
         public void llFleeFrom(LSL_Vector source, LSL_Float distance, LSL_List options)
@@ -12458,7 +12458,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             Vector3 goal = current + away * (float)Math.Max(0.1, distance);
             goal.X = Math.Clamp(goal.X, 0f, Math.Max(0f, World.RegionInfo.RegionSizeX - 0.001f));
             goal.Y = Math.Clamp(goal.Y, 0f, Math.Max(0f, World.RegionInfo.RegionSizeY - 0.001f));
-            llNavigateTo(ToLSLVector(goal), options);
+            llNavigateTo(ToPathLSLVector(goal), options);
         }
 
         public LSL_List llGetStaticPath(LSL_Vector start, LSL_Vector end, LSL_Float radius, LSL_List parameters)
@@ -12474,7 +12474,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
             LSL_List result = new(new LSL_Integer(ScriptBaseClass.PU_GOAL_REACHED));
             foreach (Vector3 point in path)
-                result.Add(ToLSLVector(point));
+                result.Add(ToPathLSLVector(point));
 
             return result;
         }
@@ -12482,7 +12482,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         public LSL_Vector llGetClosestNavPoint(LSL_Vector point, LSL_List options)
         {
             return TryGetObstacleFreeNavPoint(point, GetCharacterRadius(options), true, out Vector3 navPoint)
-                ? ToLSLVector(navPoint)
+                ? ToPathLSLVector(navPoint)
                 : LSL_Vector.Zero;
         }
 

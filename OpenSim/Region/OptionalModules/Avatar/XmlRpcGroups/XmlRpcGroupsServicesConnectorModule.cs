@@ -42,6 +42,7 @@ using OpenMetaverse.StructuredData;
 
 using OpenSim.Framework;
 using OpenSim.Region.Framework.Interfaces;
+using OpenSim.Region.Framework.Scenes;
 using OpenSim.Services.Interfaces;
 
 namespace OpenSim.Region.OptionalModules.Avatar.XmlRpcGroups
@@ -207,7 +208,7 @@ namespace OpenSim.Region.OptionalModules.Avatar.XmlRpcGroups
         {
         }
 
-        public void AddRegion(OpenSim.Region.Framework.Scenes.Scene scene)
+        public void AddRegion(Scene scene)
         {
             if (m_connectorEnabled)
             {
@@ -222,7 +223,7 @@ namespace OpenSim.Region.OptionalModules.Avatar.XmlRpcGroups
             }
         }
 
-        public void RemoveRegion(OpenSim.Region.Framework.Scenes.Scene scene)
+        public void RemoveRegion(Scene scene)
         {
             if (scene.RequestModuleInterface<IGroupsServicesConnector>() == this)
             {
@@ -230,7 +231,7 @@ namespace OpenSim.Region.OptionalModules.Avatar.XmlRpcGroups
             }
         }
 
-        public void RegionLoaded(OpenSim.Region.Framework.Scenes.Scene scene)
+        public void RegionLoaded(Scene scene)
         {
             // TODO: May want to consider listenning for Agent Connections so we can pre-cache group info
             // scene.EventManager.OnNewClient += OnNewClient;

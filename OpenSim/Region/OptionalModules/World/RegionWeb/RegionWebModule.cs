@@ -4770,7 +4770,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         };
 
         private const string AutoScriptFunctionCategory = "Auto-discovered API surface";
-        private static readonly Lazy<ScriptFunctionDoc[]> CompleteScriptFunctionDocs = new Lazy<ScriptFunctionDoc[]>(BuildCompleteScriptFunctionDocs);
+        private static readonly System.Lazy<ScriptFunctionDoc[]> CompleteScriptFunctionDocs = new System.Lazy<ScriptFunctionDoc[]>(BuildCompleteScriptFunctionDocs);
 
         private static ScriptFunctionDoc[] GetScriptFunctionDocs()
         {

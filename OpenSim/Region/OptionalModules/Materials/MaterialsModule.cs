@@ -41,6 +41,7 @@ using static OpenMetaverse.Primitive.RenderMaterials;
 using OpenMetaverse.StructuredData;
 
 using OpenSim.Framework;
+using OpenSim.Framework.Capabilities;
 using OpenSim.Framework.Servers.HttpServer;
 using OpenSim.Region.Framework.Interfaces;
 using OpenSim.Region.Framework.Scenes;
@@ -233,7 +234,7 @@ namespace OpenSim.Region.OptionalModules.Materials
             }
         }
 
-        private void OnRegisterCaps(UUID agentID, OpenSim.Framework.Capabilities.Caps caps)
+        private void OnRegisterCaps(UUID agentID, Caps caps)
         {
             caps.RegisterSimpleHandler("RenderMaterials", 
                 new SimpleStreamHandler("/" + UUID.Random(),
