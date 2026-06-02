@@ -943,6 +943,98 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
             return result;
         }
 
+        public bool WebSetBalance(UUID agentID, int amount, string description, out string reason)
+        {
+            reason = String.Empty;
+            if (agentID.IsZero())
+            {
+                reason = "Invalid avatar.";
+                return false;
+            }
+            if (amount < 0 && !m_allowNegativeBalances)
+            {
+                reason = "Negative balances are disabled.";
+                return false;
+            }
+
+            string text = string.IsNullOrWhiteSpace(description) ? "RegionWeb admin balance set" : description.Trim();
+            lock (m_balanceLock)
+            {
+                EnsureBalancesLoaded();
+                m_balances[agentID] = amount;
+                SaveBalancesLocked();
+                RecordTransactionLocked("set", UUID.Zero, agentID, amount, (int)TransactionType.SystemGenerated, true, text, 0, amount);
+            }
+
+            SendBalanceUpdateTo(agentID, UUID.Zero, agentID, true, text, (int)TransactionType.SystemGenerated, amount);
+            return true;
+        }
+
+        public bool WebCreditCurrency(UUID agentID, int amount, string description, out string reason)
+        {
+            reason = String.Empty;
+            if (agentID.IsZero())
+            {
+                reason = "Invalid avatar.";
+                return false;
+            }
+            if (amount <= 0)
+            {
+                reason = "Amount must be greater than zero.";
+                return false;
+            }
+
+            string text = string.IsNullOrWhiteSpace(description) ? "RegionWeb admin credit" : description.Trim();
+            Credit(agentID, amount, (int)TransactionType.SystemGenerated, text);
+            SendBalanceUpdateTo(agentID, UUID.Zero, agentID, true, text, (int)TransactionType.SystemGenerated, amount);
+            return true;
+        }
+
+        public bool WebDebitCurrency(UUID agentID, int amount, string description, out string reason)
+        {
+            reason = String.Empty;
+            if (agentID.IsZero())
+            {
+                reason = "Invalid avatar.";
+                return false;
+            }
+            if (amount <= 0)
+            {
+                reason = "Amount must be greater than zero.";
+                return false;
+            }
+
+            string text = string.IsNullOrWhiteSpace(description) ? "RegionWeb admin debit" : description.Trim();
+            bool result = Debit(agentID, amount, out reason, (int)TransactionType.SystemGenerated, text);
+            SendBalanceUpdateTo(agentID, agentID, UUID.Zero, result, result ? text : reason, (int)TransactionType.SystemGenerated, amount);
+            return result;
+        }
+
+        public List<Dictionary<string, string>> GetCurrencyBalances(int limit)
+        {
+            List<KeyValuePair<UUID, int>> entries;
+            lock (m_balanceLock)
+            {
+                EnsureBalancesLoaded();
+                entries = new List<KeyValuePair<UUID, int>>(m_balances);
+            }
+
+            if (limit <= 0)
+                limit = 50;
+
+            entries.Sort((a, b) => b.Value.CompareTo(a.Value));
+            List<Dictionary<string, string>> rows = new List<Dictionary<string, string>>();
+            for (int i = 0; i < entries.Count && i < limit; i++)
+            {
+                Dictionary<string, string> row = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                row["agent_id"] = entries[i].Key.ToString();
+                row["balance"] = entries[i].Value.ToString(CultureInfo.InvariantCulture);
+                rows.Add(row);
+            }
+
+            return rows;
+        }
+
         public List<Dictionary<string, string>> GetCurrencyStatement(UUID agentID, int limit)
         {
             List<Dictionary<string, string>> rows = new List<Dictionary<string, string>>();

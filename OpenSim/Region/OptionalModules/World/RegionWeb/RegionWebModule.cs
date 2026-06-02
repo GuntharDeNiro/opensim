@@ -628,6 +628,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 && request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase);
             string action = isPost ? FormValue(form, "action") :
                 (parts.Length >= 2 ? parts[1] : string.Empty);
+            bool adminPath = parts.Length >= 2 && parts[1].Equals("admin", StringComparison.OrdinalIgnoreCase);
 
             CurrencyWebSession session = GetCurrencySession(request);
 
@@ -647,7 +648,10 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             {
                 if (session != null && !ValidateCurrencyCsrf(session, form, out string csrfMessage))
                 {
-                    SendCurrencyDashboard(response, session, csrfMessage, "error");
+                    if (adminPath && IsCurrencyAdminSession(session))
+                        SendCurrencyAdminDashboard(response, session, csrfMessage, "error");
+                    else
+                        SendCurrencyDashboard(response, session, csrfMessage, "error");
                     return;
                 }
 
@@ -659,7 +663,10 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 }
 
                 ClearCurrencySessionCookie(response);
-                SendCurrencyLogin(response, "You have been logged out.", string.Empty);
+                if (adminPath)
+                    SendCurrencyAdminLogin(response, "You have been logged out.", string.Empty);
+                else
+                    SendCurrencyLogin(response, "You have been logged out.", string.Empty);
                 return;
             }
 
@@ -672,6 +679,43 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             if (isPost && action.Equals("login", StringComparison.OrdinalIgnoreCase))
             {
                 HandleCurrencyLogin(form, response);
+                return;
+            }
+
+            if (isPost && action.Equals("admin-request-token", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleCurrencyAdminTokenRequest(form, response);
+                return;
+            }
+
+            if (isPost && action.Equals("admin-login", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleCurrencyAdminLogin(form, response);
+                return;
+            }
+
+            if (action.Equals("admin", StringComparison.OrdinalIgnoreCase)
+                || action.StartsWith("admin-", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!IsCurrencyAdminSession(session))
+                {
+                    SendCurrencyAdminLogin(response, string.Empty, FormValue(form, "avatar"));
+                    return;
+                }
+
+                if (isPost)
+                {
+                    string message;
+                    string severity;
+                    if (ValidateCurrencyCsrf(session, form, out message))
+                        HandleCurrencyAdminAction(session, action, form, out message, out severity);
+                    else
+                        severity = "error";
+                    SendCurrencyAdminDashboard(response, session, message, severity);
+                    return;
+                }
+
+                SendCurrencyAdminDashboard(response, session, string.Empty, string.Empty);
                 return;
             }
 
@@ -792,6 +836,12 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     return;
                 }
 
+                if (challenge.IsAdmin)
+                {
+                    SendCurrencyLogin(response, "That is an admin token. Use the money admin login page.", displayName);
+                    return;
+                }
+
                 m_currencyChallenges.Remove(token);
             }
 
@@ -812,6 +862,239 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             SetCurrencySessionCookie(response, sessionToken, session.ExpiresUTC);
             SendCurrencyDashboard(response, session, "Login successful.", "ok");
+        }
+
+        private void HandleCurrencyAdminTokenRequest(Dictionary<string, string> form, IOSHttpResponse response)
+        {
+            string avatarName = FormValue(form, "avatar");
+            if (!TryResolveAvatar(avatarName, out UUID agentID, out string displayName))
+            {
+                SendCurrencyAdminLogin(response, "Avatar not found. Use the full avatar name, for example First Last.", avatarName);
+                return;
+            }
+
+            if (!IsRegionWebSuperAdmin(agentID))
+            {
+                SendCurrencyAdminLogin(response, "Only an estate owner of a loaded region can access the RegionWeb money admin.", displayName);
+                return;
+            }
+
+            if (!TryFindOnlineClient(agentID, out IClientAPI client))
+            {
+                SendCurrencyAdminLogin(response, "Admin avatar resolved, but it must be online in one of these regions to receive the token inworld.", displayName);
+                return;
+            }
+
+            string token = GenerateCurrencyChallengeToken();
+            DateTime expires = DateTime.UtcNow.AddMinutes(m_currencyChallengeMinutes);
+            lock (m_currencyAuthLock)
+            {
+                CleanupCurrencyAuthLocked();
+                if (m_currencyChallengeCooldownSeconds > 0
+                    && m_currencyLastChallengeUTCByAgent.TryGetValue(agentID, out DateTime lastChallengeUTC)
+                    && (DateTime.UtcNow - lastChallengeUTC).TotalSeconds < m_currencyChallengeCooldownSeconds)
+                {
+                    SendCurrencyAdminLogin(response, "Admin token already sent recently. Wait a few seconds before requesting another one.", displayName);
+                    return;
+                }
+
+                m_currencyChallenges[token] = new CurrencyLoginChallenge
+                {
+                    AgentID = agentID,
+                    DisplayName = displayName,
+                    Token = token,
+                    ExpiresUTC = expires,
+                    IsAdmin = true
+                };
+                m_currencyLastChallengeUTCByAgent[agentID] = DateTime.UtcNow;
+            }
+
+            string message = "RegionWeb money admin token for " + displayName + ": " + token
+                + " (expires in " + m_currencyChallengeMinutes.ToString(CultureInfo.InvariantCulture) + " minutes).";
+            try
+            {
+                client.SendBlueBoxMessage(UUID.Zero, "RegionWeb", message);
+            }
+            catch
+            {
+                client.SendAgentAlertMessage(message, false);
+            }
+
+            SendCurrencyAdminLogin(response, "Admin token sent inworld to " + displayName + ". Enter it below to open money admin.", displayName);
+        }
+
+        private void HandleCurrencyAdminLogin(Dictionary<string, string> form, IOSHttpResponse response)
+        {
+            string avatarName = FormValue(form, "avatar");
+            string token = FormValue(form, "token").Trim().ToUpperInvariant();
+            if (string.IsNullOrEmpty(token))
+            {
+                SendCurrencyAdminLogin(response, "Enter the admin token received inworld.", avatarName);
+                return;
+            }
+
+            if (!TryResolveAvatar(avatarName, out UUID agentID, out string displayName))
+            {
+                SendCurrencyAdminLogin(response, "Avatar not found. Request a new admin token using the exact avatar name.", avatarName);
+                return;
+            }
+
+            if (!IsRegionWebSuperAdmin(agentID))
+            {
+                SendCurrencyAdminLogin(response, "Only an estate owner of a loaded region can access the RegionWeb money admin.", displayName);
+                return;
+            }
+
+            CurrencyLoginChallenge challenge;
+            lock (m_currencyAuthLock)
+            {
+                CleanupCurrencyAuthLocked();
+                if (!m_currencyChallenges.TryGetValue(token, out challenge))
+                {
+                    SendCurrencyAdminLogin(response, "Invalid or expired admin token. Request a new one inworld.", displayName);
+                    return;
+                }
+
+                if (challenge.AgentID != agentID)
+                {
+                    SendCurrencyAdminLogin(response, "That admin token belongs to a different avatar.", displayName);
+                    return;
+                }
+
+                if (!challenge.IsAdmin)
+                {
+                    SendCurrencyAdminLogin(response, "That is a wallet token. Request an admin token from this page.", displayName);
+                    return;
+                }
+
+                m_currencyChallenges.Remove(token);
+            }
+
+            string sessionToken = GenerateCurrencySessionToken();
+            CurrencyWebSession session = new CurrencyWebSession
+            {
+                AgentID = agentID,
+                DisplayName = challenge.DisplayName,
+                CsrfToken = GenerateCurrencySessionToken(),
+                ExpiresUTC = DateTime.UtcNow.AddHours(m_currencySessionHours),
+                IsAdmin = true
+            };
+
+            lock (m_currencyAuthLock)
+            {
+                CleanupCurrencyAuthLocked();
+                m_currencySessions[sessionToken] = session;
+            }
+
+            SetCurrencySessionCookie(response, sessionToken, session.ExpiresUTC);
+            SendCurrencyAdminDashboard(response, session, "Admin login successful.", "ok");
+        }
+
+        private void HandleCurrencyAdminAction(CurrencyWebSession session, string action, Dictionary<string, string> form, out string message, out string severity)
+        {
+            severity = "error";
+            if (!IsCurrencyAdminSession(session))
+            {
+                message = "Admin session expired.";
+                return;
+            }
+
+            if (action.Equals("admin-approve", StringComparison.OrdinalIgnoreCase))
+            {
+                if (ApproveCurrencyPurchase(FormValue(form, "request"), FormValue(form, "note"), out message))
+                    severity = "ok";
+                return;
+            }
+
+            if (action.Equals("admin-deny", StringComparison.OrdinalIgnoreCase))
+            {
+                if (DenyCurrencyPurchase(FormValue(form, "request"), FormValue(form, "note"), out message))
+                    severity = "ok";
+                return;
+            }
+
+            IMoneyModule money = GetCurrencyMoneyModule();
+            if (money == null)
+            {
+                message = "Currency module is not active.";
+                return;
+            }
+
+            if (action.Equals("admin-set-balance", StringComparison.OrdinalIgnoreCase)
+                || action.Equals("admin-credit", StringComparison.OrdinalIgnoreCase)
+                || action.Equals("admin-debit", StringComparison.OrdinalIgnoreCase))
+            {
+                string avatar = FormValue(form, "avatar");
+                if (!TryResolveAvatar(avatar, out UUID targetID, out string targetName))
+                {
+                    message = "Avatar not found. Use the full avatar name or UUID.";
+                    return;
+                }
+
+                int amount;
+                if (action.Equals("admin-set-balance", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!TryParseWholeAmount(FormValue(form, "amount"), out amount, out message))
+                        return;
+                }
+                else if (!TryParsePositiveAmount(FormValue(form, "amount"), Int32.MaxValue, out amount, out message))
+                {
+                    return;
+                }
+
+                string note = FormValue(form, "note");
+                bool result = false;
+                string reason;
+                if (action.Equals("admin-set-balance", StringComparison.OrdinalIgnoreCase))
+                {
+                    result = InvokeWebSetBalance(money, targetID, amount, note, out reason);
+                    message = result ? "Set " + targetName + " balance to " + amount.ToString(CultureInfo.InvariantCulture) + "." : reason;
+                }
+                else if (action.Equals("admin-credit", StringComparison.OrdinalIgnoreCase))
+                {
+                    result = InvokeWebCreditCurrency(money, targetID, amount, note, out reason);
+                    message = result ? "Credited " + amount.ToString(CultureInfo.InvariantCulture) + " tokens to " + targetName + "." : reason;
+                }
+                else
+                {
+                    result = InvokeWebDebitCurrency(money, targetID, amount, note, out reason);
+                    message = result ? "Debited " + amount.ToString(CultureInfo.InvariantCulture) + " tokens from " + targetName + "." : reason;
+                }
+
+                if (result)
+                    severity = "ok";
+                else if (string.IsNullOrWhiteSpace(message))
+                    message = "Money admin action failed.";
+                return;
+            }
+
+            if (action.Equals("admin-transfer", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryResolveAvatar(FormValue(form, "from"), out UUID fromID, out string fromName)
+                    || !TryResolveAvatar(FormValue(form, "to"), out UUID toID, out string toName))
+                {
+                    message = "Both source and destination avatars must resolve to known accounts.";
+                    return;
+                }
+
+                if (!TryParsePositiveAmount(FormValue(form, "amount"), 0, out int amount, out message))
+                    return;
+
+                string note = FormValue(form, "note");
+                string description = string.IsNullOrWhiteSpace(note) ? "RegionWeb admin transfer" : note;
+                if (InvokeWebTransfer(money, fromID, toID, amount, description, out string reason))
+                {
+                    severity = "ok";
+                    message = "Transferred " + amount.ToString(CultureInfo.InvariantCulture) + " tokens from " + fromName + " to " + toName + ".";
+                }
+                else
+                {
+                    message = string.IsNullOrWhiteSpace(reason) ? "Admin transfer failed." : reason;
+                }
+                return;
+            }
+
+            message = "Unknown admin action.";
         }
 
         private void HandleCurrencyBuy(CurrencyWebSession session, Dictionary<string, string> form, out string message, out string severity)
@@ -903,7 +1186,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             html.Append("<main class=\"wrap wallet-page\"><a class=\"back\" href=\"")
                 .Append(Html(m_basePath)).Append("/\">Back to estate</a>")
                 .Append("<p class=\"feature-kicker\">Reserved area</p><h1>Avatar Wallet</h1>")
-                .Append("<p class=\"lead\">Request a one-time token inworld, then use it here to view your balance, statement, token purchases and avatar transfers.</p>");
+                .Append("<p class=\"lead\">Request a one-time token inworld, then use it here to view your balance, statement, token purchases and avatar transfers.</p>")
+                .Append("<p class=\"wallet-note\"><a href=\"").Append(Html(m_basePath)).Append("/currency/admin\">Estate owner money admin</a></p>");
 
             AppendCurrencyMessage(html, message, string.IsNullOrEmpty(message) || message.StartsWith("Token sent", StringComparison.Ordinal) || message.StartsWith("You have", StringComparison.Ordinal) ? "ok" : "error");
 
@@ -920,6 +1204,35 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 .Append("<label>Avatar name<input name=\"avatar\" value=\"").Append(Html(avatarName)).Append("\" required placeholder=\"First Last\"></label>")
                 .Append("<label>Token<input name=\"token\" required autocomplete=\"one-time-code\" placeholder=\"8-character token\"></label>")
                 .Append("<button type=\"submit\">Open wallet</button></form></article></section></main>")
+                .Append(EndPage());
+
+            SendHtml(response, html.ToString());
+        }
+
+        private void SendCurrencyAdminLogin(IOSHttpResponse response, string message, string avatarName)
+        {
+            EstatePageContent estate = LoadEstateContent();
+            StringBuilder html = BeginPage("Money Admin - " + estate.Title);
+            html.Append("<main class=\"wrap wallet-page\"><a class=\"back\" href=\"")
+                .Append(Html(m_basePath)).Append("/currency/\">Back to wallet</a>")
+                .Append("<p class=\"feature-kicker\">Superadmin area</p><h1>Money Admin</h1>")
+                .Append("<p class=\"lead\">Estate owners request a one-time inworld token before managing wallet requests and avatar balances.</p>");
+
+            AppendCurrencyMessage(html, message, string.IsNullOrEmpty(message) || message.StartsWith("Admin token sent", StringComparison.Ordinal) ? "ok" : "error");
+
+            html.Append("<section class=\"wallet-grid\"><article class=\"wallet-card\"><h2>1. Request admin token</h2>")
+                .Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/admin\">")
+                .Append("<input type=\"hidden\" name=\"action\" value=\"admin-request-token\">")
+                .Append("<label>Estate owner avatar<input name=\"avatar\" value=\"").Append(Html(avatarName)).Append("\" required placeholder=\"First Last\"></label>")
+                .Append("<button type=\"submit\">Send admin token inworld</button></form>")
+                .Append("<p class=\"wallet-note\">The avatar must be the estate owner of at least one loaded region and must be online.</p></article>");
+
+            html.Append("<article class=\"wallet-card\"><h2>2. Login</h2>")
+                .Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/admin\">")
+                .Append("<input type=\"hidden\" name=\"action\" value=\"admin-login\">")
+                .Append("<label>Estate owner avatar<input name=\"avatar\" value=\"").Append(Html(avatarName)).Append("\" required placeholder=\"First Last\"></label>")
+                .Append("<label>Admin token<input name=\"token\" required autocomplete=\"one-time-code\" placeholder=\"8-character token\"></label>")
+                .Append("<button type=\"submit\">Open money admin</button></form></article></section></main>")
                 .Append(EndPage());
 
             SendHtml(response, html.ToString());
@@ -957,6 +1270,9 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 .Append("</strong></div><div><span>Session expires</span><strong>")
                 .Append(Html(session.ExpiresUTC.ToLocalTime().ToString("dd MMM HH:mm", CultureInfo.InvariantCulture)))
                 .Append("</strong></div></section>");
+
+            if (IsRegionWebSuperAdmin(session.AgentID))
+                html.Append("<p class=\"wallet-note\"><a href=\"").Append(Html(m_basePath)).Append("/currency/admin\">Open money admin</a></p>");
 
             if (money == null)
             {
@@ -1008,6 +1324,76 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             }
 
             html.Append("<form class=\"wallet-logout\" method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/\">")
+                .Append("<input type=\"hidden\" name=\"action\" value=\"logout\">")
+                .Append("<input type=\"hidden\" name=\"csrf\" value=\"").Append(Html(session.CsrfToken)).Append("\">")
+                .Append("<button type=\"submit\">Logout</button></form>")
+                .Append("</main>").Append(EndPage());
+            SendHtml(response, html.ToString());
+        }
+
+        private void SendCurrencyAdminDashboard(IOSHttpResponse response, CurrencyWebSession session, string message, string severity)
+        {
+            EstatePageContent estate = LoadEstateContent();
+            IMoneyModule money = GetCurrencyMoneyModule();
+            StringBuilder html = BeginPage("Money Admin - " + estate.Title);
+            html.Append("<main class=\"wrap wallet-page\"><a class=\"back\" href=\"")
+                .Append(Html(m_basePath)).Append("/currency/\">Back to wallet</a>")
+                .Append("<p class=\"feature-kicker\">Superadmin area</p><h1>Money Admin</h1>");
+
+            AppendCurrencyMessage(html, message, severity);
+
+            html.Append("<section class=\"wallet-summary\"><div><span>Admin</span><strong>")
+                .Append(Html(session.DisplayName)).Append("</strong></div><div><span>Role</span><strong>Estate owner</strong></div><div><span>Session expires</span><strong>")
+                .Append(Html(session.ExpiresUTC.ToLocalTime().ToString("dd MMM HH:mm", CultureInfo.InvariantCulture)))
+                .Append("</strong></div></section>");
+
+            if (money == null)
+            {
+                html.Append("<p class=\"wallet-message error\">Currency module is not active. Enable BetaGridLikeMoneyModule in [Economy].</p>");
+            }
+            else
+            {
+                AppendCurrencyAdminRequests(html, session);
+
+                html.Append("<section class=\"wallet-grid\"><article class=\"wallet-card\"><h2>Set balance</h2>")
+                    .Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/admin\">")
+                    .Append("<input type=\"hidden\" name=\"action\" value=\"admin-set-balance\">")
+                    .Append("<input type=\"hidden\" name=\"csrf\" value=\"").Append(Html(session.CsrfToken)).Append("\">")
+                    .Append("<label>Avatar<input name=\"avatar\" required placeholder=\"First Last or UUID\"></label>")
+                    .Append("<label>Balance<input name=\"amount\" type=\"number\" min=\"0\" required></label>")
+                    .Append("<label>Note<input name=\"note\" maxlength=\"160\" placeholder=\"Optional audit note\"></label>")
+                    .Append("<button type=\"submit\">Set balance</button></form></article>");
+
+                html.Append("<article class=\"wallet-card\"><h2>Credit / debit</h2>")
+                    .Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/admin\">")
+                    .Append("<input type=\"hidden\" name=\"action\" value=\"admin-credit\">")
+                    .Append("<input type=\"hidden\" name=\"csrf\" value=\"").Append(Html(session.CsrfToken)).Append("\">")
+                    .Append("<label>Avatar<input name=\"avatar\" required placeholder=\"First Last or UUID\"></label>")
+                    .Append("<label>Amount<input name=\"amount\" type=\"number\" min=\"1\" required></label>")
+                    .Append("<label>Note<input name=\"note\" maxlength=\"160\" placeholder=\"Optional audit note\"></label>")
+                    .Append("<button type=\"submit\">Credit</button></form>")
+                    .Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/admin\">")
+                    .Append("<input type=\"hidden\" name=\"action\" value=\"admin-debit\">")
+                    .Append("<input type=\"hidden\" name=\"csrf\" value=\"").Append(Html(session.CsrfToken)).Append("\">")
+                    .Append("<label>Avatar<input name=\"avatar\" required placeholder=\"First Last or UUID\"></label>")
+                    .Append("<label>Amount<input name=\"amount\" type=\"number\" min=\"1\" required></label>")
+                    .Append("<label>Note<input name=\"note\" maxlength=\"160\" placeholder=\"Optional audit note\"></label>")
+                    .Append("<button type=\"submit\">Debit</button></form></article>");
+
+                html.Append("<article class=\"wallet-card\"><h2>Transfer</h2>")
+                    .Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/admin\">")
+                    .Append("<input type=\"hidden\" name=\"action\" value=\"admin-transfer\">")
+                    .Append("<input type=\"hidden\" name=\"csrf\" value=\"").Append(Html(session.CsrfToken)).Append("\">")
+                    .Append("<label>From<input name=\"from\" required placeholder=\"First Last or UUID\"></label>")
+                    .Append("<label>To<input name=\"to\" required placeholder=\"First Last or UUID\"></label>")
+                    .Append("<label>Amount<input name=\"amount\" type=\"number\" min=\"1\" required></label>")
+                    .Append("<label>Note<input name=\"note\" maxlength=\"160\" placeholder=\"Optional audit note\"></label>")
+                    .Append("<button type=\"submit\">Transfer</button></form></article></section>");
+
+                AppendCurrencyAdminBalances(html, money);
+            }
+
+            html.Append("<form class=\"wallet-logout\" method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/admin\">")
                 .Append("<input type=\"hidden\" name=\"action\" value=\"logout\">")
                 .Append("<input type=\"hidden\" name=\"csrf\" value=\"").Append(Html(session.CsrfToken)).Append("\">")
                 .Append("<button type=\"submit\">Logout</button></form>")
@@ -1076,6 +1462,76 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     .Append(request.Amount.ToString(CultureInfo.InvariantCulture)).Append("</td><td>")
                     .Append(Html(request.Status)).Append("</td><td>")
                     .Append(Html(request.Note)).Append("</td></tr>");
+            }
+
+            html.Append("</tbody></table></div></section>");
+        }
+
+        private void AppendCurrencyAdminRequests(StringBuilder html, CurrencyWebSession session)
+        {
+            List<CurrencyPurchaseRequest> pending;
+            lock (m_currencyPurchaseLock)
+                pending = m_currencyPurchaseRequests.Values
+                    .Where(r => (r.Status ?? string.Empty).Equals("pending", StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(r => r.RequestedUTC)
+                    .ToList();
+
+            html.Append("<section class=\"wallet-card wallet-statement\"><h2>Pending purchase requests</h2>");
+            if (pending.Count == 0)
+            {
+                html.Append("<p class=\"wallet-note\">No pending token purchase requests.</p></section>");
+                return;
+            }
+
+            html.Append("<div class=\"wallet-table\"><table><thead><tr><th>Date</th><th>ID</th><th>Avatar</th><th>Amount</th><th>Action</th></tr></thead><tbody>");
+            foreach (CurrencyPurchaseRequest request in pending)
+            {
+                html.Append("<tr><td>").Append(Html(request.RequestedUTC.ToLocalTime().ToString("dd MMM HH:mm", CultureInfo.InvariantCulture))).Append("</td><td>")
+                    .Append(Html(request.RequestID)).Append("</td><td>")
+                    .Append(Html(request.DisplayName)).Append("</td><td>")
+                    .Append(request.Amount.ToString(CultureInfo.InvariantCulture)).Append("</td><td>")
+                    .Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/admin\">")
+                    .Append("<input type=\"hidden\" name=\"action\" value=\"admin-approve\">")
+                    .Append("<input type=\"hidden\" name=\"csrf\" value=\"").Append(Html(session.CsrfToken)).Append("\">")
+                    .Append("<input type=\"hidden\" name=\"request\" value=\"").Append(Html(request.RequestID)).Append("\">")
+                    .Append("<input name=\"note\" maxlength=\"160\" placeholder=\"Note\">")
+                    .Append("<button type=\"submit\">Approve</button></form>")
+                    .Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/admin\">")
+                    .Append("<input type=\"hidden\" name=\"action\" value=\"admin-deny\">")
+                    .Append("<input type=\"hidden\" name=\"csrf\" value=\"").Append(Html(session.CsrfToken)).Append("\">")
+                    .Append("<input type=\"hidden\" name=\"request\" value=\"").Append(Html(request.RequestID)).Append("\">")
+                    .Append("<input name=\"note\" maxlength=\"160\" placeholder=\"Reason\">")
+                    .Append("<button type=\"submit\">Deny</button></form></td></tr>");
+            }
+
+            html.Append("</tbody></table></div></section>");
+        }
+
+        private void AppendCurrencyAdminBalances(StringBuilder html, IMoneyModule money)
+        {
+            List<Dictionary<string, string>> rows = GetCurrencyBalances(money, 50);
+            html.Append("<section class=\"wallet-card wallet-statement\"><h2>Top balances</h2>");
+            if (rows.Count == 0)
+            {
+                html.Append("<p class=\"wallet-note\">No balance rows yet.</p></section>");
+                return;
+            }
+
+            html.Append("<div class=\"wallet-table\"><table><thead><tr><th>Avatar</th><th>UUID</th><th>Balance</th></tr></thead><tbody>");
+            foreach (Dictionary<string, string> row in rows)
+            {
+                string agentText = RowValue(row, "agent_id");
+                string displayName = agentText;
+                if (UUID.TryParse(agentText, out UUID agentID))
+                {
+                    string resolved = LookupAvatarName(agentID);
+                    if (!string.IsNullOrWhiteSpace(resolved))
+                        displayName = resolved;
+                }
+
+                html.Append("<tr><td>").Append(Html(displayName)).Append("</td><td>")
+                    .Append(Html(agentText)).Append("</td><td>")
+                    .Append(Html(RowValue(row, "balance"))).Append("</td></tr>");
             }
 
             html.Append("</tbody></table></div></section>");
@@ -1196,6 +1652,45 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             {
                 bool result = method.Invoke(money, args) is bool b && b;
                 reason = args[4] as string ?? string.Empty;
+                return result;
+            }
+            catch (Exception e)
+            {
+                reason = e.InnerException != null ? e.InnerException.Message : e.Message;
+                return false;
+            }
+        }
+
+        private bool InvokeWebSetBalance(IMoneyModule money, UUID agentID, int amount, string description, out string reason)
+        {
+            return InvokeMoneyAdminMethod(money, "WebSetBalance", agentID, amount, description, out reason);
+        }
+
+        private bool InvokeWebCreditCurrency(IMoneyModule money, UUID agentID, int amount, string description, out string reason)
+        {
+            return InvokeMoneyAdminMethod(money, "WebCreditCurrency", agentID, amount, description, out reason);
+        }
+
+        private bool InvokeWebDebitCurrency(IMoneyModule money, UUID agentID, int amount, string description, out string reason)
+        {
+            return InvokeMoneyAdminMethod(money, "WebDebitCurrency", agentID, amount, description, out reason);
+        }
+
+        private bool InvokeMoneyAdminMethod(IMoneyModule money, string methodName, UUID agentID, int amount, string description, out string reason)
+        {
+            reason = string.Empty;
+            MethodInfo method = money.GetType().GetMethod(methodName, BindingFlags.Public | BindingFlags.Instance);
+            if (method == null)
+            {
+                reason = "Currency module does not expose " + methodName + ".";
+                return false;
+            }
+
+            object[] args = new object[] { agentID, amount, description ?? string.Empty, reason };
+            try
+            {
+                bool result = method.Invoke(money, args) is bool b && b;
+                reason = args[3] as string ?? string.Empty;
                 return result;
             }
             catch (Exception e)
@@ -1371,6 +1866,26 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             return rows;
         }
 
+        private List<Dictionary<string, string>> GetCurrencyBalances(IMoneyModule money, int limit)
+        {
+            List<Dictionary<string, string>> rows = new List<Dictionary<string, string>>();
+            MethodInfo method = money.GetType().GetMethod("GetCurrencyBalances", BindingFlags.Public | BindingFlags.Instance);
+            if (method == null)
+                return rows;
+
+            try
+            {
+                object result = method.Invoke(money, new object[] { limit });
+                if (result is IEnumerable<Dictionary<string, string>> enumerable)
+                    rows.AddRange(enumerable);
+            }
+            catch
+            {
+            }
+
+            return rows;
+        }
+
         private bool TryParsePositiveAmount(string text, int maxAmount, out int amount, out string reason)
         {
             amount = 0;
@@ -1388,6 +1903,39 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             }
 
             return true;
+        }
+
+        private bool TryParseWholeAmount(string text, out int amount, out string reason)
+        {
+            amount = 0;
+            reason = string.Empty;
+            if (!int.TryParse((text ?? string.Empty).Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out amount) || amount < 0)
+            {
+                reason = "Amount must be zero or a positive whole number.";
+                return false;
+            }
+
+            return true;
+        }
+
+        private bool IsCurrencyAdminSession(CurrencyWebSession session)
+        {
+            return session != null && session.IsAdmin && IsRegionWebSuperAdmin(session.AgentID);
+        }
+
+        private bool IsRegionWebSuperAdmin(UUID agentID)
+        {
+            if (agentID == UUID.Zero)
+                return false;
+
+            foreach (Scene scene in GetSceneSnapshot())
+            {
+                EstateSettings estate = scene.RegionInfo.EstateSettings;
+                if (estate != null && estate.EstateOwner == agentID)
+                    return true;
+            }
+
+            return false;
         }
 
         private CurrencyWebSession GetCurrencySession(IOSHttpRequest request)
@@ -2308,6 +2856,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Usage.Add("Set the LoginService Currency value to the viewer-facing currency name you want users to see beside their balance.");
                     content.Usage.Add("Use console commands such as money show, money balance, money set, money give, money take, money transfer, money export and money import for estate administration.");
                     content.Usage.Add("Open /regionweb/currency/ for the reserved avatar wallet area: users request an inworld token, log in on RegionWeb, view balance/statement, buy tokens and transfer to another avatar.");
+                    content.Usage.Add("Estate owners can open /regionweb/currency/admin, request an inworld admin token and manage pending token requests plus avatar balances.");
                     content.Usage.Add("Use CurrencyBuyEnabled, CurrencyTransferEnabled, CurrencyChallengeCooldownSeconds, CurrencyStatementLimit and CurrencyBuyLimit in [RegionWeb] to tune the wallet.");
                     content.Usage.Add("Set CurrencyBuyMode = request if purchases should become pending wallet requests instead of immediate credits.");
                     content.Usage.Add("Use regionweb currency pending, regionweb currency approve <request-id> and regionweb currency deny <request-id> to manage pending wallet purchase requests from the simulator console.");
@@ -3774,6 +4323,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             public string DisplayName;
             public string Token;
             public DateTime ExpiresUTC;
+            public bool IsAdmin;
         }
 
         private class CurrencyWebSession
@@ -3782,6 +4332,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             public string DisplayName;
             public string CsrfToken;
             public DateTime ExpiresUTC;
+            public bool IsAdmin;
         }
 
         private class CurrencyPurchaseRequest
