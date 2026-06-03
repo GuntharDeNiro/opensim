@@ -3732,7 +3732,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Title = MultiGridFeatureTitle;
                     content.Summary = MultiGridFeatureBody;
                     content.Overview = MultiGridFeatureOverview;
-                    content.Usage.Add("Enable [MultiGridAttachments] and list attachment names in Grids, for example Grids = \"osgrid,vibel\".");
+                    content.Usage.Add("Enable [MultiGridAttachments] and list attachment names in Grids, for example Grids = \"osgrid,vibel,francogrid,thirdrock,metropolis\".");
                     content.Usage.Add("Create one [MultiGridAttachment.<name>] section per target with GridServerURI pointing at the target grid service root, such as http://grid.example.com:8002.");
                     content.Usage.Add("Set ExternalHostName and ServerURI to your public DNS endpoint, for example vanilla-sim.com and http://vanilla-sim.com:9000.");
                     content.Usage.Add("Leave Regions empty to publish every local region, or list region names/UUIDs to publish only selected regions.");
