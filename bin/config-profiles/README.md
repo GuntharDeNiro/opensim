@@ -20,12 +20,18 @@ Quick Workflow
 2. Switch to standalone Hypergrid:
 
    ```powershell
-   powershell -ExecutionPolicy Bypass -File .\config-profiles\switch-to-standalone-hg.ps1 -HostName vanilla-sim.com
+   powershell -ExecutionPolicy Bypass -File .\config-profiles\switch-to-standalone-hg.ps1 -HostName vanilla-sim.org
    ```
 
-   Replace `vanilla-sim.com` with the public DNS name that Hypergrid visitors
+   Replace `vanilla-sim.org` with the public DNS name that Hypergrid visitors
    can reach. Some grids reject raw-IP Hypergrid addresses, so prefer a domain
    over `173.212.208.126`. Do not use `127.0.0.1` for a public Hypergrid.
+
+   To publish the standalone regions to OSGrid and ViBel at the same time:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\config-profiles\switch-to-standalone-hg.ps1 -HostName vanilla-sim.org -AttachPublicGrids
+   ```
 
 3. Switch back to OSGrid:
 
@@ -57,7 +63,7 @@ The OSGrid switch restores both files when that captured storage profile exists.
 For a new clean lab only, you can install the sample region too:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\config-profiles\switch-to-standalone-hg.ps1 -HostName vanilla-sim.com -InstallFreshRegions
+powershell -ExecutionPolicy Bypass -File .\config-profiles\switch-to-standalone-hg.ps1 -HostName vanilla-sim.org -InstallFreshRegions
 ```
 
 What The Standalone Profile Enables
@@ -85,25 +91,42 @@ registries:
 ```ini
 [MultiGridAttachments]
     Enabled = true
-    Grids = "osgrid,friend"
+    Grids = "osgrid,vibel"
     ContinueOnFailure = true
 
 [MultiGridAttachment.osgrid]
     Enabled = true
     GridServerURI = "http://hg.osgrid.org:80"
-    ExternalHostName = "vanilla-sim.com"
-    ServerURI = "http://vanilla-sim.com:9000"
+    ExternalHostName = "vanilla-sim.org"
+    ServerURI = "http://vanilla-sim.org:9000"
     Regions = ""
     Location = ""
     Strict = false
 
+[MultiGridAttachment.vibel]
+    Enabled = true
+    GridServerURI = "http://grid.vibel.eu:8002"
+    ExternalHostName = "vanilla-sim.org"
+    ServerURI = "http://vanilla-sim.org:9000"
+    Regions = ""
+    Location = ""
+    Strict = false
+```
+
+For a friend's private grid, add another name to `Grids` and another
+attachment section:
+
+```ini
+[MultiGridAttachments]
+    Grids = "osgrid,vibel,friend"
+
 [MultiGridAttachment.friend]
     Enabled = true
     GridServerURI = "http://friend-grid.example.com:8002"
-    ExternalHostName = "vanilla-sim.com"
-    ServerURI = "http://vanilla-sim.com:9000"
+    ExternalHostName = "vanilla-sim.org"
+    ServerURI = "http://vanilla-sim.org:9000"
     Regions = "Vanilla Code,Vanilla Test"
-    Location = "10463,8886"
+    Location = ""
     Strict = false
     ; AuthType = "BasicHttpAuthentication"
     ; HttpAuthUsername = ""

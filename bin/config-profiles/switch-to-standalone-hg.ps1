@@ -1,6 +1,7 @@
 param(
     [string]$HostName = "",
-    [switch]$InstallFreshRegions
+    [switch]$InstallFreshRegions,
+    [switch]$AttachPublicGrids
 )
 
 $ErrorActionPreference = "Stop"
@@ -37,11 +38,49 @@ function Expand-Template([string]$Path) {
     return $content
 }
 
+function Set-IniKey([string]$Content, [string]$Section, [string]$Key, [string]$Value) {
+    $newline = "`n"
+    if ($Content.Contains("`r`n")) {
+        $newline = "`r`n"
+    }
+
+    $lines = $Content -split "`r?`n", -1
+    $inSection = $false
+
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+
+        if ($line -match '^\s*\[(.+)\]\s*$') {
+            $inSection = ($matches[1] -eq $Section)
+            continue
+        }
+
+        if ($inSection -and $line -match "^\s*$([regex]::Escape($Key))\s*=") {
+            $indent = ""
+            if ($line -match '^(\s*)') {
+                $indent = $matches[1]
+            }
+
+            $lines[$i] = "$indent$Key = $Value"
+            return [string]::Join($newline, $lines)
+        }
+    }
+
+    throw "Cannot find key $Key in section [$Section]."
+}
+
 if (-not (Test-Path $Template)) {
     throw "Cannot find standalone profile template $Template."
 }
 
 $openSimIni = Expand-Template $Template
+if ($AttachPublicGrids) {
+    $openSimIni = Set-IniKey $openSimIni "MultiGridAttachments" "Enabled" "true"
+    $openSimIni = Set-IniKey $openSimIni "MultiGridAttachments" "Grids" '"osgrid,vibel"'
+    $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.osgrid" "Enabled" "true"
+    $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.vibel" "Enabled" "true"
+}
+
 if ($openSimIni.Contains("CHANGE_ME_PUBLIC_HOST")) {
     Write-Warning "OpenSim.ini still contains CHANGE_ME_PUBLIC_HOST. Pass -HostName with your public IP or DNS."
 }
@@ -78,6 +117,9 @@ if ($InstallFreshRegions) {
 
 Write-Host "Switched OpenSim.ini to standalone Hypergrid."
 Write-Host "Switched SQLite and currency storage to dedicated bin\StandaloneHG files."
+if ($AttachPublicGrids) {
+    Write-Host "Enabled secondary region attachments: OSGrid, ViBel."
+}
 Write-Host "Hypergrid address:"
 if ($HostName.Trim().Length -gt 0) {
     Write-Host "  http://$($HostName.Trim()):9000/"
