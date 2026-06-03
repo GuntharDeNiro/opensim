@@ -20,11 +20,12 @@ Quick Workflow
 2. Switch to standalone Hypergrid:
 
    ```powershell
-   powershell -ExecutionPolicy Bypass -File .\config-profiles\switch-to-standalone-hg.ps1 -HostName 173.212.208.126
+   powershell -ExecutionPolicy Bypass -File .\config-profiles\switch-to-standalone-hg.ps1 -HostName vanilla-sim.com
    ```
 
-   Replace `173.212.208.126` with the public IP or DNS name that Hypergrid
-   visitors can reach. Do not use `127.0.0.1` for a public Hypergrid.
+   Replace `vanilla-sim.com` with the public DNS name that Hypergrid visitors
+   can reach. Some grids reject raw-IP Hypergrid addresses, so prefer a domain
+   over `173.212.208.126`. Do not use `127.0.0.1` for a public Hypergrid.
 
 3. Switch back to OSGrid:
 
@@ -56,7 +57,7 @@ The OSGrid switch restores both files when that captured storage profile exists.
 For a new clean lab only, you can install the sample region too:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\config-profiles\switch-to-standalone-hg.ps1 -HostName 173.212.208.126 -InstallFreshRegions
+powershell -ExecutionPolicy Bypass -File .\config-profiles\switch-to-standalone-hg.ps1 -HostName vanilla-sim.com -InstallFreshRegions
 ```
 
 What The Standalone Profile Enables
@@ -72,6 +73,48 @@ What The Standalone Profile Enables
 - RegionWeb wallet in request mode by default
 - PayPal settings present but disabled until real credentials are configured
 - TextBuild enabled on channel `/88` for estate managers
+
+Multi-Grid Attachments
+----------------------
+
+The standalone profile includes a disabled `[MultiGridAttachments]` section.
+When enabled, the primary grid registration still happens first as usual, then
+the simulator fan-outs the same region metadata to any named secondary grid
+registries:
+
+```ini
+[MultiGridAttachments]
+    Enabled = true
+    Grids = "osgrid,friend"
+    ContinueOnFailure = true
+
+[MultiGridAttachment.osgrid]
+    Enabled = true
+    GridServerURI = "http://hg.osgrid.org:80"
+    ExternalHostName = "vanilla-sim.com"
+    ServerURI = "http://vanilla-sim.com:9000"
+    Regions = ""
+    Location = ""
+    Strict = false
+
+[MultiGridAttachment.friend]
+    Enabled = true
+    GridServerURI = "http://friend-grid.example.com:8002"
+    ExternalHostName = "vanilla-sim.com"
+    ServerURI = "http://vanilla-sim.com:9000"
+    Regions = "Vanilla Code,Vanilla Test"
+    Location = "10463,8886"
+    Strict = false
+    ; AuthType = "BasicHttpAuthentication"
+    ; HttpAuthUsername = ""
+    ; HttpAuthPassword = ""
+```
+
+Use this as a publication/attachment layer, not as three mixed identity
+backends. The region keeps one primary grid for inventory, assets, user
+accounts and presence. A secondary grid must allow your simulator to register
+with its grid service; public grids may refuse this unless they explicitly
+support or authorize it.
 
 Ports
 -----

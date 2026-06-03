@@ -34,6 +34,7 @@ using Nini.Config;
 using OpenMetaverse;
 
 using OpenSim.Framework;
+using OpenSim.Framework.ServiceAuth;
 using OpenSim.Region.Framework.Interfaces;
 using OpenSim.Region.Framework.Scenes;
 using OpenSim.Server.Base;
@@ -54,6 +55,9 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Grid
         private IGridService m_RemoteGridService;
 
         private RegionInfoCache m_RegionInfoCache;
+        private readonly List<MultiGridAttachment> m_MultiGridAttachments = new();
+        private bool m_MultiGridEnabled = false;
+        private bool m_MultiGridContinueOnFailure = true;
 
         public RegionGridServicesConnector()
         {
@@ -133,6 +137,7 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Grid
             }
 
             m_RegionInfoCache = new RegionInfoCache();
+            InitialiseMultiGridAttachments(source);
             return true;
         }
 
@@ -189,8 +194,14 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Grid
         public string RegisterRegion(UUID scopeID, GridRegion regionInfo)
         {
             string msg = m_LocalGridService.RegisterRegion(scopeID, regionInfo);
-            if (msg.Length == 0 && m_RemoteGridService != null)
-                return m_RemoteGridService.RegisterRegion(scopeID, regionInfo);
+            if (msg.Length == 0)
+            {
+                if (m_RemoteGridService != null)
+                    msg = m_RemoteGridService.RegisterRegion(scopeID, regionInfo);
+
+                if (msg.Length == 0)
+                    RegisterRegionWithMultiGridAttachments(scopeID, regionInfo);
+            }
 
             return msg;
         }
@@ -200,11 +211,359 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Grid
             if (m_LocalGridService.DeregisterRegion(regionID))
             {
                 if (m_RemoteGridService != null)
-                    return m_RemoteGridService.DeregisterRegion(regionID);
+                {
+                    bool remoteOk = m_RemoteGridService.DeregisterRegion(regionID);
+                    DeregisterRegionFromMultiGridAttachments(regionID);
+                    return remoteOk;
+                }
+                DeregisterRegionFromMultiGridAttachments(regionID);
                 return true;
             }
 
             return false;
+        }
+
+        private void InitialiseMultiGridAttachments(IConfigSource source)
+        {
+            IConfig config = source.Configs["MultiGridAttachments"];
+            if (config == null)
+                return;
+
+            m_MultiGridEnabled = config.GetBoolean("Enabled", false);
+            if (!m_MultiGridEnabled)
+                return;
+
+            m_MultiGridContinueOnFailure = config.GetBoolean("ContinueOnFailure", true);
+
+            string gridList = config.GetString("Grids", string.Empty);
+            foreach (string rawName in gridList.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string name = rawName.Trim();
+                if (name.Length == 0)
+                    continue;
+
+                IConfig attachmentConfig = FindMultiGridAttachmentConfig(source, name);
+                if (attachmentConfig == null)
+                {
+                    m_log.WarnFormat("[REGION GRID CONNECTOR]: MultiGrid attachment {0} has no config section", name);
+                    continue;
+                }
+
+                MultiGridAttachment attachment = MultiGridAttachment.FromConfig(name, attachmentConfig);
+                if (!attachment.Enabled)
+                    continue;
+
+                if (attachment.GridServerURI.Length == 0)
+                {
+                    m_log.WarnFormat("[REGION GRID CONNECTOR]: MultiGrid attachment {0} has no GridServerURI", attachment.Name);
+                    continue;
+                }
+
+                m_MultiGridAttachments.Add(attachment);
+            }
+
+            if (m_MultiGridAttachments.Count > 0)
+                m_log.InfoFormat("[REGION GRID CONNECTOR]: enabled {0} MultiGrid attachment(s)", m_MultiGridAttachments.Count);
+        }
+
+        private static IConfig FindMultiGridAttachmentConfig(IConfigSource source, string name)
+        {
+            return source.Configs["MultiGridAttachment " + name]
+                ?? source.Configs["MultiGridAttachment:" + name]
+                ?? source.Configs["MultiGridAttachment." + name];
+        }
+
+        private void RegisterRegionWithMultiGridAttachments(UUID primaryScopeID, GridRegion regionInfo)
+        {
+            if (!m_MultiGridEnabled || m_MultiGridAttachments.Count == 0)
+                return;
+
+            foreach (MultiGridAttachment attachment in m_MultiGridAttachments)
+            {
+                if (!attachment.MatchesRegion(regionInfo))
+                    continue;
+
+                string error = RegisterRegionWithMultiGridAttachment(primaryScopeID, regionInfo, attachment);
+                if (error.Length == 0)
+                    continue;
+
+                if (!m_MultiGridContinueOnFailure || attachment.Strict)
+                    throw new Exception(error);
+            }
+        }
+
+        private string RegisterRegionWithMultiGridAttachment(UUID primaryScopeID, GridRegion regionInfo, MultiGridAttachment attachment)
+        {
+            GridRegion attachedRegion = attachment.Apply(regionInfo);
+            UUID scopeID = attachment.ScopeID.IsZero() ? primaryScopeID : attachment.ScopeID;
+
+            Dictionary<string, object> rinfo = attachedRegion.ToKeyValuePairs();
+            Dictionary<string, object> sendData = new()
+            {
+                ["SCOPEID"] = scopeID.ToString(),
+                ["VERSIONMIN"] = ProtocolVersions.ClientProtocolVersionMin.ToString(),
+                ["VERSIONMAX"] = ProtocolVersions.ClientProtocolVersionMax.ToString(),
+                ["METHOD"] = "register"
+            };
+
+            foreach (KeyValuePair<string, object> kvp in rinfo)
+                sendData[kvp.Key] = (string)kvp.Value;
+
+            string endpoint = attachment.GridPostURI;
+            try
+            {
+                string reply = SynchronousRestFormsRequester.MakePostRequest(
+                    endpoint,
+                    ServerUtils.BuildQueryString(sendData),
+                    attachment.Auth);
+
+                if (reply.Length > 0)
+                {
+                    Dictionary<string, object> replyData = ServerUtils.ParseXmlResponse(reply);
+                    if (replyData.TryGetValue("Result", out object tmpo) && tmpo is string result)
+                    {
+                        if (result.Equals("success", StringComparison.CurrentCultureIgnoreCase))
+                        {
+                            m_log.InfoFormat(
+                                "[REGION GRID CONNECTOR]: MultiGrid attachment {0} registered region {1} at {2}",
+                                attachment.Name, attachedRegion.RegionName, endpoint);
+                            return string.Empty;
+                        }
+
+                        if (result.Equals("failure", StringComparison.CurrentCultureIgnoreCase))
+                        {
+                            string message = replyData.TryGetValue("Message", out object msg) ? msg.ToString() : "unknown failure";
+                            string error = string.Format(
+                                "MultiGrid attachment {0} registration failed: {1}",
+                                attachment.Name, message);
+                            m_log.ErrorFormat("[REGION GRID CONNECTOR]: {0}", error);
+                            return error;
+                        }
+
+                        string unexpected = string.Format(
+                            "MultiGrid attachment {0} returned unexpected result {1}",
+                            attachment.Name, result);
+                        m_log.ErrorFormat("[REGION GRID CONNECTOR]: {0}", unexpected);
+                        return unexpected;
+                    }
+
+                    string missing = string.Format(
+                        "MultiGrid attachment {0} reply did not contain Result",
+                        attachment.Name);
+                    m_log.ErrorFormat("[REGION GRID CONNECTOR]: {0}", missing);
+                    return missing;
+                }
+
+                string empty = string.Format(
+                    "MultiGrid attachment {0} received empty reply from {1}",
+                    attachment.Name, endpoint);
+                m_log.ErrorFormat("[REGION GRID CONNECTOR]: {0}", empty);
+                return empty;
+            }
+            catch (Exception e)
+            {
+                string error = string.Format(
+                    "MultiGrid attachment {0} exception at {1}: {2}",
+                    attachment.Name, endpoint, e.Message);
+                m_log.ErrorFormat("[REGION GRID CONNECTOR]: {0}", error);
+                return error;
+            }
+        }
+
+        private void DeregisterRegionFromMultiGridAttachments(UUID regionID)
+        {
+            if (!m_MultiGridEnabled || m_MultiGridAttachments.Count == 0)
+                return;
+
+            foreach (MultiGridAttachment attachment in m_MultiGridAttachments)
+            {
+                Dictionary<string, object> sendData = new()
+                {
+                    ["REGIONID"] = regionID.ToString(),
+                    ["METHOD"] = "deregister"
+                };
+
+                try
+                {
+                    string reply = SynchronousRestFormsRequester.MakePostRequest(
+                        attachment.GridPostURI,
+                        ServerUtils.BuildQueryString(sendData),
+                        attachment.Auth);
+
+                    if (reply.Length == 0)
+                    {
+                        m_log.WarnFormat(
+                            "[REGION GRID CONNECTOR]: MultiGrid attachment {0} received empty deregister reply from {1}",
+                            attachment.Name, attachment.GridPostURI);
+                    }
+                }
+                catch (Exception e)
+                {
+                    m_log.WarnFormat(
+                        "[REGION GRID CONNECTOR]: MultiGrid attachment {0} deregister exception at {1}: {2}",
+                        attachment.Name, attachment.GridPostURI, e.Message);
+                }
+            }
+        }
+
+        private sealed class MultiGridAttachment
+        {
+            public string Name;
+            public bool Enabled;
+            public bool Strict;
+            public string GridServerURI;
+            public string GridPostURI;
+            public string ExternalHostName;
+            public string ServerURI;
+            public string RegionName;
+            public string RegionNamePrefix;
+            public string RegionNameSuffix;
+            public int? LocationX;
+            public int? LocationY;
+            public int? WorldLocationX;
+            public int? WorldLocationY;
+            public uint? HttpPort;
+            public UUID ScopeID;
+            public IServiceAuth Auth;
+            private readonly HashSet<string> m_Regions = new(StringComparer.OrdinalIgnoreCase);
+
+            public static MultiGridAttachment FromConfig(string name, IConfig config)
+            {
+                MultiGridAttachment attachment = new()
+                {
+                    Name = name,
+                    Enabled = config.GetBoolean("Enabled", true),
+                    Strict = config.GetBoolean("Strict", false),
+                    GridServerURI = NormalizeServerURI(config.GetString("GridServerURI", string.Empty)),
+                    ExternalHostName = config.GetString("ExternalHostName", string.Empty).Trim(),
+                    ServerURI = NormalizeOptionalURI(config.GetString("ServerURI", string.Empty)),
+                    RegionName = config.GetString("RegionName", string.Empty).Trim(),
+                    RegionNamePrefix = config.GetString("RegionNamePrefix", string.Empty),
+                    RegionNameSuffix = config.GetString("RegionNameSuffix", string.Empty),
+                    ScopeID = UUID.Zero
+                };
+
+                string scope = config.GetString("ScopeID", string.Empty).Trim();
+                if (scope.Length > 0)
+                    UUID.TryParse(scope, out attachment.ScopeID);
+
+                if (TryParsePair(config.GetString("Location", string.Empty), out int locX, out int locY))
+                {
+                    attachment.LocationX = locX;
+                    attachment.LocationY = locY;
+                }
+
+                if (TryParsePair(config.GetString("WorldLocation", string.Empty), out int worldX, out int worldY))
+                {
+                    attachment.WorldLocationX = worldX;
+                    attachment.WorldLocationY = worldY;
+                }
+
+                int httpPort = config.GetInt("HttpPort", -1);
+                if (httpPort >= 0)
+                    attachment.HttpPort = (uint)httpPort;
+
+                foreach (string region in config.GetString("Regions", string.Empty).Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    string trimmed = region.Trim();
+                    if (trimmed.Length > 0)
+                        attachment.m_Regions.Add(trimmed);
+                }
+
+                attachment.GridPostURI = attachment.GridServerURI.EndsWith("/grid", StringComparison.OrdinalIgnoreCase)
+                    ? attachment.GridServerURI
+                    : attachment.GridServerURI + "/grid";
+
+                attachment.Auth = BuildAuth(config);
+                return attachment;
+            }
+
+            public bool MatchesRegion(GridRegion region)
+            {
+                if (m_Regions.Count == 0)
+                    return true;
+
+                return m_Regions.Contains(region.RegionName) || m_Regions.Contains(region.RegionID.ToString());
+            }
+
+            public GridRegion Apply(GridRegion source)
+            {
+                GridRegion region = new(source);
+
+                if (RegionName.Length > 0)
+                    region.RegionName = RegionName;
+                else if (RegionNamePrefix.Length > 0 || RegionNameSuffix.Length > 0)
+                    region.RegionName = RegionNamePrefix + region.RegionName + RegionNameSuffix;
+
+                if (WorldLocationX.HasValue && WorldLocationY.HasValue)
+                {
+                    region.RegionLocX = WorldLocationX.Value;
+                    region.RegionLocY = WorldLocationY.Value;
+                }
+                else if (LocationX.HasValue && LocationY.HasValue)
+                {
+                    region.RegionLocX = (int)Util.RegionToWorldLoc((uint)LocationX.Value);
+                    region.RegionLocY = (int)Util.RegionToWorldLoc((uint)LocationY.Value);
+                }
+
+                if (ExternalHostName.Length > 0)
+                    region.ExternalHostName = ExternalHostName;
+
+                if (HttpPort.HasValue)
+                    region.HttpPort = HttpPort.Value;
+
+                if (ServerURI.Length > 0)
+                    region.ServerURI = ServerURI;
+                else if (ExternalHostName.Length > 0 || HttpPort.HasValue)
+                    region.RawServerURI = string.Empty;
+
+                return region;
+            }
+
+            private static IServiceAuth BuildAuth(IConfig config)
+            {
+                string authType = config.GetString("AuthType", "None");
+                if (!authType.Equals("BasicHttpAuthentication", StringComparison.OrdinalIgnoreCase))
+                    return null;
+
+                IniConfigSource authConfig = new();
+                IConfig authSection = authConfig.AddConfig("GridService");
+                authSection.Set("AuthType", "BasicHttpAuthentication");
+                authSection.Set("HttpAuthUsername", config.GetString("HttpAuthUsername", string.Empty));
+                authSection.Set("HttpAuthPassword", config.GetString("HttpAuthPassword", string.Empty));
+                return new BasicHttpAuthentication(authConfig, "GridService");
+            }
+
+            private static bool TryParsePair(string value, out int x, out int y)
+            {
+                x = 0;
+                y = 0;
+
+                if (string.IsNullOrWhiteSpace(value))
+                    return false;
+
+                string[] parts = value.Split(',');
+                if (parts.Length != 2)
+                    return false;
+
+                return int.TryParse(parts[0].Trim(), out x) && int.TryParse(parts[1].Trim(), out y);
+            }
+
+            private static string NormalizeServerURI(string uri)
+            {
+                uri = NormalizeOptionalURI(uri);
+                if (uri.EndsWith("/grid", StringComparison.OrdinalIgnoreCase))
+                    return uri.Substring(0, uri.Length - 5);
+                return uri;
+            }
+
+            private static string NormalizeOptionalURI(string uri)
+            {
+                uri = uri.Trim();
+                if (uri.Length == 0)
+                    return string.Empty;
+                return uri.EndsWith("/") ? uri.TrimEnd('/') : uri;
+            }
         }
 
         public List<GridRegion> GetNeighbours(UUID scopeID, UUID regionID)

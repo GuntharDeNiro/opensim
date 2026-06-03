@@ -64,6 +64,11 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             "The estate can run a local persistent currency ledger that sends live balances to the viewer, handles transfers, object payments, land/object purchases and simulator economy charges without requiring a separate currency server.";
         private const string CurrencyFeatureOverview =
             "The bundled BetaGridLikeMoneyModule now works as a lightweight local economy backend. It persists avatar balances in a tab-separated ledger, grants a configurable first-use balance, pushes MoneyBalanceReply updates so compatible viewers show the current balance, and applies the same balance path to viewer transfers, scripted money calls, object payments, land/object purchases, upload charges and group creation charges.";
+        private const string MultiGridFeatureTitle = "Multi-grid region attachments";
+        private const string MultiGridFeatureBody =
+            "Regions can keep one primary grid for identity, assets, inventory and presence while publishing their simulator endpoint to additional grid registries as configured secondary attachments.";
+        private const string MultiGridFeatureOverview =
+            "The region grid connector can now fan out successful primary region registrations to a configurable list of secondary grid services. Each attachment can target all regions or selected region names/UUIDs, override the advertised DNS name, HTTP endpoint, map location and region name, and use optional HTTP Basic authentication. Secondary attachments are best-effort by default so a public grid outage does not stop the simulator from booting.";
 
         private readonly object m_sync = new object();
         private readonly Dictionary<UUID, Scene> m_scenesByID = new Dictionary<UUID, Scene>();
@@ -3512,6 +3517,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             EnsureFeature(content.Features, "Group auto invite",
                 "Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects.");
             EnsureFeature(content.Features, CurrencyFeatureTitle, CurrencyFeatureBody);
+            EnsureFeature(content.Features, MultiGridFeatureTitle, MultiGridFeatureBody);
             EnsureFeature(content.Features, "Viewer polish",
                 "Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.");
             EnsureFeature(content.Features, ScriptEngineFeatureTitle, ScriptEngineFeatureBody);
@@ -3717,6 +3723,26 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Notes.Add("Wallet buy, transfer and logout forms are protected by a session CSRF token, and the statement can be downloaded as CSV.");
                     content.Notes.Add("Pending wallet purchase requests are stored in CurrencyPurchaseStorage as TSV so they survive simulator restarts.");
                     content.Notes.Add("PayPal checkout orders are stored in PayPalOrderStorage as TSV; tokens are credited only after the PayPal order capture returns completed.");
+                    break;
+
+                case "multi-grid-region-attachments":
+                case "multi-grid-attachments":
+                case "multigrid":
+                case "multi-grid":
+                    content.Title = MultiGridFeatureTitle;
+                    content.Summary = MultiGridFeatureBody;
+                    content.Overview = MultiGridFeatureOverview;
+                    content.Usage.Add("Enable [MultiGridAttachments] and list attachment names in Grids, for example Grids = \"osgrid,friend\".");
+                    content.Usage.Add("Create one [MultiGridAttachment.<name>] section per target with GridServerURI pointing at the target grid service root, such as http://grid.example.com:8002.");
+                    content.Usage.Add("Set ExternalHostName and ServerURI to your public DNS endpoint, for example vanilla-sim.com and http://vanilla-sim.com:9000.");
+                    content.Usage.Add("Leave Regions empty to publish every local region, or list region names/UUIDs to publish only selected regions.");
+                    content.Usage.Add("Use Location = x,y when the secondary grid needs a different map coordinate for the published region.");
+                    content.Usage.Add("Use RegionNamePrefix, RegionNameSuffix or RegionName when the target grid needs unique names.");
+                    content.Usage.Add("Set AuthType = BasicHttpAuthentication plus HttpAuthUsername/HttpAuthPassword when a private friend's grid protects its grid service.");
+                    content.Usage.Add("Keep Strict = false and ContinueOnFailure = true for public grids so one rejected attachment does not stop the simulator.");
+                    content.Notes.Add("This is a publication/attachment layer. The simulator still has one primary grid for inventory, assets, accounts and presence.");
+                    content.Notes.Add("Public grids may reject registration unless they explicitly allow your region server or provide credentials.");
+                    content.Notes.Add("Use a DNS name rather than a raw IP address for Hypergrid-facing endpoints; some grids refuse raw-IP HG addresses.");
                     break;
 
                 case "viewer-polish":
@@ -4385,6 +4411,20 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 || normalized == "viewer-visible currency";
         }
 
+        private static bool IsMultiGridFeature(string title)
+        {
+            if (string.IsNullOrEmpty(title))
+                return false;
+
+            string normalized = title.Trim().ToLowerInvariant();
+            return normalized == "multi-grid region attachments"
+                || normalized == "multi-grid attachments"
+                || normalized == "multigrid attachments"
+                || normalized == "multigrid"
+                || normalized == "multi-grid"
+                || normalized == "secondary grid attachments";
+        }
+
         private static void AddDefaultFeatures(List<FeatureItem> features)
         {
             features.Add(new FeatureItem
@@ -4439,6 +4479,11 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             });
             features.Add(new FeatureItem
             {
+                Title = MultiGridFeatureTitle,
+                Body = MultiGridFeatureBody
+            });
+            features.Add(new FeatureItem
+            {
                 Title = "Viewer polish",
                 Body = "Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent."
             });
@@ -4455,7 +4500,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             {
                 if (feature.Title.Equals(title, StringComparison.OrdinalIgnoreCase))
                 {
-                    if (IsScriptEngineFeature(title) || IsCurrencyFeature(title))
+                    if (IsScriptEngineFeature(title) || IsCurrencyFeature(title) || IsMultiGridFeature(title))
                         feature.Body = body;
                     return;
                 }
