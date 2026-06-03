@@ -3732,14 +3732,14 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Title = MultiGridFeatureTitle;
                     content.Summary = MultiGridFeatureBody;
                     content.Overview = MultiGridFeatureOverview;
-                    content.Usage.Add("Enable [MultiGridAttachments] and list attachment names in Grids, for example Grids = \"osgrid,vibel,francogrid,thirdrock,metropolis\".");
+                    content.Usage.Add("Enable [MultiGridAttachments] and list attachment names in Grids, for example Grids = \"osgrid,neverworld\".");
                     content.Usage.Add("Create one [MultiGridAttachment.<name>] section per target with GridServerURI pointing at the target grid service root, such as http://grid.example.com:8002.");
                     content.Usage.Add("Set ExternalHostName and ServerURI to your public DNS endpoint, for example vanilla-sim.com and http://vanilla-sim.com:9000.");
                     content.Usage.Add("Leave Regions empty to publish every local region, or list region names/UUIDs to publish only selected regions.");
                     content.Usage.Add("Use Location = x,y when the secondary grid needs a different map coordinate for the published region.");
                     content.Usage.Add("Use RegionNamePrefix, RegionNameSuffix or RegionName when the target grid needs unique names.");
                     content.Usage.Add("Set AuthType = BasicHttpAuthentication plus HttpAuthUsername/HttpAuthPassword when a private friend's grid protects its grid service.");
-                    content.Usage.Add("Keep Strict = false and ContinueOnFailure = true for public grids so one rejected attachment does not stop the simulator.");
+                    content.Usage.Add("Keep Strict = false, ContinueOnFailure = true and a short TimeoutSeconds value for public grids so rejected or slow attachments run in the background and do not stop the simulator.");
                     content.Notes.Add("This is a publication/attachment layer. The simulator still has one primary grid for inventory, assets, accounts and presence.");
                     content.Notes.Add("Public grids may reject registration unless they explicitly allow your region server or provide credentials.");
                     content.Notes.Add("Use a DNS name rather than a raw IP address for Hypergrid-facing endpoints; some grids refuse raw-IP HG addresses.");

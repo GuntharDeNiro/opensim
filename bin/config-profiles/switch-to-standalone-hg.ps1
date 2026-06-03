@@ -76,12 +76,9 @@ if (-not (Test-Path $Template)) {
 $openSimIni = Expand-Template $Template
 if ($AttachPublicGrids) {
     $openSimIni = Set-IniKey $openSimIni "MultiGridAttachments" "Enabled" "true"
-    $openSimIni = Set-IniKey $openSimIni "MultiGridAttachments" "Grids" '"osgrid,vibel,francogrid,thirdrock,metropolis"'
+    $openSimIni = Set-IniKey $openSimIni "MultiGridAttachments" "Grids" '"osgrid,neverworld"'
     $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.osgrid" "Enabled" "true"
-    $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.vibel" "Enabled" "true"
-    $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.francogrid" "Enabled" "true"
-    $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.thirdrock" "Enabled" "true"
-    $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.metropolis" "Enabled" "true"
+    $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.neverworld" "Enabled" "true"
 }
 
 if ($openSimIni.Contains("CHANGE_ME_PUBLIC_HOST")) {
@@ -121,7 +118,7 @@ if ($InstallFreshRegions) {
 Write-Host "Switched OpenSim.ini to standalone Hypergrid."
 Write-Host "Switched SQLite and currency storage to dedicated bin\StandaloneHG files."
 if ($AttachPublicGrids) {
-    Write-Host "Enabled secondary region attachments: OSGrid, ViBel, FrancoGrid, 3rd Rock Grid, Metropolis."
+    Write-Host "Enabled secondary region attachments: OSGrid, Neverworld Grid."
 }
 Write-Host "Hypergrid address:"
 if ($HostName.Trim().Length -gt 0) {

@@ -27,8 +27,8 @@ Quick Workflow
    can reach. Some grids reject raw-IP Hypergrid addresses, so prefer a domain
    over `173.212.208.126`. Do not use `127.0.0.1` for a public Hypergrid.
 
-   To publish the standalone regions to OSGrid, ViBel, FrancoGrid, 3rd Rock Grid
-   and Metropolis at the same time:
+   To publish the standalone regions to OSGrid and Neverworld Grid at the same
+   time:
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\config-profiles\switch-to-standalone-hg.ps1 -HostName vanilla-sim.com -AttachPublicGrids
@@ -92,7 +92,7 @@ registries:
 ```ini
 [MultiGridAttachments]
     Enabled = true
-    Grids = "osgrid,vibel,francogrid,thirdrock,metropolis"
+    Grids = "osgrid,neverworld"
     ContinueOnFailure = true
 
 [MultiGridAttachment.osgrid]
@@ -102,63 +102,37 @@ registries:
     ServerURI = "http://vanilla-sim.com:9000"
     Regions = ""
     Location = ""
+    TimeoutSeconds = 5
     Strict = false
 
-[MultiGridAttachment.vibel]
+[MultiGridAttachment.neverworld]
     Enabled = true
-    GridServerURI = "http://grid.vibel.eu:8002"
+    GridServerURI = "http://hg.neverworldgrid.com:8002"
     ExternalHostName = "vanilla-sim.com"
     ServerURI = "http://vanilla-sim.com:9000"
     Regions = ""
     Location = ""
-    Strict = false
-
-[MultiGridAttachment.francogrid]
-    Enabled = true
-    GridServerURI = "http://hg.francogrid.org:80"
-    ExternalHostName = "vanilla-sim.com"
-    ServerURI = "http://vanilla-sim.com:9000"
-    Regions = ""
-    Location = ""
-    Strict = false
-
-[MultiGridAttachment.thirdrock]
-    Enabled = true
-    GridServerURI = "http://grid.3rdrockgrid.com:8002"
-    ExternalHostName = "vanilla-sim.com"
-    ServerURI = "http://vanilla-sim.com:9000"
-    Regions = ""
-    Location = ""
-    Strict = false
-
-[MultiGridAttachment.metropolis]
-    Enabled = true
-    GridServerURI = "http://hypergrid.org:8002"
-    ExternalHostName = "vanilla-sim.com"
-    ServerURI = "http://vanilla-sim.com:9000"
-    Regions = ""
-    Location = ""
+    TimeoutSeconds = 5
     Strict = false
 ```
 
-For a friend's private grid, add another name to `Grids` and another
-attachment section:
+In this standalone profile, Vanilla is already the primary grid. If you run a
+different primary profile and want to publish back to Vanilla too, add
+`vanilla` to `Grids` and enable the optional Vanilla attachment:
 
 ```ini
 [MultiGridAttachments]
-    Grids = "osgrid,vibel,francogrid,thirdrock,metropolis,friend"
+    Grids = "osgrid,neverworld,vanilla"
 
-[MultiGridAttachment.friend]
+[MultiGridAttachment.vanilla]
     Enabled = true
-    GridServerURI = "http://friend-grid.example.com:8002"
+    GridServerURI = "http://vanilla-sim.com:9000"
     ExternalHostName = "vanilla-sim.com"
     ServerURI = "http://vanilla-sim.com:9000"
-    Regions = "Vanilla Code,Vanilla Test"
+    Regions = ""
     Location = ""
+    TimeoutSeconds = 5
     Strict = false
-    ; AuthType = "BasicHttpAuthentication"
-    ; HttpAuthUsername = ""
-    ; HttpAuthPassword = ""
 ```
 
 Use this as a publication/attachment layer, not as three mixed identity

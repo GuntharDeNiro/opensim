@@ -283,6 +283,19 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Grid
                 if (!attachment.MatchesRegion(regionInfo))
                     continue;
 
+                if (m_MultiGridContinueOnFailure && !attachment.Strict)
+                {
+                    UUID scopeCopy = primaryScopeID;
+                    GridRegion regionCopy = new(regionInfo);
+                    MultiGridAttachment attachmentCopy = attachment;
+                    Util.FireAndForget(
+                        _ => RegisterRegionWithMultiGridAttachment(scopeCopy, regionCopy, attachmentCopy),
+                        null,
+                        "MultiGridAttachmentRegister",
+                        false);
+                    continue;
+                }
+
                 string error = RegisterRegionWithMultiGridAttachment(primaryScopeID, regionInfo, attachment);
                 if (error.Length == 0)
                     continue;
@@ -315,7 +328,9 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Grid
                 string reply = SynchronousRestFormsRequester.MakePostRequest(
                     endpoint,
                     ServerUtils.BuildQueryString(sendData),
-                    attachment.Auth);
+                    attachment.Auth,
+                    attachment.TimeoutSeconds,
+                    false);
 
                 if (reply.Length > 0)
                 {
@@ -416,7 +431,9 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Grid
                     string reply = SynchronousRestFormsRequester.MakePostRequest(
                         attachment.GridPostURI,
                         ServerUtils.BuildQueryString(sendData),
-                        attachment.Auth);
+                        attachment.Auth,
+                        attachment.TimeoutSeconds,
+                        false);
 
                     if (reply.Length == 0)
                     {
@@ -451,6 +468,7 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Grid
             public int? WorldLocationX;
             public int? WorldLocationY;
             public uint? HttpPort;
+            public int TimeoutSeconds;
             public UUID ScopeID;
             public IServiceAuth Auth;
             private readonly HashSet<string> m_Regions = new(StringComparer.OrdinalIgnoreCase);
@@ -468,8 +486,11 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Grid
                     RegionName = config.GetString("RegionName", string.Empty).Trim(),
                     RegionNamePrefix = config.GetString("RegionNamePrefix", string.Empty),
                     RegionNameSuffix = config.GetString("RegionNameSuffix", string.Empty),
+                    TimeoutSeconds = 0,
                     ScopeID = UUID.Zero
                 };
+
+                attachment.TimeoutSeconds = Math.Max(1, config.GetInt("TimeoutSeconds", attachment.Strict ? 30 : 5));
 
                 string scope = config.GetString("ScopeID", string.Empty).Trim();
                 if (scope.Length > 0)
