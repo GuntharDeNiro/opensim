@@ -53,8 +53,9 @@ Databases
 The standalone Hypergrid profile includes and switches
 `config-include\storage\SQLiteStandalone.ini` to dedicated SQLite files under
 `bin\StandaloneHG\`. It also writes the local currency balance, transaction,
-wallet-request and PayPal-order files under `bin\StandaloneHG\Currency\`. That
-keeps standalone users, inventory, assets, friends and local currency state
+wallet-request and PayPal-order files under `bin\StandaloneHG\Currency\`, plus
+the built-in V2 groups database under `bin\StandaloneHG\groups.db`. That keeps
+standalone users, inventory, assets, friends, groups and local currency state
 separate from the OSGrid profile.
 
 The capture command stores your current `OpenSim.ini` and current
@@ -75,6 +76,7 @@ What The Standalone Profile Enables
 - YEngine
 - ubODE physics
 - Warp3D map rendering with depth-shaded water
+- Built-in Groups Module V2 with local SQLite storage
 - RegionWeb
 - Viewer-visible local currency ledger
 - RegionWeb wallet in request mode by default

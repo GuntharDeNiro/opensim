@@ -291,5 +291,51 @@ namespace OpenSim.Data.SQLite
                 return ExecuteNonQuery(cmd, m_Connection) > 0;
             }
         }
+
+        public long GetCount(string field, string key)
+        {
+            return GetCount(new string[] { field }, new string[] { key });
+        }
+
+        public long GetCount(string[] fields, string[] keys)
+        {
+            if (fields.Length != keys.Length)
+                return 0;
+
+            List<string> terms = new List<string>();
+
+            using (SQLiteCommand cmd = new SQLiteCommand())
+            {
+                for (int i = 0; i < fields.Length; i++)
+                {
+                    cmd.Parameters.Add(new SQLiteParameter(":" + fields[i], keys[i]));
+                    terms.Add("`" + fields[i] + "` = :" + fields[i]);
+                }
+
+                string where = String.Join(" and ", terms.ToArray());
+
+                return GetCount(cmd, where);
+            }
+        }
+
+        public long GetCount(string where)
+        {
+            using (SQLiteCommand cmd = new SQLiteCommand())
+                return GetCount(cmd, where);
+        }
+
+        private long GetCount(SQLiteCommand cmd, string where)
+        {
+            cmd.CommandText = String.Format("select count(*) as Count from {0} where {1}",
+                    m_Realm, where);
+
+            using (IDataReader reader = ExecuteReader(cmd, m_Connection))
+            {
+                if (reader != null && reader.Read())
+                    return Convert.ToInt64(reader["Count"]);
+            }
+
+            return 0;
+        }
     }
 }

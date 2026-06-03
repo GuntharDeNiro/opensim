@@ -1378,7 +1378,7 @@
     ;; or... use Groups Module V2, which works for standalones and robust grids
     ; Module = "Groups Module V2"
 
-    ;# {StorageProvider} {Module:Groups Module V2} {The DLL that provides the storage for V2} {OpenSim.Data.MySQL.dll}
+    ;# {StorageProvider} {Module:Groups Module V2} {The DLL that provides the storage for V2} {OpenSim.Data.MySQL.dll OpenSim.Data.PGSQL.dll OpenSim.Data.SQLite.dll}
     ; StorageProvider = OpenSim.Data.MySQL.dll
 
     ;# {ServicesConnectorModule} {Module:GroupsModule Module:Groups Module V2} {Service connector to use for groups} {XmlRpcGroupsServicesConnector "Groups Local Service Connector" "Groups Remote Service Connector" "Groups HG Service Connector"} XmlRpcGroupsServicesConnector
@@ -1432,7 +1432,7 @@
     ; DebugEnabled = false
 
     ; This makes the Group Messaging module very chatty on the console.
-    ; DebugMessagingEnabled = false
+    ; MessagingDebugEnabled = false
 
     ;; XmlRpc Security settings.  These must match those set on your backend
     ;; groups service if the service is using these keys
