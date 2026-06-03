@@ -33,7 +33,7 @@ function Backup-File([string]$Path) {
 function Expand-Template([string]$Path) {
     $content = Get-Content -Raw $Path
     if ($HostName.Trim().Length -gt 0) {
-        $content = $content.Replace("CHANGE_ME_PUBLIC_HOST", $HostName.Trim())
+        $content = $content.Replace("CHANGE_ME_PUBLIC_HOST", $HostName.Trim().ToLowerInvariant())
     }
     return $content
 }
@@ -122,7 +122,7 @@ if ($AttachPublicGrids) {
 }
 Write-Host "Hypergrid address:"
 if ($HostName.Trim().Length -gt 0) {
-    Write-Host "  http://$($HostName.Trim()):9000/"
+    Write-Host "  http://$($HostName.Trim().ToLowerInvariant()):9000/"
 } else {
     Write-Host "  http://CHANGE_ME_PUBLIC_HOST:9000/"
 }

@@ -319,6 +319,15 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Grid
 
                 if (reply.Length > 0)
                 {
+                    if (!LooksLikeGridServiceXmlReply(reply))
+                    {
+                        string nonGridReply = string.Format(
+                            "MultiGrid attachment {0} returned non-grid-service reply from {1}: {2}",
+                            attachment.Name, endpoint, AbbreviateForLog(reply, 140));
+                        m_log.ErrorFormat("[REGION GRID CONNECTOR]: {0}", nonGridReply);
+                        return nonGridReply;
+                    }
+
                     Dictionary<string, object> replyData = ServerUtils.ParseXmlResponse(reply);
                     if (replyData.TryGetValue("Result", out object tmpo) && tmpo is string result)
                     {
@@ -368,6 +377,25 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Grid
                 m_log.ErrorFormat("[REGION GRID CONNECTOR]: {0}", error);
                 return error;
             }
+        }
+
+        private static bool LooksLikeGridServiceXmlReply(string reply)
+        {
+            string trimmed = reply.TrimStart();
+            return trimmed.StartsWith("<ServerResponse", StringComparison.OrdinalIgnoreCase)
+                || trimmed.StartsWith("<?xml", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string AbbreviateForLog(string value, int maxLength)
+        {
+            string compact = value.Replace("\r", " ").Replace("\n", " ").Trim();
+            while (compact.Contains("  "))
+                compact = compact.Replace("  ", " ");
+
+            if (compact.Length <= maxLength)
+                return compact;
+
+            return compact.Substring(0, maxLength) + "...";
         }
 
         private void DeregisterRegionFromMultiGridAttachments(UUID regionID)
