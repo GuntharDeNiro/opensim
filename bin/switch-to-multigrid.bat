@@ -10,7 +10,7 @@ echo.
 echo === Switching OpenSim to Standalone Hypergrid + MultiGrid attachments ===
 echo Hostname: %HG_HOST%
 echo Primary grid: local Standalone Hypergrid
-echo Secondary attachments: OSGrid, Neverworld Grid, ZetaWorlds
+echo Secondary attachments: OSGrid, Neverworld Grid, ZetaWorlds, Craft World
 echo Regions.ini will not be touched.
 echo.
 

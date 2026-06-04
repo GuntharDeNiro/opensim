@@ -113,7 +113,7 @@ registries:
 ```ini
 [MultiGridAttachments]
     Enabled = true
-    Grids = "osgrid,neverworld,zetasim"
+    Grids = "osgrid,neverworld,zetasim,craft"
     ContinueOnFailure = true
     AutoCreateInboundPresence = true
 
@@ -145,6 +145,20 @@ registries:
     GridPostURI = "http://robust.zetaworlds.com:8003/grid"
     ExternalHostName = "vanilla-sim.com"
     ServerURI = "http://vanilla-sim.com:9000"
+    Regions = ""
+    Location = ""
+    TimeoutSeconds = 5
+    Strict = false
+
+[MultiGridAttachment.craft]
+    Enabled = true
+    GridServerURI = "http://craft-world.org:8003"
+    GridPostURI = "http://craft-world.org:8003/grid"
+    ExternalHostName = "vanilla-sim.com"
+    ServerURI = "http://vanilla-sim.com:9000"
+    AuthType = "BasicHttpAuthentication"
+    HttpAuthUsername = "plipbadalippHH"
+    HttpAuthPassword = "cTm78eVf5Lk2gBje8hyfdr1116gbh6"
     Regions = ""
     Location = ""
     TimeoutSeconds = 5
@@ -193,6 +207,12 @@ ZetaWorlds exposes Hypergrid login and gatekeeper on
 Robust GridService endpoint on `http://robust.zetaworlds.com:8003/grid`.
 The default ZetaWorlds Hypergrid destination is
 `hop://hg.zetaworlds.com:80/Welcome/128/128/25`.
+
+Craft World exposes Hypergrid login and gatekeeper on
+`http://craft-world.org:8002`, but self-hosted region registration uses its
+authenticated GridService endpoint on `http://craft-world.org:8003/grid`.
+The default Craft Hypergrid destination is
+`hop://craft-world.org:8002/Pulse%20Pavilion/128/128/25`.
 
 Keep `AutoCreateInboundPresence = true` for multigrid publication. Some attached
 grids teleport from their world map directly to this simulator's `/agent`
