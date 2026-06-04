@@ -1417,6 +1417,11 @@
     ;# {MessagingEnabled} {Module:GroupsModule Module:Groups Module V2} {Is groups messaging enabled?} {true false} true
     ; MessagingEnabled = true
 
+    ;# {ShowForeignActiveGroupTitles} {Enabled:true} {Preserve Hypergrid group titles when membership cannot be validated locally?} {true false} true
+    ;; Keeps incoming Hypergrid active group titles visible as display-only metadata.
+    ;; This does not grant local group powers or permissions.
+    ; ShowForeignActiveGroupTitles = true
+
     ;# {MessagingModule} {MessagingEnabled:true} {Module to use for groups messaging} {GroupsMessagingModule "Groups Messaging Module V2"} GroupsMessagingModule
     ; MessagingModule = GroupsMessagingModule
     ; or use "Groups Messaging Module V2" for Groups V2

@@ -178,6 +178,7 @@ namespace OpenSim.Region.Framework.Scenes
         private int m_attachmentScriptRestartGeneration;
         private bool m_forceMovementAnimationUpdateAfterCrossing;
         private int m_transferAgentUpdateWaitMS = 30000;
+        private bool m_showForeignActiveGroupTitles = true;
 
         /// <summary>
         /// Experimentally determined "fudge factor" to make sit-target positions
@@ -1199,6 +1200,10 @@ namespace OpenSim.Region.Framework.Scenes
                     10000,
                     sconfig.GetInt("TransferAgentUpdateWaitMS", m_transferAgentUpdateWaitMS));
             }
+
+            IConfig groupsConfig = m_scene.Config.Configs["Groups"];
+            if (groupsConfig != null)
+                m_showForeignActiveGroupTitles = groupsConfig.GetBoolean("ShowForeignActiveGroupTitles", m_showForeignActiveGroupTitles);
 
             ControllingClient.RefreshGroupMembership();
         }
@@ -4978,16 +4983,16 @@ namespace OpenSim.Region.Framework.Scenes
             else
                  cAgent.CrossingFlags = 0;
 
-            if(isCrossUpdate)
-            {
-                //cAgent.agentCOF = COF;
-                cAgent.ActiveGroupID = ControllingClient.ActiveGroupId;
-                cAgent.ActiveGroupName = ControllingClient.ActiveGroupName;
-                if(Grouptitle == null)
-                    cAgent.ActiveGroupTitle = String.Empty;
-                else
-                    cAgent.ActiveGroupTitle = Grouptitle;
-            }
+            // Always carry active group display metadata. Hypergrid teleports use
+            // non-crossing AgentData too, and remote regions can only preserve
+            // the title if we send it with the transfer.
+            //cAgent.agentCOF = COF;
+            cAgent.ActiveGroupID = ControllingClient.ActiveGroupId;
+            cAgent.ActiveGroupName = ControllingClient.ActiveGroupName;
+            if(Grouptitle == null)
+                cAgent.ActiveGroupTitle = String.Empty;
+            else
+                cAgent.ActiveGroupTitle = Grouptitle;
 
             IFriendsModule friendsModule = m_scene.RequestModuleInterface<IFriendsModule>();
             if (friendsModule != null)
@@ -5162,9 +5167,22 @@ namespace OpenSim.Region.Framework.Scenes
                 }
                 else
                 {
-                    // we got a unknown active group so get what groups thinks about us
-                    IGroupsModule gm = m_scene.RequestModuleInterface<IGroupsModule>();
-                    gm?.SendAgentGroupDataUpdate(ControllingClient);
+                    if (m_showForeignActiveGroupTitles && cAgent.ActiveGroupID.NotEqual(UUID.Zero) &&
+                            !String.IsNullOrEmpty(cAgent.ActiveGroupTitle))
+                    {
+                        // Hypergrid visitors may arrive with a valid home-grid
+                        // title for a group this region cannot verify. Preserve
+                        // only the visible title; do not add membership or grant
+                        // powers on the local grid.
+                        ControllingClient.ActiveGroupPowers = 0;
+                        Grouptitle = cAgent.ActiveGroupTitle;
+                    }
+                    else
+                    {
+                        // we got a unknown active group so get what groups thinks about us
+                        IGroupsModule gm = m_scene.RequestModuleInterface<IGroupsModule>();
+                        gm?.SendAgentGroupDataUpdate(ControllingClient);
+                    }
                 }
             }
 
