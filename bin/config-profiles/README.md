@@ -10,6 +10,22 @@ when you call them from `bin`.
 Quick Workflow
 --------------
 
+Easy server wrappers from `bin`:
+
+```bat
+switch-to-standalone-hg.bat
+switch-to-osgrid.bat
+switch-to-multigrid.bat
+```
+
+The standalone and multigrid wrappers default to `vanilla-sim.com`. To use a
+different public Hypergrid DNS name, pass it as the first argument:
+
+```bat
+switch-to-standalone-hg.bat example.com
+switch-to-multigrid.bat example.com
+```
+
 1. While your current OSGrid configuration is working, capture it once:
 
    ```powershell
