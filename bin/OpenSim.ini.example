@@ -687,6 +687,44 @@
     ; MapColor4 = "#C8C8C8"
 
 
+[Weather]
+    ;# {Enabled} {} {Enable the estate weather module} {true false} true
+    ;; Weather is enabled by default for showroom grids. Estate managers can use
+    ;; /89 weather rain, /89 weather storm, /89 weather snow, /89 weather sunny,
+    ;; /89 weather clear and /89 weather status.
+    ; Enabled = true
+
+    ;# {AllowDisabled} {Enabled} {Allow Enabled=false to disable Weather instead of keeping the showroom default on} {true false} false
+    ; AllowDisabled = false
+
+    ;# {CommandChannel} {Enabled} {Chat channel for weather commands} {} 89
+    ; CommandChannel = 89
+
+    ;# {EstateManagerOnly} {Enabled} {Restrict weather commands to estate managers} {true false} true
+    ; EstateManagerOnly = true
+
+    ;# {EmitterGrid} {Enabled} {Particle emitter spacing for weather coverage} {} 8
+    ; EmitterGrid = 8
+
+    ;# {EmitterHeight} {Enabled} {Height above terrain for weather emitters} {} 18
+    ; EmitterHeight = 18
+
+    ;# {Intensity} {Enabled} {Weather particle intensity multiplier} {} 1.0
+    ; Intensity = 1.0
+
+    ;# {AutoCycleEnabled} {Enabled} {Automatically rotate regional weather presets} {true false} true
+    ; AutoCycleEnabled = true
+
+    ;# {AutoCycleHours} {AutoCycleEnabled} {Hours between automatic forecast changes} {} 6
+    ; AutoCycleHours = 6
+
+    ;# {AutoCycleChoices} {AutoCycleEnabled} {Weather presets used by the forecast cycle} {} storm,rain,snow,sunny,clear
+    ; AutoCycleChoices = storm,rain,snow,sunny,clear
+
+    ;# {SendWeatherIMOnEntry} {Enabled} {Send visitors a private forecast IM when they enter} {true false} true
+    ; SendWeatherIMOnEntry = true
+
+
 [Permissions]
     ;# {permissionmodules} {} {Permission modules to use (may specify multiple modules, separated by comma} {} DefaultPermissionsModule
     ;; Permission modules to use, separated by comma.
@@ -1308,11 +1346,12 @@
 
 [ScriptExperiences]
     ;; OpenSim Experience-Lite auto grants for trusted estate scripts.
-    ;; This is disabled by default. Enable only for trusted estate environments.
-    ; Enabled = false
+    ;; Enabled by default for showroom estates; keep trusted owner/object lists
+    ;; tight on public production grids.
+    ; Enabled = true
 
     ;; If true, scripts owned by estate managers are trusted for auto grants.
-    ; AllowEstateManagers = false
+    ; AllowEstateManagers = true
 
     ;; Information returned by llGetExperienceDetails(NULL_KEY).
     ; ExperienceName = "OpenSim Experience-Lite"
@@ -1586,8 +1625,8 @@
 
 
 [TextBuild]
-    ;# {Enabled} {} {Enable chat-driven text build commands} {true false} false
-    ; Enabled = false
+    ;# {Enabled} {} {Enable chat-driven text build commands} {true false} true
+    ; Enabled = true
 
     ;# {CommandChannel} {Enabled} {Chat channel for text build commands} {} 88
     ; CommandChannel = 88

@@ -93,6 +93,7 @@ What The Standalone Profile Enables
 - YEngine
 - ubODE physics
 - Warp3D map rendering with depth-shaded water
+- Weather module with automatic forecast cycling and visitor IMs
 - Built-in Groups Module V2 with local SQLite storage
 - Offline IM V2 with local SQLite storage for group invites and notices
 - RegionWeb

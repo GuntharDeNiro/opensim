@@ -122,48 +122,74 @@ namespace OpenSim.Region.OptionalModules.World.Weather
         {
             IConfig config = source.Configs["Weather"];
             if (config == null)
-                return;
+                m_log.Info("[WEATHER]: No [Weather] configuration found; using showroom defaults.");
 
-            m_enabled = config.GetBoolean("Enabled", false);
-            m_commandChannel = config.GetInt("CommandChannel", 89);
-            m_estateManagerOnly = config.GetBoolean("EstateManagerOnly", true);
-            m_emitterGrid = Math.Max(1, config.GetInt("EmitterGrid", 8));
-            m_emitterHeight = Math.Max(4f, config.GetFloat("EmitterHeight", 18f));
-            m_intensity = Clamp(config.GetFloat("Intensity", 1f), 0.1f, 10f);
-            m_adjustClouds = config.GetBoolean("AdjustClouds", true);
-            m_restoreCloudsOnClear = config.GetBoolean("RestoreCloudsOnClear", true);
-            m_adjustWind = config.GetBoolean("AdjustWind", true);
-            m_restoreWindOnClear = config.GetBoolean("RestoreWindOnClear", true);
-            m_windDirectionDegrees = config.GetFloat("WindDirectionDegrees", 70f);
-            m_windDirectionVarianceDegrees = Math.Max(0f, config.GetFloat("WindDirectionVarianceDegrees", 18f));
-            m_rainWindStrength = Math.Max(0f, config.GetFloat("RainWindStrength", 0.45f));
-            m_stormWindStrength = Math.Max(0f, config.GetFloat("StormWindStrength", 1.35f));
-            m_snowWindStrength = Math.Max(0f, config.GetFloat("SnowWindStrength", 0.22f));
-            m_avoidCoveredAreas = config.GetBoolean("AvoidCoveredAreas", true);
-            m_coverProbeHeight = Math.Max(8f, config.GetFloat("CoverProbeHeight", 96f));
-            m_lightningEnabled = config.GetBoolean("LightningEnabled", true);
-            m_lightningMinDelayMS = Math.Max(1000, config.GetInt("LightningMinDelayMS", 7000));
-            m_lightningMaxDelayMS = Math.Max(m_lightningMinDelayMS, config.GetInt("LightningMaxDelayMS", 18000));
-            m_thunderEnabled = config.GetBoolean("ThunderEnabled", true);
-            m_thunderVolume = Clamp(config.GetFloat("ThunderVolume", 1f), 0f, 1f);
-            m_autoCycleEnabled = config.GetBoolean("AutoCycleEnabled", false);
-            m_autoCycleHours = Math.Max(0.01f, config.GetFloat("AutoCycleHours", 6f));
-            m_autoCycleStartupDelaySeconds = Math.Max(1, config.GetInt("AutoCycleStartupDelaySeconds", 30));
-            m_autoCycleChangeOnStartup = config.GetBoolean("AutoCycleChangeOnStartup", true);
-            ParseAutoCycleChoices(config.GetString("AutoCycleChoices", "storm,rain,snow,sunny"));
-            m_autoCycleForecastWarningMinutes = Math.Max(0, config.GetInt("AutoCycleForecastWarningMinutes", 15));
-            m_autoCycleForecastWarningMessage = config.GetString(
+            bool requestedEnabled = GetBoolean(config, "Enabled", true);
+            bool allowDisabled = GetBoolean(config, "AllowDisabled", false);
+            m_enabled = requestedEnabled || !allowDisabled;
+            if (!requestedEnabled && m_enabled)
+                m_log.Warn("[WEATHER]: Enabled=false ignored because AllowDisabled is not true; showroom weather remains enabled.");
+            m_commandChannel = GetInt(config, "CommandChannel", 89);
+            m_estateManagerOnly = GetBoolean(config, "EstateManagerOnly", true);
+            m_emitterGrid = Math.Max(1, GetInt(config, "EmitterGrid", 8));
+            m_emitterHeight = Math.Max(4f, GetFloat(config, "EmitterHeight", 18f));
+            m_intensity = Clamp(GetFloat(config, "Intensity", 1f), 0.1f, 10f);
+            m_adjustClouds = GetBoolean(config, "AdjustClouds", true);
+            m_restoreCloudsOnClear = GetBoolean(config, "RestoreCloudsOnClear", true);
+            m_adjustWind = GetBoolean(config, "AdjustWind", true);
+            m_restoreWindOnClear = GetBoolean(config, "RestoreWindOnClear", true);
+            m_windDirectionDegrees = GetFloat(config, "WindDirectionDegrees", 70f);
+            m_windDirectionVarianceDegrees = Math.Max(0f, GetFloat(config, "WindDirectionVarianceDegrees", 18f));
+            m_rainWindStrength = Math.Max(0f, GetFloat(config, "RainWindStrength", 0.45f));
+            m_stormWindStrength = Math.Max(0f, GetFloat(config, "StormWindStrength", 1.35f));
+            m_snowWindStrength = Math.Max(0f, GetFloat(config, "SnowWindStrength", 0.22f));
+            m_avoidCoveredAreas = GetBoolean(config, "AvoidCoveredAreas", true);
+            m_coverProbeHeight = Math.Max(8f, GetFloat(config, "CoverProbeHeight", 96f));
+            m_lightningEnabled = GetBoolean(config, "LightningEnabled", true);
+            m_lightningMinDelayMS = Math.Max(1000, GetInt(config, "LightningMinDelayMS", 7000));
+            m_lightningMaxDelayMS = Math.Max(m_lightningMinDelayMS, GetInt(config, "LightningMaxDelayMS", 18000));
+            m_thunderEnabled = GetBoolean(config, "ThunderEnabled", true);
+            m_thunderVolume = Clamp(GetFloat(config, "ThunderVolume", 1f), 0f, 1f);
+            m_autoCycleEnabled = GetBoolean(config, "AutoCycleEnabled", true);
+            m_autoCycleHours = Math.Max(0.01f, GetFloat(config, "AutoCycleHours", 6f));
+            m_autoCycleStartupDelaySeconds = Math.Max(1, GetInt(config, "AutoCycleStartupDelaySeconds", 30));
+            m_autoCycleChangeOnStartup = GetBoolean(config, "AutoCycleChangeOnStartup", true);
+            ParseAutoCycleChoices(GetString(config, "AutoCycleChoices", "storm,rain,snow,sunny,clear"));
+            m_autoCycleForecastWarningMinutes = Math.Max(0, GetInt(config, "AutoCycleForecastWarningMinutes", 15));
+            m_autoCycleForecastWarningMessage = GetString(
+                config,
                 "AutoCycleForecastWarningMessage",
                 "Weather forecast update: next conditions for {RegionName} are expected to shift to {NextWeather} in {TimeUntilNextForecast}.").Trim();
-            m_sendWeatherIMOnEntry = config.GetBoolean("SendWeatherIMOnEntry", true);
-            m_weatherIMDelaySeconds = Math.Max(0, config.GetInt("WeatherIMDelaySeconds", 8));
-            m_weatherIMMessage = config.GetString(
+            m_sendWeatherIMOnEntry = GetBoolean(config, "SendWeatherIMOnEntry", true);
+            m_weatherIMDelaySeconds = Math.Max(0, GetInt(config, "WeatherIMDelaySeconds", 8));
+            m_weatherIMMessage = GetString(
+                config,
                 "WeatherIMMessage",
                 "Weather forecast for {RegionName}: current conditions are {Weather}. Next forecast: {NextForecast}. Stay tuned for further regional updates.").Trim();
 
-            string thunderSound = config.GetString("ThunderSound", string.Empty);
+            string thunderSound = GetString(config, "ThunderSound", string.Empty);
             if (!string.IsNullOrEmpty(thunderSound) && !UUID.TryParse(thunderSound, out m_thunderSound))
                 m_log.WarnFormat("[WEATHER]: ThunderSound '{0}' is not a valid UUID; thunder audio disabled.", thunderSound);
+        }
+
+        private static bool GetBoolean(IConfig config, string key, bool defaultValue)
+        {
+            return config == null ? defaultValue : config.GetBoolean(key, defaultValue);
+        }
+
+        private static int GetInt(IConfig config, string key, int defaultValue)
+        {
+            return config == null ? defaultValue : config.GetInt(key, defaultValue);
+        }
+
+        private static float GetFloat(IConfig config, string key, float defaultValue)
+        {
+            return config == null ? defaultValue : config.GetFloat(key, defaultValue);
+        }
+
+        private static string GetString(IConfig config, string key, string defaultValue)
+        {
+            return config == null ? defaultValue : config.GetString(key, defaultValue);
         }
 
         public void AddRegion(Scene scene)

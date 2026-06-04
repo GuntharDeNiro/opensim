@@ -46,12 +46,22 @@ function Set-IniKey([string]$Content, [string]$Section, [string]$Key, [string]$V
 
     $lines = $Content -split "`r?`n", -1
     $inSection = $false
+    $sectionStart = -1
 
     for ($i = 0; $i -lt $lines.Count; $i++) {
         $line = $lines[$i]
 
         if ($line -match '^\s*\[(.+)\]\s*$') {
+            if ($inSection) {
+                $before = $lines[0..($i - 1)]
+                $after = $lines[$i..($lines.Count - 1)]
+                return [string]::Join($newline, @($before + "    $Key = $Value" + $after))
+            }
+
             $inSection = ($matches[1] -eq $Section)
+            if ($inSection) {
+                $sectionStart = $i
+            }
             continue
         }
 
@@ -66,7 +76,11 @@ function Set-IniKey([string]$Content, [string]$Section, [string]$Key, [string]$V
         }
     }
 
-    throw "Cannot find key $Key in section [$Section]."
+    if ($inSection -and $sectionStart -ge 0) {
+        return [string]::Join($newline, @($lines + "    $Key = $Value"))
+    }
+
+    return [string]::Join($newline, @($lines + "" + "[$Section]" + "    $Key = $Value"))
 }
 
 if (-not (Test-Path $Template)) {
@@ -74,6 +88,15 @@ if (-not (Test-Path $Template)) {
 }
 
 $openSimIni = Expand-Template $Template
+$openSimIni = Set-IniKey $openSimIni "Map" "GenerateMaptiles" "true"
+$openSimIni = Set-IniKey $openSimIni "Map" "MapImageModule" '"Warp3DImageModule"'
+$openSimIni = Set-IniKey $openSimIni "Weather" "Enabled" "true"
+$openSimIni = Set-IniKey $openSimIni "Weather" "AllowDisabled" "false"
+$openSimIni = Set-IniKey $openSimIni "Weather" "AutoCycleEnabled" "true"
+$openSimIni = Set-IniKey $openSimIni "RegionWeb" "Enabled" "true"
+$openSimIni = Set-IniKey $openSimIni "Groups" "Enabled" "true"
+$openSimIni = Set-IniKey $openSimIni "TextBuild" "Enabled" "true"
+$openSimIni = Set-IniKey $openSimIni "YEngine" "Enabled" "true"
 if ($AttachPublicGrids) {
     $openSimIni = Set-IniKey $openSimIni "MultiGridAttachments" "Enabled" "true"
     $openSimIni = Set-IniKey $openSimIni "MultiGridAttachments" "Grids" '"osgrid,neverworld"'
@@ -117,6 +140,7 @@ if ($InstallFreshRegions) {
 
 Write-Host "Switched OpenSim.ini to standalone Hypergrid."
 Write-Host "Switched SQLite and currency storage to dedicated bin\StandaloneHG files."
+Write-Host "Showroom startup modules forced on: Warp3D maptiles, Weather /89, RegionWeb, Groups, TextBuild /88, YEngine."
 if ($AttachPublicGrids) {
     Write-Host "Enabled secondary region attachments: OSGrid, Neverworld Grid."
 }
