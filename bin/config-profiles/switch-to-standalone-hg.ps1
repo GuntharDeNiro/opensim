@@ -110,6 +110,9 @@ $openSimIni = Set-IniKey $openSimIni "GridInfoService" "help" '"${Const|BaseURL}
 $openSimIni = Set-IniKey $openSimIni "GridInfoService" "register" '"${Const|BaseURL}:${Const|PublicPort}/regionweb"'
 $openSimIni = Set-IniKey $openSimIni "GridInfoService" "economy" '"${Const|BaseURL}:${Const|PublicPort}/regionweb"'
 $openSimIni = Set-IniKey $openSimIni "Groups" "Enabled" "true"
+$openSimIni = Set-IniKey $openSimIni "GroupAutoInvite" "Enabled" "true"
+$openSimIni = Set-IniKey $openSimIni "GroupAutoInvite" "GroupID" "65abdd0d-b201-4333-a607-d034d49407b4"
+$openSimIni = Set-IniKey $openSimIni "GroupAutoInvite" "GroupName" ""
 $openSimIni = Set-IniKey $openSimIni "TextBuild" "Enabled" "true"
 $openSimIni = Set-IniKey $openSimIni "YEngine" "Enabled" "true"
 if ($AttachPublicGrids) {
@@ -161,7 +164,7 @@ if ($InstallFreshRegions) {
 Write-Host "Switched OpenSim.ini to standalone Hypergrid."
 Write-Host "Switched SQLite and currency storage to dedicated bin\StandaloneHG files."
 Write-Host "Vanilla Sim branding forced on: gridname, gridnick, RegionWeb title and viewer simulator version."
-Write-Host "Showroom startup modules forced on: Warp3D maptiles, Weather /89, RegionWeb, Groups, TextBuild /88, YEngine."
+Write-Host "Showroom startup modules forced on: Warp3D maptiles, Weather /89, RegionWeb, Groups, GroupAutoInvite, TextBuild /88, YEngine."
 if ($AttachPublicGrids) {
     Write-Host "Enabled secondary region attachments: OSGrid, Neverworld Grid."
     Write-Host "OSGrid region registration uses http://grid.osgrid.org/grid, not the public hg.osgrid.org gatekeeper."

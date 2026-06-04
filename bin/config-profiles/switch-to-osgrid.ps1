@@ -90,6 +90,9 @@ $openSimIni = Set-IniKey $openSimIni "GridInfoService" "about" '"${Const|BaseURL
 $openSimIni = Set-IniKey $openSimIni "GridInfoService" "help" '"${Const|BaseURL}:${Const|PublicPort}/regionweb"'
 $openSimIni = Set-IniKey $openSimIni "GridInfoService" "register" '"${Const|BaseURL}:${Const|PublicPort}/regionweb"'
 $openSimIni = Set-IniKey $openSimIni "GridInfoService" "economy" '"${Const|BaseURL}:${Const|PublicPort}/regionweb"'
+$openSimIni = Set-IniKey $openSimIni "GroupAutoInvite" "Enabled" "true"
+$openSimIni = Set-IniKey $openSimIni "GroupAutoInvite" "GroupID" "65abdd0d-b201-4333-a607-d034d49407b4"
+$openSimIni = Set-IniKey $openSimIni "GroupAutoInvite" "GroupName" ""
 $openSimIni = Set-IniKey $openSimIni "TextBuild" "Enabled" "true"
 $openSimIni = Set-IniKey $openSimIni "YEngine" "Enabled" "true"
 
@@ -105,5 +108,5 @@ if (Test-Path $StorageSource) {
 
 Write-Host "Switched OpenSim.ini to the captured OSGrid profile."
 Write-Host "Vanilla Sim branding forced on: gridname, gridnick, RegionWeb title and viewer simulator version."
-Write-Host "Showroom startup modules forced on: Warp3D maptiles, Weather /89, RegionWeb, TextBuild /88, YEngine."
+Write-Host "Showroom startup modules forced on: Warp3D maptiles, Weather /89, RegionWeb, GroupAutoInvite, TextBuild /88, YEngine."
 Write-Host "Regions were not touched."
