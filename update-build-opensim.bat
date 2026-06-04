@@ -9,6 +9,18 @@ git checkout -- Update-Build-Run-OpenSim.ps1 2>NUL
 
 echo.
 echo === Updating source from Git ===
+set "HAS_LOCAL_CHANGES=0"
+git diff --quiet --ignore-submodules --
+if errorlevel 1 set "HAS_LOCAL_CHANGES=1"
+git diff --cached --quiet --ignore-submodules --
+if errorlevel 1 set "HAS_LOCAL_CHANGES=1"
+
+if "%HAS_LOCAL_CHANGES%"=="1" (
+    echo Local tracked changes detected; stashing them before pull.
+    git stash push -m "update-build-opensim auto-stash before pull"
+    if errorlevel 1 goto failed
+)
+
 git pull --ff-only
 if errorlevel 1 goto failed
 
