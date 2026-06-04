@@ -115,6 +115,7 @@ $openSimIni = Set-IniKey $openSimIni "YEngine" "Enabled" "true"
 if ($AttachPublicGrids) {
     $openSimIni = Set-IniKey $openSimIni "MultiGridAttachments" "Enabled" "true"
     $openSimIni = Set-IniKey $openSimIni "MultiGridAttachments" "Grids" '"osgrid,neverworld"'
+    $openSimIni = Set-IniKey $openSimIni "MultiGridAttachments" "AutoCreateInboundPresence" "true"
     $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.osgrid" "Enabled" "true"
     $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.neverworld" "Enabled" "true"
     $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.neverworld" "GridServerURI" '"http://hg.neverworldgrid.com:8003"'
@@ -162,6 +163,7 @@ Write-Host "Showroom startup modules forced on: Warp3D maptiles, Weather /89, Re
 if ($AttachPublicGrids) {
     Write-Host "Enabled secondary region attachments: OSGrid, Neverworld Grid."
     Write-Host "Neverworld region registration uses http://hg.neverworldgrid.com:8003/grid, not the public 8002 login endpoint."
+    Write-Host "Enabled inbound MultiGrid presence fallback for teleports from attached grid maps."
 }
 Write-Host "Hypergrid address:"
 if ($HostName.Trim().Length -gt 0) {

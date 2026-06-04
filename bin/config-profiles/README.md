@@ -115,6 +115,7 @@ registries:
     Enabled = true
     Grids = "osgrid,neverworld"
     ContinueOnFailure = true
+    AutoCreateInboundPresence = true
 
 [MultiGridAttachment.osgrid]
     Enabled = true
@@ -168,6 +169,12 @@ Neverworld Grid exposes login, gatekeeper and grid info on
 the GridService endpoint on `http://hg.neverworldgrid.com:8003/grid`. If a
 target returns HTML or an empty body from `/grid`, the configured URL is probably
 a login/gatekeeper endpoint rather than a region registration endpoint.
+
+Keep `AutoCreateInboundPresence = true` for multigrid publication. Some attached
+grids teleport from their world map directly to this simulator's `/agent`
+endpoint instead of entering through this grid's gatekeeper first; the simulator
+then creates the local presence row needed by `Scene.VerifyUserPresence` before
+continuing normal access checks.
 
 Ports
 -----

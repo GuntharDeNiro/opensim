@@ -3783,6 +3783,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Usage.Add("Use Location = x,y when the secondary grid needs a different map coordinate for the published region.");
                     content.Usage.Add("Use RegionNamePrefix, RegionNameSuffix or RegionName when the target grid needs unique names.");
                     content.Usage.Add("Set AuthType = BasicHttpAuthentication plus HttpAuthUsername/HttpAuthPassword when a private friend's grid protects its grid service.");
+                    content.Usage.Add("Keep AutoCreateInboundPresence = true so teleports from an attached grid map can create the local presence row before Scene.VerifyUserPresence runs.");
                     content.Usage.Add("Keep Strict = false, ContinueOnFailure = true and a short TimeoutSeconds value for public grids so rejected or slow attachments run in the background and do not stop the simulator.");
                     content.Notes.Add("This is a publication/attachment layer. The simulator still has one primary grid for inventory, assets, accounts and presence.");
                     content.Notes.Add("Public grids may reject registration unless they explicitly allow your region server or provide credentials.");

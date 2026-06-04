@@ -54,6 +54,7 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Simulation
         /// Is this module enabled?
         /// </summary>
         private bool m_ModuleEnabled = false;
+        private bool m_AutoCreateMultiGridInboundPresence = false;
 
         #region Region Module interface
 
@@ -76,6 +77,14 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Simulation
 
         public void InitialiseService(IConfigSource configSource)
         {
+            IConfig multiGridConfig = configSource.Configs["MultiGridAttachments"];
+            if (multiGridConfig != null
+                && multiGridConfig.GetBoolean("Enabled", false)
+                && multiGridConfig.GetBoolean("AutoCreateInboundPresence", false))
+            {
+                m_AutoCreateMultiGridInboundPresence = true;
+                m_log.Info("[LOCAL SIMULATION CONNECTOR]: MultiGrid inbound presence fallback enabled.");
+            }
         }
 
         public void PostInitialise()
@@ -196,12 +205,67 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Simulation
 
             if (m_scenes.TryGetValue(destination.RegionID, out Scene destScene))
             {
+                if (ShouldAutoCreateMultiGridInboundPresence(source, aCircuit, teleportFlags)
+                    && !EnsureMultiGridInboundPresence(destScene, source, aCircuit, out reason))
+                    return false;
+
                 //m_log.DebugFormat("[LOCAL SIMULATION CONNECTOR]: Found region {0} to send SendCreateChildAgent", destination.RegionName);
                 return destScene.NewUserConnection(aCircuit, teleportFlags, source, out reason);
             }
 
             reason = "Did not find region " + destination.RegionName;
             return false;
+        }
+
+        private bool ShouldAutoCreateMultiGridInboundPresence(GridRegion source, AgentCircuitData aCircuit, uint teleportFlags)
+        {
+            if (!m_AutoCreateMultiGridInboundPresence)
+                return false;
+
+            if (source != null)
+                return true;
+
+            return (teleportFlags & (uint)Constants.TeleportFlags.ViaHGLogin) != 0
+                && aCircuit.ServiceURLs != null
+                && aCircuit.ServiceURLs.ContainsKey("HomeURI");
+        }
+
+        private bool EnsureMultiGridInboundPresence(Scene scene, GridRegion source, AgentCircuitData aCircuit, out string reason)
+        {
+            reason = string.Empty;
+
+            IPresenceService presenceService = scene.RequestModuleInterface<IPresenceService>();
+            if (presenceService == null)
+                return true;
+
+            PresenceInfo presence = presenceService.GetAgent(aCircuit.SessionID);
+            if (presence != null)
+            {
+                if (presence.UserID == aCircuit.AgentID.ToString())
+                    return true;
+
+                reason = string.Format(
+                    "Inbound MultiGrid presence mismatch for {0} {1} in region {2}.",
+                    aCircuit.firstname, aCircuit.lastname, scene.RegionInfo.RegionName);
+                m_log.WarnFormat("[LOCAL SIMULATION CONNECTOR]: {0}", reason);
+                return false;
+            }
+
+            if (!presenceService.LoginAgent(aCircuit.AgentID.ToString(), aCircuit.SessionID, aCircuit.SecureSessionID))
+            {
+                reason = string.Format(
+                    "Unable to create inbound MultiGrid presence for {0} {1} in region {2}.",
+                    aCircuit.firstname, aCircuit.lastname, scene.RegionInfo.RegionName);
+                m_log.WarnFormat("[LOCAL SIMULATION CONNECTOR]: {0}", reason);
+                return false;
+            }
+
+            string sourceName = source == null ? "unknown source" : source.RegionName;
+            m_log.InfoFormat(
+                "[LOCAL SIMULATION CONNECTOR]: Created inbound MultiGrid presence for {0} {1} in {2} from {3}.",
+                aCircuit.firstname, aCircuit.lastname, scene.RegionInfo.RegionName, sourceName);
+
+            return true;
         }
 
         public bool UpdateAgent(GridRegion destination, AgentData cAgentData, EntityTransferContext ctx)
