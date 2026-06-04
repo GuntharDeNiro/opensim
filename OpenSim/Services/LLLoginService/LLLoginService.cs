@@ -1090,14 +1090,18 @@ namespace OpenSim.Services.LLLoginService
             if (homeURI.Length == 0)
                 homeURI = NormalizeServiceURL(m_GatekeeperURL);
 
-            if (homeURI.Length > 0 &&
-                (!aCircuit.ServiceURLs.TryGetValue("HomeURI", out object currentCircuitHome) ||
-                    IsMissingServiceURL(currentCircuitHome)))
+            if (homeURI.Length > 0)
             {
-                aCircuit.ServiceURLs["HomeURI"] = homeURI;
+                if (!aCircuit.ServiceURLs.TryGetValue("HomeURI", out object currentCircuitHome) ||
+                    IsMissingServiceURL(currentCircuitHome) ||
+                    !string.Equals(homeURI, currentCircuitHome as string, StringComparison.OrdinalIgnoreCase))
+                {
+                    aCircuit.ServiceURLs["HomeURI"] = homeURI;
+                }
+
                 if (!account.ServiceURLs.TryGetValue("HomeURI", out object currentAccountHome) ||
                     IsMissingServiceURL(currentAccountHome) ||
-                    !homeURI.Equals(currentAccountHome as string))
+                    !string.Equals(homeURI, currentAccountHome as string, StringComparison.OrdinalIgnoreCase))
                 {
                     account.ServiceURLs["HomeURI"] = homeURI;
                     newUrls = true;

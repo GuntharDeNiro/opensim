@@ -56,6 +56,8 @@ namespace OpenSim.Services.UserAccountService
         protected IGridUserService m_GridUserService;
         protected IInventoryService m_InventoryService;
         protected IAvatarService m_AvatarService;
+        protected string m_DefaultHomeURI;
+        protected string m_DefaultGatekeeperURI;
 
         public UserAccountService(IConfigSource config)
             : base(config)
@@ -85,6 +87,12 @@ namespace OpenSim.Services.UserAccountService
                 m_AvatarService = LoadPlugin<IAvatarService>(avatarServiceDll, [config]);
 
             m_CreateDefaultAvatarEntries = userConfig.GetBoolean("CreateDefaultAvatarEntries", false);
+            m_DefaultGatekeeperURI = NormalizeServiceURL(Util.GetConfigVarFromSections<string>(config, "GatekeeperURI",
+                new string[] { "Startup", "Hypergrid", "LoginService", "UserAgentService" }, string.Empty));
+            m_DefaultHomeURI = NormalizeServiceURL(Util.GetConfigVarFromSections<string>(config, "HomeURI",
+                new string[] { "Startup", "Hypergrid", "LoginService", "UserAgentService" }, string.Empty));
+            if (m_DefaultHomeURI.Length == 0)
+                m_DefaultHomeURI = m_DefaultGatekeeperURI;
 
             if (m_RootInstance == null)
             {
@@ -145,6 +153,12 @@ namespace OpenSim.Services.UserAccountService
                             "show account",
                             "show account <first> <last>",
                             "Show account details for the given user", HandleShowAccount);
+
+                    MainConsole.Instance.Commands.AddCommand("Users", false,
+                            "repair user service urls",
+                            "repair user service urls <first> <last> [<home-uri>]",
+                            "Rewrite an account's Hypergrid HomeURI and GatekeeperURI to the configured or supplied canonical domain.",
+                            HandleRepairUserServiceURLs);
                 }
             }
         }
@@ -466,6 +480,60 @@ namespace OpenSim.Services.UserAccountService
             MainConsole.Instance.Output("Flags:   {0}", ua.UserFlags);
             foreach (KeyValuePair<string, Object> kvp in ua.ServiceURLs)
                 MainConsole.Instance.Output("{0}: {1}", kvp.Key, kvp.Value);
+        }
+
+        protected void HandleRepairUserServiceURLs(string module, string[] cmdparams)
+        {
+            if (cmdparams.Length != 6 && cmdparams.Length != 7)
+            {
+                MainConsole.Instance.Output("Usage: repair user service urls <first-name> <last-name> [<home-uri>]");
+                return;
+            }
+
+            string firstName = cmdparams[4];
+            string lastName = cmdparams[5];
+            bool explicitHomeURI = cmdparams.Length == 7;
+            string homeURI = explicitHomeURI ? NormalizeServiceURL(cmdparams[6]) : m_DefaultHomeURI;
+
+            if (homeURI.Length == 0)
+            {
+                MainConsole.Instance.Output("No HomeURI is configured. Supply it explicitly, for example:");
+                MainConsole.Instance.Output("repair user service urls {0} {1} http://vanilla-sim.com:9000", firstName, lastName);
+                return;
+            }
+
+            string gatekeeperURI = explicitHomeURI || m_DefaultGatekeeperURI.Length == 0 ? homeURI : m_DefaultGatekeeperURI;
+            UserAccount account = GetUserAccount(UUID.Zero, firstName, lastName);
+
+            if (account == null)
+            {
+                MainConsole.Instance.Output("No user named {0} {1}", firstName, lastName);
+                return;
+            }
+
+            if (account.ServiceURLs == null)
+                account.ServiceURLs = new Dictionary<string, object>();
+
+            string oldHomeURI = account.ServiceURLs.TryGetValue("HomeURI", out object oldHome)
+                ? oldHome?.ToString() ?? string.Empty
+                : string.Empty;
+            string oldGatekeeperURI = account.ServiceURLs.TryGetValue("GatekeeperURI", out object oldGatekeeper)
+                ? oldGatekeeper?.ToString() ?? string.Empty
+                : string.Empty;
+
+            account.ServiceURLs["HomeURI"] = homeURI;
+            account.ServiceURLs["GatekeeperURI"] = gatekeeperURI;
+
+            if (!StoreUserAccount(account))
+            {
+                MainConsole.Instance.Output("Unable to repair ServiceURLs for {0} {1}", firstName, lastName);
+                return;
+            }
+
+            MainConsole.Instance.Output("Repaired ServiceURLs for {0} {1}", firstName, lastName);
+            MainConsole.Instance.Output("HomeURI:       {0} -> {1}", oldHomeURI, homeURI);
+            MainConsole.Instance.Output("GatekeeperURI: {0} -> {1}", oldGatekeeperURI, gatekeeperURI);
+            MainConsole.Instance.Output("Log out from foreign grids and teleport again so they receive the new Hypergrid identity.");
         }
 
         protected void HandleResetUserPassword(string module, string[] cmdparams)
@@ -1058,6 +1126,18 @@ namespace OpenSim.Services.UserAccountService
             item.CurrentPermissions &= item.NextPermissions;
             item.BasePermissions &= item.NextPermissions;
             item.EveryOnePermissions &= item.NextPermissions;
+        }
+
+        private static string NormalizeServiceURL(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            value = value.Trim();
+            if (!value.EndsWith("/"))
+                value += "/";
+
+            return value;
         }
     }
 }
