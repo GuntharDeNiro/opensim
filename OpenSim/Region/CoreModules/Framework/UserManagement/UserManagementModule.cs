@@ -1121,12 +1121,45 @@ namespace OpenSim.Region.CoreModules.Framework.UserManagement
             {
                 if (!oldUser.IsUnknownUser)
                 {
-                    if (!homeURL.Equals(oldUser.HomeURL) && m_DisplayChangingHomeURI)
+                    if (CheckUrl(homeURL, out bool cachedLocal, out OSHHTPHost cachedHost))
                     {
-                        m_log.DebugFormat("[USER MANAGEMENT MODULE]: Different HomeURI for {0} {1} ({2}): {3} and {4}",
-                            first, last, uuid.ToString(), homeURL, oldUser.HomeURL);
+                        string cachedFirstName;
+                        string cachedLastName;
+                        string cachedHomeURL;
+
+                        if (cachedLocal)
+                        {
+                            cachedFirstName = first;
+                            cachedLastName = last;
+                            cachedHomeURL = string.Empty;
+                        }
+                        else
+                        {
+                            cachedFirstName = first.Replace(" ", ".") + "." + last.Replace(" ", ".");
+                            cachedLastName = "@" + cachedHost.HostAndPort;
+                            cachedHomeURL = cachedHost.URI;
+                        }
+
+                        if (oldUser.IsLocal != cachedLocal ||
+                            !string.Equals(oldUser.HomeURL, cachedHomeURL, StringComparison.OrdinalIgnoreCase) ||
+                            !string.Equals(oldUser.FirstName, cachedFirstName, StringComparison.Ordinal) ||
+                            !string.Equals(oldUser.LastName, cachedLastName, StringComparison.Ordinal))
+                        {
+                            if (!homeURL.Equals(oldUser.HomeURL) || m_DisplayChangingHomeURI)
+                            {
+                                m_log.InfoFormat("[USER MANAGEMENT MODULE]: Updating cached HomeURI for {0} {1} ({2}) from {3} to {4}",
+                                    first, last, uuid.ToString(), oldUser.HomeURL, cachedHomeURL);
+                            }
+
+                            oldUser.FirstName = cachedFirstName;
+                            oldUser.LastName = cachedLastName;
+                            oldUser.HomeURL = cachedHomeURL;
+                            oldUser.IsLocal = cachedLocal;
+                            oldUser.HasGridUserTried = cachedLocal;
+                            m_userCacheByID.Add(uuid, oldUser, cachedLocal ? LOCALEXPIRE : HGEXPIRE);
+                        }
                     }
-                    /* no update needed */
+
                     return;
                 }
             }
