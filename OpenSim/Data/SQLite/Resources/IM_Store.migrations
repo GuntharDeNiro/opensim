@@ -1,0 +1,17 @@
+﻿:VERSION 1
+
+BEGIN TRANSACTION;
+
+CREATE TABLE `im_offline` (
+  `ID` integer NOT NULL PRIMARY KEY AUTOINCREMENT,
+  `PrincipalID` char(36) NOT NULL DEFAULT '',
+  `FromID` char(36) NOT NULL DEFAULT '',
+  `Message` text NOT NULL DEFAULT '',
+  `TMStamp` integer NOT NULL DEFAULT (strftime('%s', 'now'))
+);
+
+CREATE INDEX `im_offline_PrincipalID` ON `im_offline` (`PrincipalID`);
+CREATE INDEX `im_offline_FromID` ON `im_offline` (`FromID`);
+CREATE INDEX `im_offline_TMStamp` ON `im_offline` (`TMStamp`);
+
+COMMIT;
