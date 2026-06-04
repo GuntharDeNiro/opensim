@@ -77,6 +77,17 @@
     PrivatePort = "8003"
 
 
+[GridInfo]
+    ;# {GridName} {} {Grid name shown by compatible viewers} {} "Vanilla Sim"
+    GridName = "Vanilla Sim"
+
+    ;# {GridNick} {} {Short grid name shown by compatible viewers} {} "vanilla"
+    GridNick = "vanilla"
+
+    ; Lower-case aliases are kept for older OpenSimulator grid-info paths.
+    gridname = "Vanilla Sim"
+    gridnick = "vanilla"
+
 
 [Startup]
     ;# {ConsolePrompt} {} {ConsolePrompt} {} "Region (\R) "

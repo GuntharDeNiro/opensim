@@ -636,6 +636,12 @@
     ; HasProxy = false
 
 
+[GridInfo]
+    GridName = "Vanilla Sim"
+    GridNick = "vanilla"
+    gridname = "Vanilla Sim"
+    gridnick = "vanilla"
+
 [GridInfoService]
     ; These settings are used to return information on a get_grid_info call.
     ; Client launcher scripts and third-party clients make use of this to

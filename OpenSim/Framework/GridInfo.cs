@@ -465,12 +465,14 @@ namespace OpenSim.Framework
                 }
             }
 
-            string[] namessections = ["Const", "GridInfo", "SimulatorFeatures"];
+            string[] namessections = ["Const", "GridInfo", "GridInfoService", "SimulatorFeatures"];
             m_GridName = Util.GetConfigVarFromSections<string>(config, "GridName", namessections, string.Empty);
             if (string.IsNullOrEmpty(m_GridName))
                 m_GridName = Util.GetConfigVarFromSections<string>(config, "gridname", namessections, string.Empty);
 
             m_GridNick = Util.GetConfigVarFromSections<string>(config, "GridNick", namessections, string.Empty);
+            if (string.IsNullOrEmpty(m_GridNick))
+                m_GridNick = Util.GetConfigVarFromSections<string>(config, "gridnick", namessections, string.Empty);
 
             if (string.IsNullOrEmpty(m_GridName))
                 m_GridName = "Another bad configured grid";
@@ -505,7 +507,7 @@ namespace OpenSim.Framework
             }
 
 
-            m_economyURL = Util.GetConfigVarFromSections<string>(config, "economy", ["Economy", "GridInfo"]);
+            m_economyURL = Util.GetConfigVarFromSections<string>(config, "economy", ["Economy", "GridInfo", "GridInfoService"]);
             if (!string.IsNullOrEmpty(m_economyURL))
             {
                 tmpuri = new OSHTTPURI(m_economyURL.Trim(), true);
