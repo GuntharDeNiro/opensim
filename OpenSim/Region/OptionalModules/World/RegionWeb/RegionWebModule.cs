@@ -3777,6 +3777,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Overview = MultiGridFeatureOverview;
                     content.Usage.Add("Enable [MultiGridAttachments] and list attachment names in Grids, for example Grids = \"osgrid,neverworld\".");
                     content.Usage.Add("Create one [MultiGridAttachment.<name>] section per target with GridServerURI pointing at the target grid service root, such as http://grid.example.com:8002.");
+                    content.Usage.Add("For OSGrid, use GridServerURI = http://grid.osgrid.org and GridPostURI = http://grid.osgrid.org/grid; http://hg.osgrid.org:80 is the Hypergrid login/gatekeeper endpoint, not the region registration endpoint.");
                     content.Usage.Add("Set GridPostURI when the target's registration endpoint is not simply GridServerURI plus /grid; Neverworld uses http://hg.neverworldgrid.com:8003/grid for region registration, while 8002 is its public login/gatekeeper endpoint.");
                     content.Usage.Add("Set ExternalHostName and ServerURI to your public DNS endpoint, for example vanilla-sim.com and http://vanilla-sim.com:9000.");
                     content.Usage.Add("Leave Regions empty to publish every local region, or list region names/UUIDs to publish only selected regions.");

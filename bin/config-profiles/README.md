@@ -119,7 +119,8 @@ registries:
 
 [MultiGridAttachment.osgrid]
     Enabled = true
-    GridServerURI = "http://hg.osgrid.org:80"
+    GridServerURI = "http://grid.osgrid.org"
+    GridPostURI = "http://grid.osgrid.org/grid"
     ExternalHostName = "vanilla-sim.com"
     ServerURI = "http://vanilla-sim.com:9000"
     Regions = ""
@@ -163,6 +164,12 @@ backends. The region keeps one primary grid for inventory, assets, user
 accounts and presence. A secondary grid must allow your simulator to register
 with its grid service; public grids may refuse this unless they explicitly
 support or authorize it.
+
+OSGrid exposes Hypergrid login and home identity on `http://hg.osgrid.org:80`,
+but region registration uses its GridService endpoint on
+`http://grid.osgrid.org/grid`. If you post registration to
+`http://hg.osgrid.org:80/grid`, nginx may answer with HTML/502 instead of a
+GridService XML response.
 
 Neverworld Grid exposes login, gatekeeper and grid info on
 `http://hg.neverworldgrid.com:8002`, but self-hosted region registration uses
