@@ -253,9 +253,9 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Grid
                 if (!attachment.Enabled)
                     continue;
 
-                if (attachment.GridServerURI.Length == 0)
+                if (attachment.GridServerURI.Length == 0 && attachment.GridPostURI.Length == 0)
                 {
-                    m_log.WarnFormat("[REGION GRID CONNECTOR]: MultiGrid attachment {0} has no GridServerURI", attachment.Name);
+                    m_log.WarnFormat("[REGION GRID CONNECTOR]: MultiGrid attachment {0} has no GridServerURI or GridPostURI", attachment.Name);
                     continue;
                 }
 
@@ -379,7 +379,7 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Grid
                 }
 
                 string empty = string.Format(
-                    "MultiGrid attachment {0} received empty reply from {1}",
+                    "MultiGrid attachment {0} received empty reply from {1}; verify that this URL is the target grid service registration endpoint, not only the public login/gatekeeper endpoint",
                     attachment.Name, endpoint);
                 m_log.ErrorFormat("[REGION GRID CONNECTOR]: {0}", empty);
                 return empty;
@@ -481,6 +481,7 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Grid
                     Enabled = config.GetBoolean("Enabled", true),
                     Strict = config.GetBoolean("Strict", false),
                     GridServerURI = NormalizeServerURI(config.GetString("GridServerURI", string.Empty)),
+                    GridPostURI = NormalizeOptionalURI(config.GetString("GridPostURI", string.Empty)),
                     ExternalHostName = config.GetString("ExternalHostName", string.Empty).Trim(),
                     ServerURI = NormalizeOptionalURI(config.GetString("ServerURI", string.Empty)),
                     RegionName = config.GetString("RegionName", string.Empty).Trim(),
@@ -519,9 +520,10 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Grid
                         attachment.m_Regions.Add(trimmed);
                 }
 
-                attachment.GridPostURI = attachment.GridServerURI.EndsWith("/grid", StringComparison.OrdinalIgnoreCase)
-                    ? attachment.GridServerURI
-                    : attachment.GridServerURI + "/grid";
+                if (attachment.GridPostURI.Length == 0 && attachment.GridServerURI.Length > 0)
+                    attachment.GridPostURI = attachment.GridServerURI.EndsWith("/grid", StringComparison.OrdinalIgnoreCase)
+                        ? attachment.GridServerURI
+                        : attachment.GridServerURI + "/grid";
 
                 attachment.Auth = BuildAuth(config);
                 return attachment;

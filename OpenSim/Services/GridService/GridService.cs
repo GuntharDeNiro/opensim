@@ -180,7 +180,11 @@ namespace OpenSim.Services.GridService
                 config, "GridName", new string[] { "Const", "Hypergrid" }, string.Empty);
             if (string.IsNullOrEmpty(configVal))
                 configVal = Util.GetConfigVarFromSections<string>(
+                    config, "GridName", new string[] { "GridInfo", "GridInfoService" }, string.Empty);
+            if (string.IsNullOrEmpty(configVal))
+                configVal = Util.GetConfigVarFromSections<string>(
                     config, "gridname", new string[] { "GridInfo", "GridInfoService" }, string.Empty);
+            configVal = NormalizeGridName(configVal);
             if (!string.IsNullOrEmpty(configVal))
                 m_ExtraFeatures["GridName"] = configVal;
 
@@ -188,7 +192,11 @@ namespace OpenSim.Services.GridService
                 config, "GridNick", new string[] { "Const", "Hypergrid" }, string.Empty);
             if (string.IsNullOrEmpty(configVal))
                 configVal = Util.GetConfigVarFromSections<string>(
+                    config, "GridNick", new string[] { "GridInfo", "GridInfoService" }, string.Empty);
+            if (string.IsNullOrEmpty(configVal))
+                configVal = Util.GetConfigVarFromSections<string>(
                     config, "gridnick", new string[] { "GridInfo", "GridInfoService" }, string.Empty);
+            configVal = NormalizeGridNick(configVal);
             if (!string.IsNullOrEmpty(configVal))
                 m_ExtraFeatures["GridNick"] = configVal;
 
@@ -1145,6 +1153,26 @@ namespace OpenSim.Services.GridService
         public Dictionary<string,object> GetExtraFeatures()
         {
             return m_ExtraFeatures;
+        }
+
+        private static string NormalizeGridName(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return "Vanilla Sim";
+
+            string lower = value.Trim().ToLowerInvariant();
+            if (lower.Contains("lost continent")
+                    || lower.Contains("gunthar")
+                    || lower.Contains("opensimulator estate")
+                    || lower.Contains("standalone hypergrid"))
+                return "Vanilla Sim";
+
+            return value.Trim();
+        }
+
+        private static string NormalizeGridNick(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? "vanilla" : value.Trim();
         }
     }
 }

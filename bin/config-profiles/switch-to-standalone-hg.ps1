@@ -117,6 +117,8 @@ if ($AttachPublicGrids) {
     $openSimIni = Set-IniKey $openSimIni "MultiGridAttachments" "Grids" '"osgrid,neverworld"'
     $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.osgrid" "Enabled" "true"
     $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.neverworld" "Enabled" "true"
+    $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.neverworld" "GridServerURI" '"http://hg.neverworldgrid.com:8003"'
+    $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.neverworld" "GridPostURI" '"http://hg.neverworldgrid.com:8003/grid"'
 }
 
 if ($openSimIni.Contains("CHANGE_ME_PUBLIC_HOST")) {
@@ -159,6 +161,7 @@ Write-Host "Vanilla Sim branding forced on: gridname, gridnick, RegionWeb title 
 Write-Host "Showroom startup modules forced on: Warp3D maptiles, Weather /89, RegionWeb, Groups, TextBuild /88, YEngine."
 if ($AttachPublicGrids) {
     Write-Host "Enabled secondary region attachments: OSGrid, Neverworld Grid."
+    Write-Host "Neverworld region registration uses http://hg.neverworldgrid.com:8003/grid, not the public 8002 login endpoint."
 }
 Write-Host "Hypergrid address:"
 if ($HostName.Trim().Length -gt 0) {

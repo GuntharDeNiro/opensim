@@ -353,6 +353,8 @@ namespace OpenSim.Framework
 
     public class GridInfo
     {
+        private const string DefaultGridName = "Vanilla Sim";
+        private const string DefaultGridNick = "vanilla";
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
         private bool m_hasHGconfig;
@@ -474,6 +476,9 @@ namespace OpenSim.Framework
             if (string.IsNullOrEmpty(m_GridNick))
                 m_GridNick = Util.GetConfigVarFromSections<string>(config, "gridnick", namessections, string.Empty);
 
+            m_GridName = NormalizeGridName(m_GridName);
+            m_GridNick = NormalizeGridNick(m_GridNick);
+
             if (string.IsNullOrEmpty(m_GridName))
                 m_GridName = "Another bad configured grid";
 
@@ -532,6 +537,26 @@ namespace OpenSim.Framework
                 }
                 m_StunServers = stunsarr.Count > 0 ? stunsarr.ToArray() : null;
             }
+        }
+
+        private static string NormalizeGridName(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return DefaultGridName;
+
+            string lower = value.Trim().ToLowerInvariant();
+            if (lower.Contains("lost continent")
+                    || lower.Contains("gunthar")
+                    || lower.Contains("opensimulator estate")
+                    || lower.Contains("standalone hypergrid"))
+                return DefaultGridName;
+
+            return value.Trim();
+        }
+
+        private static string NormalizeGridNick(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? DefaultGridNick : value.Trim();
         }
 
         public bool HasHGConfig

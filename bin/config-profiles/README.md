@@ -128,7 +128,8 @@ registries:
 
 [MultiGridAttachment.neverworld]
     Enabled = true
-    GridServerURI = "http://hg.neverworldgrid.com:8002"
+    GridServerURI = "http://hg.neverworldgrid.com:8003"
+    GridPostURI = "http://hg.neverworldgrid.com:8003/grid"
     ExternalHostName = "vanilla-sim.com"
     ServerURI = "http://vanilla-sim.com:9000"
     Regions = ""
@@ -161,6 +162,12 @@ backends. The region keeps one primary grid for inventory, assets, user
 accounts and presence. A secondary grid must allow your simulator to register
 with its grid service; public grids may refuse this unless they explicitly
 support or authorize it.
+
+Neverworld Grid exposes login, gatekeeper and grid info on
+`http://hg.neverworldgrid.com:8002`, but self-hosted region registration uses
+the GridService endpoint on `http://hg.neverworldgrid.com:8003/grid`. If a
+target returns HTML or an empty body from `/grid`, the configured URL is probably
+a login/gatekeeper endpoint rather than a region registration endpoint.
 
 Ports
 -----

@@ -48,7 +48,7 @@ namespace OpenSim.Server.Handlers.Grid
 
             IConfig gridCfg = config.Configs["GridInfoService"];
 
-            bool stats_disabled = gridCfg.GetBoolean("DisableStatsEndpoint", false);
+            bool stats_disabled = gridCfg != null && gridCfg.GetBoolean("DisableStatsEndpoint", false);
 
             server.AddSimpleStreamHandler(new SimpleStreamHandler("/get_grid_info",
                                                                handlers.RestGetGridInfoMethod));

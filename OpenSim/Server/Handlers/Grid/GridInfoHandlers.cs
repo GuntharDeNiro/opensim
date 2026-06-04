@@ -50,6 +50,8 @@ namespace OpenSim.Server.Handlers.Grid
 {
     public class GridInfoHandlers
     {
+        private const string DefaultGridName = "Vanilla Sim";
+        private const string DefaultGridNick = "vanilla";
         private static readonly ILog _log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
         private IConfigSource m_Config;
         private Dictionary<string, string> _info = [];
@@ -83,7 +85,7 @@ namespace OpenSim.Server.Handlers.Grid
         {
             IConfig gridCfg = configSource.Configs["GridInfoService"];
 
-            stats_available = !gridCfg.GetBoolean("DisableStatsEndpoint", false);
+            stats_available = gridCfg == null || !gridCfg.GetBoolean("DisableStatsEndpoint", false);
             _lastrun = 0;
 
             if (stats_available)
@@ -169,13 +171,83 @@ namespace OpenSim.Server.Handlers.Grid
                 if (!string.IsNullOrEmpty(tmp))
                     _info["gatekeeperalias"] = OSD.FromString(tmp);
 
+                ApplyGridBranding();
+
             }
             catch (Exception)
             {
                 _log.Warn("[GRID INFO SERVICE]: Cannot get grid info from config source, using minimal defaults");
+                ApplyGridBranding();
             }
 
             _log.DebugFormat("[GRID INFO SERVICE]: Grid info service initialized with {0} keys", _info.Count);
+        }
+
+        private void ApplyGridBranding()
+        {
+            string configuredName = Util.GetConfigVarFromSections<string>(
+                m_Config, "GridName", ["Const", "GridInfo", "GridInfoService"], string.Empty);
+            if (string.IsNullOrWhiteSpace(configuredName))
+            {
+                configuredName = Util.GetConfigVarFromSections<string>(
+                    m_Config, "gridname", ["Const", "GridInfo", "GridInfoService"], string.Empty);
+            }
+
+            _info.TryGetValue("GridName", out string infoGridName);
+            _info.TryGetValue("gridname", out string infoLegacyGridName);
+
+            string gridName = SelectGridName(configuredName, infoGridName, infoLegacyGridName);
+            _info["GridName"] = gridName;
+            _info["gridname"] = gridName;
+
+            string configuredNick = Util.GetConfigVarFromSections<string>(
+                m_Config, "GridNick", ["Const", "GridInfo", "GridInfoService"], string.Empty);
+            if (string.IsNullOrWhiteSpace(configuredNick))
+            {
+                configuredNick = Util.GetConfigVarFromSections<string>(
+                    m_Config, "gridnick", ["Const", "GridInfo", "GridInfoService"], string.Empty);
+            }
+
+            _info.TryGetValue("GridNick", out string infoGridNick);
+            _info.TryGetValue("gridnick", out string infoLegacyGridNick);
+
+            string gridNick = SelectGridNick(configuredNick, infoGridNick, infoLegacyGridNick);
+            _info["GridNick"] = gridNick;
+            _info["gridnick"] = gridNick;
+        }
+
+        private static string SelectGridName(params string[] candidates)
+        {
+            foreach (string candidate in candidates)
+            {
+                if (!IsLegacyOrEmptyGridName(candidate))
+                    return candidate.Trim();
+            }
+
+            return DefaultGridName;
+        }
+
+        private static string SelectGridNick(params string[] candidates)
+        {
+            foreach (string candidate in candidates)
+            {
+                if (!string.IsNullOrWhiteSpace(candidate))
+                    return candidate.Trim();
+            }
+
+            return DefaultGridNick;
+        }
+
+        private static bool IsLegacyOrEmptyGridName(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return true;
+
+            string lower = value.Trim().ToLowerInvariant();
+            return lower.Contains("lost continent")
+                || lower.Contains("gunthar")
+                || lower.Contains("opensimulator estate")
+                || lower.Contains("standalone hypergrid");
         }
 
         private void IssueWarning()
