@@ -1,6 +1,7 @@
 .project
 .settings
 .gitignore
+.DS_Store
 *.csproj
 *.csproj.user
 *.build
