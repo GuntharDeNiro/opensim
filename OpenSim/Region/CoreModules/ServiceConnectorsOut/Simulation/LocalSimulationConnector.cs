@@ -238,7 +238,7 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Simulation
             if (presenceService == null)
                 return true;
 
-            PresenceInfo presence = presenceService.GetAgent(aCircuit.SessionID);
+            OpenSim.Services.Interfaces.PresenceInfo presence = presenceService.GetAgent(aCircuit.SessionID);
             if (presence != null)
             {
                 if (presence.UserID == aCircuit.AgentID.ToString())
