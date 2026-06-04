@@ -45,6 +45,7 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Presence
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
         protected bool m_Enabled;
+        protected bool m_AllowSimulatorLoginAgent;
 
         protected PresenceDetector m_PresenceDetector;
 
@@ -99,8 +100,13 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Presence
 
         public bool LoginAgent(string userID, UUID sessionID, UUID secureSessionID)
         {
-            m_log.Warn("[BASE PRESENCE SERVICE CONNECTOR]: LoginAgent connector not implemented at the simulators");
-            return false;
+            if (!m_AllowSimulatorLoginAgent)
+            {
+                m_log.Warn("[BASE PRESENCE SERVICE CONNECTOR]: LoginAgent connector not enabled at the simulators");
+                return false;
+            }
+
+            return m_PresenceService != null && m_PresenceService.LoginAgent(userID, sessionID, secureSessionID);
         }
 
         public bool LogoutAgent(UUID sessionID)
@@ -133,5 +139,13 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Presence
         }
 
         #endregion
+
+        protected void ConfigureSimulatorLoginAgent(IConfigSource source)
+        {
+            IConfig multiGridConfig = source.Configs["MultiGridAttachments"];
+            m_AllowSimulatorLoginAgent = multiGridConfig != null
+                && multiGridConfig.GetBoolean("Enabled", false)
+                && multiGridConfig.GetBoolean("AutoCreateInboundPresence", false);
+        }
     }
 }

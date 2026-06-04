@@ -88,6 +88,7 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Presence
                     }
 
                     //Init(source);
+                    ConfigureSimulatorLoginAgent(source);
 
                     m_PresenceDetector = new PresenceDetector(this);
 

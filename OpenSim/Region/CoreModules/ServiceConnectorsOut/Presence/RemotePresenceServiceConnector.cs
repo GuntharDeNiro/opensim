@@ -63,6 +63,7 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Presence
                 if (name == Name)
                 {
                     m_PresenceService = new PresenceServicesConnector(source);
+                    ConfigureSimulatorLoginAgent(source);
 
                     m_Enabled = true;
 
