@@ -71,10 +71,19 @@ if (-not (Test-Path $Source)) {
 $openSimIni = Get-Content -Raw $Source
 $openSimIni = Set-IniKey $openSimIni "Map" "GenerateMaptiles" "true"
 $openSimIni = Set-IniKey $openSimIni "Map" "MapImageModule" '"Warp3DImageModule"'
+$openSimIni = Set-IniKey $openSimIni "ClientStack.LindenUDP" "ViewerSimulatorVersionOverride" '"Vanilla Sim"'
 $openSimIni = Set-IniKey $openSimIni "Weather" "Enabled" "true"
 $openSimIni = Set-IniKey $openSimIni "Weather" "AllowDisabled" "false"
 $openSimIni = Set-IniKey $openSimIni "Weather" "AutoCycleEnabled" "true"
 $openSimIni = Set-IniKey $openSimIni "RegionWeb" "Enabled" "true"
+$openSimIni = Set-IniKey $openSimIni "RegionWeb" "EstateTitle" '"Vanilla Sim"'
+$openSimIni = Set-IniKey $openSimIni "GridInfoService" "gridname" '"Vanilla Sim"'
+$openSimIni = Set-IniKey $openSimIni "GridInfoService" "gridnick" '"vanilla"'
+$openSimIni = Set-IniKey $openSimIni "GridInfoService" "welcome" '"${Const|BaseURL}:${Const|PublicPort}/regionweb"'
+$openSimIni = Set-IniKey $openSimIni "GridInfoService" "about" '"${Const|BaseURL}:${Const|PublicPort}/regionweb"'
+$openSimIni = Set-IniKey $openSimIni "GridInfoService" "help" '"${Const|BaseURL}:${Const|PublicPort}/regionweb"'
+$openSimIni = Set-IniKey $openSimIni "GridInfoService" "register" '"${Const|BaseURL}:${Const|PublicPort}/regionweb"'
+$openSimIni = Set-IniKey $openSimIni "GridInfoService" "economy" '"${Const|BaseURL}:${Const|PublicPort}/regionweb"'
 $openSimIni = Set-IniKey $openSimIni "TextBuild" "Enabled" "true"
 $openSimIni = Set-IniKey $openSimIni "YEngine" "Enabled" "true"
 
@@ -89,5 +98,6 @@ if (Test-Path $StorageSource) {
 }
 
 Write-Host "Switched OpenSim.ini to the captured OSGrid profile."
+Write-Host "Vanilla Sim branding forced on: gridname, gridnick, RegionWeb title and viewer simulator version."
 Write-Host "Showroom startup modules forced on: Warp3D maptiles, Weather /89, RegionWeb, TextBuild /88, YEngine."
 Write-Host "Regions were not touched."

@@ -126,7 +126,7 @@ namespace OpenSim.Region.DataSnapshot
                             m_gridinfo.Add("gatekeeperURL", gatekeeper);
 
                         m_gridinfo.Add(
-                            "name", config.Configs["DataSnapshot"].GetString("gridname", "the lost continent of hippo"));
+                            "name", config.Configs["DataSnapshot"].GetString("gridname", "Vanilla Sim"));
 
                         m_exposure_level = config.Configs["DataSnapshot"].GetString("data_exposure", m_exposure_level);
                         m_exposure_level = m_exposure_level.ToLower();

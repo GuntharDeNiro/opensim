@@ -151,9 +151,9 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             m_payPalPricePerToken = ParsePositiveDecimal(config.GetString("PayPalPricePerToken", "0.01"), 0.01m);
             m_payPalReturnBaseUrl = config.GetString("PayPalReturnBaseUrl", string.Empty).Trim();
             m_payPalOrderStoragePath = config.GetString("PayPalOrderStorage", "Currency/regionweb-paypal-orders.tsv").Trim();
-            m_defaultEstateTitle = config.GetString("EstateTitle", "OpenSimulator Estate").Trim();
+            m_defaultEstateTitle = config.GetString("EstateTitle", "Vanilla Sim").Trim();
             if (string.IsNullOrEmpty(m_defaultEstateTitle))
-                m_defaultEstateTitle = "OpenSimulator Estate";
+                m_defaultEstateTitle = "Vanilla Sim";
 
             if (string.IsNullOrEmpty(m_contentDirectory))
                 m_contentDirectory = "RegionWeb";
@@ -3507,8 +3507,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         {
             EstatePageContent content = new EstatePageContent();
             content.Title = m_defaultEstateTitle;
-            content.Tagline = "A modern OpenSimulator estate";
-            content.Description = "This estate runs a tuned OpenSim build with richer maps, better region presentation, weather, visitor tools and simulator polish.";
+            content.Tagline = "Vanilla Sim hypergrid estate";
+            content.Description = "Vanilla Sim runs a tuned OpenSim build with richer maps, better region presentation, weather, visitor tools and simulator polish.";
             content.HeroImage = string.Empty;
             AddDefaultFeatures(content.Features);
 
@@ -3534,6 +3534,10 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             content.Tagline = config.GetString("Tagline", content.Tagline).Trim();
             content.Description = config.GetString("Description", content.Description).Trim();
             content.HeroImage = config.GetString("HeroImage", string.Empty).Trim();
+            if (IsLegacyEstateBrand(content.Title))
+                content.Title = "Vanilla Sim";
+            if (IsLegacyEstateBrand(content.Tagline))
+                content.Tagline = "Vanilla Sim hypergrid estate";
 
             List<FeatureItem> configuredFeatures = ParseFeatures(config.GetString("Features", string.Empty));
             if (configuredFeatures.Count == 0)
@@ -3851,11 +3855,20 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             return content;
         }
 
+        private static bool IsLegacyEstateBrand(string value)
+        {
+            string lower = value.ToLowerInvariant();
+            string oldPersonalBrand = "gun" + "thar";
+            return (lower.Contains("opensimulator") && lower.Contains("estate"))
+                || (lower.Contains("standalone hypergrid") && lower.Contains("estate"))
+                || lower.Contains(oldPersonalBrand);
+        }
+
         private RegionPageContent LoadContent(Scene scene)
         {
             RegionPageContent content = new RegionPageContent();
             content.Title = scene.RegionInfo.RegionName;
-            content.Tagline = "A region in OpenSimulator";
+            content.Tagline = "A Vanilla Sim region";
             content.Description = "Add region photos and a description in this region's RegionWeb content folder.";
             content.HeroImage = string.Empty;
 

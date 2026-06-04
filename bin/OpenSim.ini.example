@@ -1023,10 +1023,10 @@
     ;; local builds or operating systems.
     ; SendSimulatorVersionToViewer = false
 
-    ;# {ViewerSimulatorVersionOverride} {SendSimulatorVersionToViewer} {Fixed simulator version string for viewers} {} OpenSim
+    ;# {ViewerSimulatorVersionOverride} {SendSimulatorVersionToViewer} {Fixed simulator version string for viewers} {} Vanilla Sim
     ;; Optional fixed string to send instead of the full build/runtime string.
     ;; Only used when SendSimulatorVersionToViewer is true.
-    ; ViewerSimulatorVersionOverride = "OpenSim"
+    ; ViewerSimulatorVersionOverride = "Vanilla Sim"
 
     ;# {DisableFacelights} {} {Stop facelights from working?} {true false} false
     ;; Quash and remove any light properties from attachments not on the
@@ -1241,10 +1241,10 @@
     ;;    all: exposes everything
     ; data_exposure = minimum
 
-    ;# {gridname} {index_sims:true} {Enter the name fo your grid} {} OSGrid
+    ;# {gridname} {index_sims:true} {Enter the name fo your grid} {} Vanilla Sim
     ;; If search is on, change this to your grid name; will be ignored for
     ;; standalones
-    ; gridname = "OSGrid"
+    ; gridname = "Vanilla Sim"
 
     ;# {default_snapshot_period} {index_sims:true} {Period between data snapshots?} {} 1200
     ;; Period between data snapshots, in seconds. 20 minutes, for starters,
@@ -1549,8 +1549,8 @@
     ;; and each region gets a folder named after its URL slug.
     ; ContentDirectory = "RegionWeb"
 
-    ;# {EstateTitle} {Enabled} {Default title for the central estate website} {} OpenSimulator Estate
-    ; EstateTitle = "OpenSimulator Estate"
+    ;# {EstateTitle} {Enabled} {Default title for the central estate website} {} Vanilla Sim
+    ; EstateTitle = "Vanilla Sim"
 
     ;# {AutoCreateContent} {Enabled} {Create starter profile and post files} {true false} true
     ; AutoCreateContent = true

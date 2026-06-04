@@ -570,28 +570,28 @@
     login = ${Const|BaseURL}:${Const|PublicPort}/
 
     ; long grid name: the long name of your grid
-    gridname = "the lost continent of hippo"
+    gridname = "Vanilla Sim"
 
     ; short grid name: the short name of your grid
-    gridnick = "hippogrid"
+    gridnick = "vanilla"
 
     ; login page: optional: if it exists it will be used to tell the client to use
     ;                       this as splash page
-    ;welcome = ${Const|BaseURL}/welcome
+    welcome = ${Const|BaseURL}:${Const|PublicPort}/regionweb
 
     ; helper uri: optional: if it exists it will be used to tell the client to use
     ;                       this for all economy related things
-    ;economy = ${Const|BaseURL}/economy
+    economy = ${Const|BaseURL}:${Const|PublicPort}/regionweb
 
     ; web page of grid: optional: page providing further information about your grid
-    ;about = ${Const|BaseURL}/about
+    about = ${Const|BaseURL}:${Const|PublicPort}/regionweb
 
     ; account creation: optional: page providing further information about obtaining
     ;                             a user account on your grid
-    ;register = ${Const|BaseURL}/register
+    register = ${Const|BaseURL}:${Const|PublicPort}/regionweb
 
     ; help: optional: page providing further assistance for users of your grid
-    ;help = ${Const|BaseURL}/help
+    help = ${Const|BaseURL}:${Const|PublicPort}/regionweb
 
     ; password help: optional: page providing password assistance for users of your grid
     ;password = ${Const|BaseURL}/password

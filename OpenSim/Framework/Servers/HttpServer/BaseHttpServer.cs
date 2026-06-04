@@ -2181,7 +2181,7 @@ namespace OpenSim.Framework.Servers.HttpServer
         // Fallback HTTP responses in case the HTTP error response files don't exist
         private static string getDefaultHTTP404()
         {
-            return "<HTML><HEAD><TITLE>404 Page not found</TITLE><BODY><BR /><H1>Ooops!</H1><P>The page you requested has been obsconded with by knomes. Find hippos quick!</P></BODY></HTML>";
+            return "<HTML><HEAD><TITLE>404 Page not found</TITLE><BODY><BR /><H1>Not found</H1><P>The page you requested is not available on Vanilla Sim.</P></BODY></HTML>";
         }
 
         public void SetHTTP404()
