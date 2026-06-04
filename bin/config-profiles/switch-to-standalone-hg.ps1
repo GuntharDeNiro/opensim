@@ -117,7 +117,7 @@ $openSimIni = Set-IniKey $openSimIni "TextBuild" "Enabled" "true"
 $openSimIni = Set-IniKey $openSimIni "YEngine" "Enabled" "true"
 if ($AttachPublicGrids) {
     $openSimIni = Set-IniKey $openSimIni "MultiGridAttachments" "Enabled" "true"
-    $openSimIni = Set-IniKey $openSimIni "MultiGridAttachments" "Grids" '"osgrid,neverworld"'
+    $openSimIni = Set-IniKey $openSimIni "MultiGridAttachments" "Grids" '"osgrid,neverworld,zetasim"'
     $openSimIni = Set-IniKey $openSimIni "MultiGridAttachments" "AutoCreateInboundPresence" "true"
     $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.osgrid" "Enabled" "true"
     $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.osgrid" "GridServerURI" '"http://grid.osgrid.org"'
@@ -125,6 +125,9 @@ if ($AttachPublicGrids) {
     $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.neverworld" "Enabled" "true"
     $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.neverworld" "GridServerURI" '"http://hg.neverworldgrid.com:8003"'
     $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.neverworld" "GridPostURI" '"http://hg.neverworldgrid.com:8003/grid"'
+    $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.zetasim" "Enabled" "true"
+    $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.zetasim" "GridServerURI" '"http://robust.zetaworlds.com:8003"'
+    $openSimIni = Set-IniKey $openSimIni "MultiGridAttachment.zetasim" "GridPostURI" '"http://robust.zetaworlds.com:8003/grid"'
 }
 
 if ($openSimIni.Contains("CHANGE_ME_PUBLIC_HOST")) {
@@ -166,9 +169,10 @@ Write-Host "Switched SQLite and currency storage to dedicated bin\StandaloneHG f
 Write-Host "Vanilla Sim branding forced on: gridname, gridnick, RegionWeb title and viewer simulator version."
 Write-Host "Showroom startup modules forced on: Warp3D maptiles, Weather /89, RegionWeb, Groups, GroupAutoInvite, TextBuild /88, YEngine."
 if ($AttachPublicGrids) {
-    Write-Host "Enabled secondary region attachments: OSGrid, Neverworld Grid."
+    Write-Host "Enabled secondary region attachments: OSGrid, Neverworld Grid, ZetaWorlds."
     Write-Host "OSGrid region registration uses http://grid.osgrid.org/grid, not the public hg.osgrid.org gatekeeper."
     Write-Host "Neverworld region registration uses http://hg.neverworldgrid.com:8003/grid, not the public 8002 login endpoint."
+    Write-Host "ZetaWorlds region registration uses http://robust.zetaworlds.com:8003/grid, not the public hg.zetaworlds.com gatekeeper."
     Write-Host "Enabled inbound MultiGrid presence fallback for teleports from attached grid maps."
 }
 Write-Host "Hypergrid address:"

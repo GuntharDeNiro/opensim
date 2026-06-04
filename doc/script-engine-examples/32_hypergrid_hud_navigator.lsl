@@ -38,7 +38,7 @@ list GRIDS = [
     "Wolf Territories", "grid.wolfterritories.org:8002",
     "Kitely", "grid.kitely.com:8002",
     "Neverworld", "hg.neverworldgrid.com:8002",
-    "ZetaWorlds", "login.zetaworlds.com",
+    "ZetaWorlds", "hg.zetaworlds.com:80",
     "Alternate MV", "login.alternatemetaverse.com:8002",
     "DigiWorldz", "login.digiworldz.com:8002",
     "Craft World", "craft-world.org:8002",

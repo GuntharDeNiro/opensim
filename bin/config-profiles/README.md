@@ -113,7 +113,7 @@ registries:
 ```ini
 [MultiGridAttachments]
     Enabled = true
-    Grids = "osgrid,neverworld"
+    Grids = "osgrid,neverworld,zetasim"
     ContinueOnFailure = true
     AutoCreateInboundPresence = true
 
@@ -132,6 +132,17 @@ registries:
     Enabled = true
     GridServerURI = "http://hg.neverworldgrid.com:8003"
     GridPostURI = "http://hg.neverworldgrid.com:8003/grid"
+    ExternalHostName = "vanilla-sim.com"
+    ServerURI = "http://vanilla-sim.com:9000"
+    Regions = ""
+    Location = ""
+    TimeoutSeconds = 5
+    Strict = false
+
+[MultiGridAttachment.zetasim]
+    Enabled = true
+    GridServerURI = "http://robust.zetaworlds.com:8003"
+    GridPostURI = "http://robust.zetaworlds.com:8003/grid"
     ExternalHostName = "vanilla-sim.com"
     ServerURI = "http://vanilla-sim.com:9000"
     Regions = ""
@@ -176,6 +187,12 @@ Neverworld Grid exposes login, gatekeeper and grid info on
 the GridService endpoint on `http://hg.neverworldgrid.com:8003/grid`. If a
 target returns HTML or an empty body from `/grid`, the configured URL is probably
 a login/gatekeeper endpoint rather than a region registration endpoint.
+
+ZetaWorlds exposes Hypergrid login and gatekeeper on
+`http://hg.zetaworlds.com:80`, but self-hosted region registration uses its
+Robust GridService endpoint on `http://robust.zetaworlds.com:8003/grid`.
+The default ZetaWorlds Hypergrid destination is
+`hop://hg.zetaworlds.com:80/Welcome/128/128/25`.
 
 Keep `AutoCreateInboundPresence = true` for multigrid publication. Some attached
 grids teleport from their world map directly to this simulator's `/agent`
