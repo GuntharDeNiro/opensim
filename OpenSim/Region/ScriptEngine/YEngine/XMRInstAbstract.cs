@@ -1307,7 +1307,10 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         //    at default state_entry (XMRInstAbstract )
         public string XMRExceptionStackString(Exception ex)
         {
-            string stwhole = ex.StackTrace;
+            string stwhole = ex?.StackTrace;
+            if (string.IsNullOrEmpty(stwhole))
+                return string.Empty;
+
             string[] stlines = stwhole.Split(new char[] { '\n' });
             StringBuilder sb = new StringBuilder();
             foreach(string st in stlines)
@@ -1357,8 +1360,8 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                     --endFuncName;
                 }
                 string funcName = stline.Substring(0, endFuncName);
-                KeyValuePair<int, ScriptSrcLoc>[] srcLocs;
-                if(m_ObjCode.scriptSrcLocss.TryGetValue(funcName, out srcLocs))
+                KeyValuePair<int, ScriptSrcLoc>[] srcLocs = null;
+                if(m_ObjCode?.scriptSrcLocss != null && m_ObjCode.scriptSrcLocss.TryGetValue(funcName, out srcLocs))
                 {
                     stline = stline.Substring(0, endFuncName) + stline.Substring(pastCloseParen);
                     kwin = stline.IndexOf(" in ");

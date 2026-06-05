@@ -270,8 +270,12 @@ default
         if (gPendingDestination == "")
             return;
 
-        say("Trying direct teleport to " + gPendingName + "...");
-        llTeleportAgent((string)gOwner, gPendingDestination, LANDING, LOOK_AT);
+        string destination = gPendingDestination;
+        string destinationName = gPendingName;
         gPendingDestination = "";
+        gPendingName = "";
+
+        say("Trying direct teleport to " + destinationName + "...");
+        llTeleportAgent((string)gOwner, destination, LANDING, LOOK_AT);
     }
 }
