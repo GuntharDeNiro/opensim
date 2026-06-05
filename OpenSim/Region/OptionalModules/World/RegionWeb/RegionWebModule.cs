@@ -56,9 +56,9 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
         private const string ScriptEngineFeatureTitle = "Second Life-style script engine";
         private const string ScriptEngineFeatureBody =
-            "The script engine is moving closer to Second Life behavior with Experience-Lite permissions, scripted sit controls, key-value stores, linkset data, environment, estate-return, parcel media, parcel prim counts/details, guarded money transfer, inventory transfer, damage, RSA, attachment filter, identity lookup, privacy-aware agent language lookup, animation-state introspection, physics energy readback, object-detail cost readback, script memory/profiler diagnostics, GLTF material and physics primitive-param helpers, plus a RegionWeb compatibility center and in-world regression lab.";
+            "The script engine is moving closer to Second Life behavior with Experience-Lite permissions, scripted sit controls, key-value stores, linkset data, environment, estate-return, parcel media, parcel prim counts/details, guarded money transfer, inventory transfer, damage, RSA, attachment filter, identity lookup, privacy-aware agent language lookup, animation-state introspection, physics energy readback, object-detail cost readback, script memory/profiler diagnostics, GLTF material and physics primitive-param helpers, plus a Vanilla Sim compatibility center and in-world regression lab.";
         private const string ScriptEngineFeatureOverview =
-            "The script engine now includes a wider Second Life-style scripting surface for modern estate systems. Trusted estate scripts can use Experience-Lite permissions, persistent experience key-value storage, linkset data with linkset_data events, scripted sit controls, linked sound controls, region and parcel environment helpers, estate return and terrain helpers, parcel media controls, same-owner simulator-wide parcel prim counts/details, guarded debit-permission money transfer, direct inventory and ownership transfer, direct damage helpers with Combat2-style pre-application damage transactions, cached identity lookup, privacy-aware agent language lookup, animation-state introspection, physics energy readback, object-detail cost/render/selection readback, script memory limit/profiler diagnostics, GLTF/render material primitive params with stored override readback, physics material primitive params, secure hashing/HMAC/RSA helpers, parameterized rez/derez workflows, filtered attachment inspection and HUD coordinate helpers without relying on brittle scripted workarounds. Second Life pathfinding character calls now provide persistent character option state, baked terrain navmesh caching, terrain-aware A* routing, parcel-stay handling and dynamic object/avatar obstacle avoidance where OpenSim does not expose the proprietary SL navmesh service. RegionWeb exposes a script compatibility center, and the example suite includes an in-world regression controller for post-build checks.";
+            "The script engine now includes a wider Second Life-style scripting surface for modern estate systems. Trusted estate scripts can use Experience-Lite permissions, persistent experience key-value storage, linkset data with linkset_data events, scripted sit controls, linked sound controls, region and parcel environment helpers, estate return and terrain helpers, parcel media controls, same-owner simulator-wide parcel prim counts/details, guarded debit-permission money transfer, direct inventory and ownership transfer, direct damage helpers with Combat2-style pre-application damage transactions, cached identity lookup, privacy-aware agent language lookup, animation-state introspection, physics energy readback, object-detail cost/render/selection readback, script memory limit/profiler diagnostics, GLTF/render material primitive params with stored override readback, physics material primitive params, secure hashing/HMAC/RSA helpers, parameterized rez/derez workflows, filtered attachment inspection and HUD coordinate helpers without relying on brittle scripted workarounds. Second Life pathfinding character calls now provide persistent character option state, baked terrain navmesh caching, terrain-aware A* routing, parcel-stay handling and dynamic object/avatar obstacle avoidance where OpenSim does not expose the proprietary SL navmesh service. Vanilla Sim exposes a script compatibility center, and the example suite includes an in-world regression controller for post-build checks.";
         private const string CurrencyFeatureTitle = "Viewer-visible local currency";
         private const string CurrencyFeatureBody =
             "The estate can run a local persistent currency ledger that sends live balances to the viewer, handles transfers, object payments, land/object purchases and simulator economy charges without requiring a separate currency server.";
@@ -194,25 +194,25 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 MainConsole.Instance.Commands.AddCommand(
                     "RegionWeb", false, "regionweb show",
                     "regionweb show",
-                    "Show public RegionWeb URLs and content folders for loaded regions.",
+                    "Show public Vanilla Sim web URLs and content folders for loaded regions.",
                     HandleShowCommand);
 
                 MainConsole.Instance.Commands.AddCommand(
                     "RegionWeb", false, "regionweb currency pending",
                     "regionweb currency pending",
-                    "List pending RegionWeb wallet token purchase requests.",
+                    "List pending Vanilla Sim wallet token purchase requests.",
                     HandleCurrencyCommand);
 
                 MainConsole.Instance.Commands.AddCommand(
                     "RegionWeb", false, "regionweb currency approve",
                     "regionweb currency approve <request-id> [note]",
-                    "Approve a pending RegionWeb wallet token purchase request and credit the avatar.",
+                    "Approve a pending Vanilla Sim wallet token purchase request and credit the avatar.",
                     HandleCurrencyCommand);
 
                 MainConsole.Instance.Commands.AddCommand(
                     "RegionWeb", false, "regionweb currency deny",
                     "regionweb currency deny <request-id> [note]",
-                    "Deny a pending RegionWeb wallet token purchase request.",
+                    "Deny a pending Vanilla Sim wallet token purchase request.",
                     HandleCurrencyCommand);
 
                 m_log.InfoFormat("[REGION WEB]: Enabled at {0}; content folder {1}", m_basePath, m_absoluteContentDirectory);
@@ -460,7 +460,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 m_log.WarnFormat("[REGION WEB]: Request failed: {0}", e);
                 response.StatusCode = (int)HttpStatusCode.InternalServerError;
                 response.ContentType = "text/plain";
-                response.RawBuffer = Encoding.UTF8.GetBytes("RegionWeb request failed.");
+                response.RawBuffer = Encoding.UTF8.GetBytes("Vanilla Sim web request failed.");
             }
         }
 
@@ -496,7 +496,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             html.Append("\"");
             if (!string.IsNullOrEmpty(content.HeroImage))
             {
-                html.Append(" style=\"background-image:linear-gradient(90deg,rgba(8,18,22,.86),rgba(8,18,22,.34)),url('")
+                html.Append(" style=\"background-image:linear-gradient(90deg,rgba(0,0,0,.76),rgba(0,0,0,.30)),url('")
                     .Append(Html(EstateMediaURL(content.HeroImage))).Append("')\"");
             }
 
@@ -671,7 +671,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         {
             if (!m_currencyPortalEnabled)
             {
-                SendNotFound(response, "RegionWeb currency portal is disabled.");
+                SendNotFound(response, "Vanilla Sim currency portal is disabled.");
                 return;
             }
 
@@ -895,11 +895,11 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 m_currencyLastChallengeUTCByAgent[agentID] = DateTime.UtcNow;
             }
 
-            string message = "RegionWeb wallet login token for " + displayName + ": " + token
+            string message = "Vanilla Sim wallet login token for " + displayName + ": " + token
                 + " (expires in " + m_currencyChallengeMinutes.ToString(CultureInfo.InvariantCulture) + " minutes).";
             try
             {
-                client.SendBlueBoxMessage(UUID.Zero, "RegionWeb", message);
+                client.SendBlueBoxMessage(UUID.Zero, "Vanilla Sim", message);
             }
             catch
             {
@@ -980,7 +980,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             if (!IsRegionWebSuperAdmin(agentID))
             {
-                SendCurrencyAdminLogin(response, "Only an estate owner of a loaded region can access the RegionWeb money admin.", displayName);
+                SendCurrencyAdminLogin(response, "Only an estate owner of a loaded region can access the Vanilla Sim money admin.", displayName);
                 return;
             }
 
@@ -1014,11 +1014,11 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 m_currencyLastChallengeUTCByAgent[agentID] = DateTime.UtcNow;
             }
 
-            string message = "RegionWeb money admin token for " + displayName + ": " + token
+            string message = "Vanilla Sim money admin token for " + displayName + ": " + token
                 + " (expires in " + m_currencyChallengeMinutes.ToString(CultureInfo.InvariantCulture) + " minutes).";
             try
             {
-                client.SendBlueBoxMessage(UUID.Zero, "RegionWeb", message);
+                client.SendBlueBoxMessage(UUID.Zero, "Vanilla Sim", message);
             }
             catch
             {
@@ -1046,7 +1046,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             if (!IsRegionWebSuperAdmin(agentID))
             {
-                SendCurrencyAdminLogin(response, "Only an estate owner of a loaded region can access the RegionWeb money admin.", displayName);
+                SendCurrencyAdminLogin(response, "Only an estate owner of a loaded region can access the Vanilla Sim money admin.", displayName);
                 return;
             }
 
@@ -1186,7 +1186,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     return;
 
                 string note = FormValue(form, "note");
-                string description = string.IsNullOrWhiteSpace(note) ? "RegionWeb admin transfer" : note;
+                string description = string.IsNullOrWhiteSpace(note) ? "Vanilla Sim admin transfer" : note;
                 if (InvokeWebTransfer(money, fromID, toID, amount, description, out string reason))
                 {
                     severity = "ok";
@@ -1207,7 +1207,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             severity = "error";
             if (!IsCurrencyBuyAvailable())
             {
-                message = "Token purchases are disabled on this RegionWeb portal.";
+                message = "Token purchases are disabled on this Vanilla Sim portal.";
                 return;
             }
 
@@ -1226,7 +1226,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 severity = "ok";
                 message = "Purchase request " + request.RequestID + " created for " + amount.ToString(CultureInfo.InvariantCulture)
                     + " tokens. Estate staff can approve it from the console.";
-                NotifyCurrencyAvatar(session.AgentID, "RegionWeb wallet purchase request " + request.RequestID
+                NotifyCurrencyAvatar(session.AgentID, "Vanilla Sim wallet purchase request " + request.RequestID
                     + " created for " + amount.ToString(CultureInfo.InvariantCulture) + " tokens.");
                 return;
             }
@@ -1254,7 +1254,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             string message;
             if (!m_currencyBuyEnabled || m_currencyBuyMode.Equals("disabled", StringComparison.OrdinalIgnoreCase))
             {
-                SendCurrencyDashboard(response, session, "Token purchases are disabled on this RegionWeb portal.", "error");
+                SendCurrencyDashboard(response, session, "Token purchases are disabled on this Vanilla Sim portal.", "error");
                 return;
             }
 
@@ -1304,7 +1304,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             order.Status = "created";
             order.UpdatedUTC = DateTime.UtcNow;
             StoreCurrencyPayPalOrder(order);
-            NotifyCurrencyAvatar(session.AgentID, "RegionWeb PayPal checkout " + order.LocalID + " created for "
+            NotifyCurrencyAvatar(session.AgentID, "Vanilla Sim PayPal checkout " + order.LocalID + " created for "
                 + amount.ToString(CultureInfo.InvariantCulture) + " tokens.");
             response.Redirect(approvalUrl, HttpStatusCode.Redirect);
         }
@@ -1316,7 +1316,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             CurrencyPayPalOrder order = FindCurrencyPayPalOrder(orderID, localID);
             if (order == null)
             {
-                SendCurrencyDashboard(response, session, "PayPal order not found in RegionWeb storage.", "error");
+                SendCurrencyDashboard(response, session, "PayPal order not found in Vanilla Sim storage.", "error");
                 return;
             }
 
@@ -1367,7 +1367,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             }
 
             MarkCurrencyPayPalOrder(order.LocalID, "completed", "PayPal captured and tokens credited.");
-            NotifyCurrencyAvatar(session.AgentID, "RegionWeb PayPal checkout " + order.LocalID + " completed: "
+            NotifyCurrencyAvatar(session.AgentID, "Vanilla Sim PayPal checkout " + order.LocalID + " completed: "
                 + order.TokenAmount.ToString(CultureInfo.InvariantCulture) + " tokens credited.");
             SendCurrencyDashboard(response, session, "PayPal payment captured. Credited "
                 + order.TokenAmount.ToString(CultureInfo.InvariantCulture) + " tokens.", "ok");
@@ -1392,7 +1392,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             severity = "error";
             if (!m_currencyTransferEnabled)
             {
-                message = "Wallet transfers are disabled on this RegionWeb portal.";
+                message = "Wallet transfers are disabled on this Vanilla Sim portal.";
                 return;
             }
 
@@ -1448,7 +1448,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 .Append("<input type=\"hidden\" name=\"action\" value=\"request-token\">")
                 .Append("<label>Avatar name<input name=\"avatar\" value=\"").Append(Html(avatarName)).Append("\" required placeholder=\"First Last\"></label>")
                 .Append("<button type=\"submit\">Send token inworld</button></form>")
-                .Append("<p class=\"wallet-note\">The avatar must be online in one of the loaded regions so RegionWeb can deliver the token through the viewer.</p></article>");
+                .Append("<p class=\"wallet-note\">The avatar must be online in one of the loaded regions so Vanilla Sim can deliver the token through the viewer.</p></article>");
 
             html.Append("<article class=\"wallet-card\"><h2>2. Login</h2>")
                 .Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/currency/\">")
@@ -1987,7 +1987,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             MethodInfo method = money.GetType().GetMethod("WebBuyCurrency", BindingFlags.Public | BindingFlags.Instance);
             if (method == null)
             {
-                reason = "Currency module does not expose RegionWeb purchases.";
+                reason = "Currency module does not expose Vanilla Sim purchases.";
                 return false;
             }
 
@@ -2013,7 +2013,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 method = money.GetType().GetMethod("WebTransferCurrency", BindingFlags.Public | BindingFlags.Instance);
             if (method == null)
             {
-                reason = "Currency module does not expose RegionWeb transfers.";
+                reason = "Currency module does not expose Vanilla Sim transfers.";
                 return false;
             }
 
@@ -2153,7 +2153,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 }
             }
 
-            NotifyCurrencyAvatar(agentID, "RegionWeb wallet purchase " + requestID + " approved: "
+            NotifyCurrencyAvatar(agentID, "Vanilla Sim wallet purchase " + requestID + " approved: "
                 + amount.ToString(CultureInfo.InvariantCulture) + " tokens credited.");
             message = "Approved " + requestID + " for " + displayName + " and credited "
                 + amount.ToString(CultureInfo.InvariantCulture) + " tokens.";
@@ -2195,7 +2195,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 storedNote = request.Note;
             }
 
-            NotifyCurrencyAvatar(agentID, "RegionWeb wallet purchase " + storedRequestID + " denied."
+            NotifyCurrencyAvatar(agentID, "Vanilla Sim wallet purchase " + storedRequestID + " denied."
                 + (string.IsNullOrWhiteSpace(storedNote) ? string.Empty : " " + storedNote));
             message = "Denied " + storedRequestID + " for " + displayName + ".";
             return true;
@@ -2273,7 +2273,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             if (!IsAbsoluteWebUrl(GetCurrencyPublicBaseUrl()))
             {
-                reason = "PayPal checkout needs PayPalReturnBaseUrl set to the public RegionWeb URL, for example https://example.com/regionweb.";
+                reason = "PayPal checkout needs PayPalReturnBaseUrl set to the public Vanilla Sim URL, for example https://example.com/regionweb.";
                 return false;
             }
 
@@ -2298,7 +2298,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             string returnUrl = publicBase + "/currency/paypal-return?local=" + Url(order.LocalID);
             string cancelUrl = publicBase + "/currency/paypal-cancel?local=" + Url(order.LocalID);
             string amount = order.FiatAmount.ToString("0.00", CultureInfo.InvariantCulture);
-            string description = "RegionWeb wallet tokens for " + order.DisplayName;
+            string description = "Vanilla Sim wallet tokens for " + order.DisplayName;
             string customID = order.AgentID + ":" + order.TokenAmount.ToString(CultureInfo.InvariantCulture) + ":" + order.LocalID;
 
             string body =
@@ -2311,7 +2311,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 + "\"amount\":{\"currency_code\":\"" + Json(order.CurrencyCode) + "\",\"value\":\"" + Json(amount) + "\"}"
                 + "}],"
                 + "\"application_context\":{"
-                + "\"brand_name\":\"RegionWeb\","
+                + "\"brand_name\":\"Vanilla Sim\","
                 + "\"landing_page\":\"LOGIN\","
                 + "\"user_action\":\"PAY_NOW\","
                 + "\"return_url\":\"" + Json(returnUrl) + "\","
@@ -2915,7 +2915,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             try
             {
-                client.SendBlueBoxMessage(UUID.Zero, "RegionWeb", message);
+                client.SendBlueBoxMessage(UUID.Zero, "Vanilla Sim", message);
             }
             catch
             {
@@ -3345,7 +3345,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             if (status == "Viewer-visible fallback")
                 return "The script API stores the requested SL state and mirrors it through viewer-visible compatibility packets available to OpenSim viewers.";
             if (status == "Runtime telemetry")
-                return "The runtime records profiler state and measurements for simulator/RegionWeb inspection; a Linden viewer profiler panel is not part of the OpenSim protocol.";
+                return "The runtime records profiler state and measurements for simulator/Vanilla Sim web inspection; a Linden viewer profiler panel is not part of the OpenSim protocol.";
             if (status == "OpenSim-local backend")
                 return "The function is implemented on the local terrain/object/avatar backend because Linden's hosted pathfinding service is unavailable to OpenSim.";
             if (status == "Forward-compatible storage")
@@ -3353,7 +3353,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             if (status == "Experience trust")
                 return "The function follows SL Experience semantics through this build's local Experience-Lite trust and key-value backend.";
             if (status == "API surface")
-                return "Auto-discovered from ILSL_Api so RegionWeb shows the full exposed script surface even before a hand-written compatibility note is added.";
+                return "Auto-discovered from ILSL_Api so Vanilla Sim web shows the full exposed script surface even before a hand-written compatibility note is added.";
 
             return "Implemented directly in the simulator script API with Second Life-style arguments, return values and event behavior where applicable.";
         }
@@ -3366,7 +3366,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             string slug = MakeSlug(scene.RegionInfo.RegionName);
 
             StringBuilder html = BeginPage(content.Title);
-            html.Append("<header class=\"hero\" style=\"background-image:linear-gradient(90deg,rgba(8,18,22,.80),rgba(8,18,22,.30)),url('")
+            html.Append("<header class=\"hero\" style=\"background-image:linear-gradient(90deg,rgba(0,0,0,.76),rgba(0,0,0,.28)),url('")
                 .Append(Html(GetHeroURL(scene, content))).Append("')\">")
                 .Append("<div class=\"wrap\">");
             AppendPageLinks(html,
@@ -3664,9 +3664,9 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
                 case "regionweb-pages":
                 case "regionweb-estate-portal":
-                    content.Title = "RegionWeb estate portal";
+                    content.Title = "Vanilla Sim estate portal";
                     content.Summary = "Every estate and region can publish a web page with photos, posts, map tiles, parcels and live simulator statistics.";
-                    content.Overview = "RegionWeb turns the simulator HTTP endpoint into a simple estate website. The central page lists online regions and estate features; each region gets a profile page, gallery, blog posts, current map tile, parcel summaries and live stats pulled from the simulator.";
+                    content.Overview = "Vanilla Sim turns the simulator HTTP endpoint into a simple estate website. The central page lists online regions and estate features; each region gets a profile page, gallery, blog posts, current map tile, parcel summaries and live stats pulled from the simulator.";
                     content.Usage.Add("Open /regionweb/ on the simulator HTTP address to view the estate landing page.");
                     content.Usage.Add("Edit bin/RegionWeb/estate.ini for the central title, tagline, hero image and feature cards.");
                     content.Usage.Add("Edit bin/RegionWeb/<region-slug>/profile.ini for each region page, and add JPEG or PNG files under that region's media folder.");
@@ -3750,7 +3750,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Usage.Add("Keep AllowNegativeBalances = false for normal viewer currency behavior unless you deliberately want overdraft-style testing.");
                     content.Usage.Add("Set the LoginService Currency value to the viewer-facing currency name you want users to see beside their balance.");
                     content.Usage.Add("Use console commands such as money show, money balance, money set, money give, money take, money transfer, money export and money import for estate administration.");
-                    content.Usage.Add("Open /regionweb/currency/ for the reserved avatar wallet area: users request an inworld token, log in on RegionWeb, view balance/statement, buy tokens and transfer to another avatar.");
+                    content.Usage.Add("Open /regionweb/currency/ for the reserved avatar wallet area: users request an inworld token, log in on Vanilla Sim, view balance/statement, buy tokens and transfer to another avatar.");
                     content.Usage.Add("Estate owners can open /regionweb/currency/admin, request an inworld admin token and manage pending token requests plus avatar balances.");
                     content.Usage.Add("Use CurrencyBuyEnabled, CurrencyTransferEnabled, CurrencyChallengeCooldownSeconds, CurrencyStatementLimit and CurrencyBuyLimit in [RegionWeb] to tune the wallet.");
                     content.Usage.Add("Set CurrencyBuyMode = request if purchases should become pending wallet requests instead of immediate credits.");
@@ -3762,7 +3762,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Notes.Add("Scripted llGiveMoney and llTransferLindenDollars still require owner-granted PERMISSION_DEBIT before money leaves the object owner.");
                     content.Notes.Add("Object payments trigger the normal money event path, so in-world vendors and donation jars can react when the viewer pays an object.");
                     content.Notes.Add("Land/object purchases and upload/group charges use the same ledger, so users see the result immediately in the viewer balance.");
-                    content.Notes.Add("RegionWeb region pages show live economy totals when this local money module is active, and the wallet login uses a one-time inworld token instead of trusting only a typed avatar name.");
+                    content.Notes.Add("Vanilla Sim region pages show live economy totals when this local money module is active, and the wallet login uses a one-time inworld token instead of trusting only a typed avatar name.");
                     content.Notes.Add("Wallet buy, transfer and logout forms are protected by a session CSRF token, and the statement can be downloaded as CSV.");
                     content.Notes.Add("Pending wallet purchase requests are stored in CurrencyPurchaseStorage as TSV so they survive simulator restarts.");
                     content.Notes.Add("PayPal checkout orders are stored in PayPalOrderStorage as TSV; tokens are credited only after the PayPal order capture returns completed.");
@@ -3846,14 +3846,14 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Usage.Add("Use llWorldPosToHUD() for HUDs that need to point at or track in-world positions.");
                     content.Usage.Add("Use llGetStartString() when scripts need SL-style start parameter data after rez.");
                     content.Usage.Add("llSetSculptAnim() stores the requested sculpt animation state and mirrors it through the normal texture-animation packet so viewers can see sculpt texture playback even though OpenSim has no separate sculpt-animation protocol field.");
-                    content.Usage.Add("Open the RegionWeb scripts page at /regionweb/scripts for the per-function reference with signatures, return values, permissions and usage notes.");
+                    content.Usage.Add("Open the Vanilla Sim scripts page at /regionweb/scripts for the per-function reference with signatures, return values, permissions and usage notes.");
                     content.Notes.Add("The default permission bitmask excludes PERMISSION_DEBIT and ownership changes.");
                     content.Notes.Add("Untrusted scripts keep the normal viewer permission prompt behavior.");
                     content.Notes.Add("The store is scoped per region/owner and persisted under KeyValueStorePath, making it useful for estate tools, games, rides and AI build workflows.");
                     content.Notes.Add("Use KeyValueStoreMaxKeys, KeyValueStoreMaxKeyBytes, KeyValueStoreMaxValueBytes, KeyValueStoreMaxStoreBytes and KeyValueStorePath to tune storage.");
                     content.Notes.Add("New constants documented by the script runtime include XP_ERROR_*, SIT_*, SIT_FLAG_*, LINKSETDATA_*, SOUND_*, REZ_*, REZ_FLAG_*, PARCEL_SALE_*, PARCEL_MEDIA_COMMAND_*, OBJECT_RETURN_*, OBJECT_* detail constants, ENV_*, SKY_*, WATER_*, TERRAIN_*, TRANSFER_*, FILTER_*, DAMAGE_TYPE_*, CHARACTER_*, PU_*, PRIM_SCRIPTED_SIT_ONLY, PRIM_ALLOW_UNSIT, PRIM_SIT_TARGET, PRIM_RENDER_MATERIAL, PRIM_GLTF_*, OVERRIDE_GLTF_* including OVERRIDE_GLTF_EXTENSION_JSON, PRIM_PHYSICS_MATERIAL and CHANGED_RENDER_MATERIAL.");
-                    content.Notes.Add("The pathfinding backend is simulator-side A* over a region-local baked terrain cache plus dynamic object/avatar clearance bounds, not Linden Lab's proprietary baked navmesh generator. Combat2 damage adjustment is applied before health through a quiet-window transaction capped by a server-side timeout. Sculpt animation uses viewer-visible texture animation as the compatible transport. Profiler mode and counters are stored on prim dynamic attributes for local tooling/RegionWeb rather than a Linden viewer-only profiler capability.");
-                    content.Notes.Add("Existing RegionWeb feature files are merged with these built-in defaults at render time, so older auto-generated pages pick up the newer LSL surface without deleting local notes.");
+                    content.Notes.Add("The pathfinding backend is simulator-side A* over a region-local baked terrain cache plus dynamic object/avatar clearance bounds, not Linden Lab's proprietary baked navmesh generator. Combat2 damage adjustment is applied before health through a quiet-window transaction capped by a server-side timeout. Sculpt animation uses viewer-visible texture animation as the compatible transport. Profiler mode and counters are stored on prim dynamic attributes for local tooling/Vanilla Sim web rather than a Linden viewer-only profiler capability.");
+                    content.Notes.Add("Existing Vanilla Sim feature files are merged with these built-in defaults at render time, so older auto-generated pages pick up the newer LSL surface without deleting local notes.");
                     break;
             }
 
@@ -3874,7 +3874,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             RegionPageContent content = new RegionPageContent();
             content.Title = scene.RegionInfo.RegionName;
             content.Tagline = "A Vanilla Sim region";
-            content.Description = "Add region photos and a description in this region's RegionWeb content folder.";
+            content.Description = "Add region photos and a description in this region.s Vanilla Sim content folder.";
             content.HeroImage = string.Empty;
 
             string file = Path.Combine(GetRegionDirectory(scene), "profile.ini");
@@ -4079,7 +4079,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 + "HeroImage = \"\"\n"
                 + "; Feature entries use title|description.\n"
                 + "Feature1 = \"High quality world map|Terrain textures, water depth shading, land detail, aerial tone mapping, mesh/sculpt geometry projection, cleaner water alpha handling, background generation and cooperative rendering make map tiles sharper, more geographic and safer for simulator responsiveness.\"\n"
-                + "Feature2 = \"RegionWeb estate portal|Every region can have a public web page with photos, blog posts, map tile, parcels and live region statistics.\"\n"
+                + "Feature2 = \"Vanilla Sim estate portal|Every region can have a public web page with photos, blog posts, map tile, parcels and live region statistics.\"\n"
                 + "Feature3 = \"Weather module|Regions can run rain, storm, snow or sunny presets, with wind, clouds, lightning, thunder and automatic forecast cycling.\"\n"
                 + "Feature4 = \"Wave-following boats|Boats can now move with the sea surface, following wave motion for a more natural marina and sailing experience.\"\n"
                 + "Feature5 = \"Smooth region crossings|Avatar and vehicle crossings between neighbouring regions are smoothed to reduce the hard stop, rubber-banding and visual pop of stock OpenSim border transfers.\"\n"
@@ -4165,7 +4165,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     + "Summary: First public note for this region.\n"
                     + "Image: \n"
                     + "----\n"
-                    + "This is the first RegionWeb post. Replace this text with news, build notes, events, credits, or travel information for visitors.\n",
+                    + "This is the first Vanilla Sim post. Replace this text with news, build notes, events, credits, or travel information for visitors.\n",
                     new UTF8Encoding(false));
             }
         }
@@ -4491,7 +4491,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             });
             features.Add(new FeatureItem
             {
-                Title = "RegionWeb estate portal",
+                Title = "Vanilla Sim estate portal",
                 Body = "Every region can have a public web page with photos, blog posts, map tile, parcels and live region statistics."
             });
             features.Add(new FeatureItem
@@ -4600,6 +4600,22 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             response.RawBuffer = Encoding.UTF8.GetBytes(message);
         }
 
+        private static string RegionWebCss()
+        {
+            StringBuilder css = new StringBuilder(8192);
+            css.Append(":root{--ink:#05070a;--paper:#f4f7f9;--card:#fff;--text:#111820;--muted:#68727c;--line:#dfe7eb;--dark:#11161b;--dark2:#1d2227;--accent:#12bdf4;--accent2:#c700ff;--shadow:0 22px 60px rgba(5,10,15,.14)}")
+                .Append("html{scroll-behavior:smooth;scroll-padding-top:88px}body{margin:0;background:var(--paper);color:var(--text);font:16px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}a{color:#0079b6;text-decoration:none}a:hover{color:#00aeea}img{max-width:100%;display:block}.wrap{max-width:1320px;margin:0 auto;padding:0 28px}")
+                .Append(".site-nav{position:sticky;top:0;z-index:1000;background:#020304;border-bottom:2px solid var(--accent);box-shadow:0 14px 40px rgba(0,0,0,.32)}.nav-wrap{display:flex;align-items:center;justify-content:space-between;gap:28px;min-height:68px}.site-nav a{color:#f6f7f8;font-weight:900}.brand{display:flex;align-items:center;gap:13px;color:#fff;min-width:190px}.brand-mark{position:relative;width:52px;height:52px;flex:0 0 52px}.brand-mark:before{content:'';position:absolute;left:9px;bottom:8px;width:30px;height:20px;border:5px solid var(--accent);border-radius:50%;transform:rotate(-9deg)}.brand-mark:after{content:'';position:absolute;left:21px;bottom:16px;width:8px;height:8px;background:var(--accent);border-radius:50%}.brand-mark span{position:absolute;left:11px;top:3px;width:6px;height:29px;background:var(--accent);border-radius:999px;transform:rotate(-12deg);box-shadow:10px -3px 0 var(--accent),20px 0 0 var(--accent),30px 8px 0 var(--accent)}.brand-mark span:before{content:'';position:absolute;left:-10px;top:13px;width:6px;height:24px;background:var(--accent);border-radius:999px;transform:rotate(-18deg)}.brand-type{display:grid;text-transform:uppercase;line-height:.84;color:#fff}.brand-type span{font-size:16px;font-weight:1000;letter-spacing:.08em}.brand-type strong{font-size:35px;font-weight:1000;letter-spacing:0}.nav-links{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:28px}.nav-links a{font-size:17px}.nav-links a:hover{color:var(--accent)}.nav-cta{background:var(--accent2);color:#fff!important;padding:11px 20px;border-radius:5px;box-shadow:0 12px 30px rgba(199,0,255,.24)}.nav-cta:hover{background:#a900e0!important;color:#fff!important}")
+                .Append(".page-links{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 22px}.page-links a,.back{display:inline-flex;align-items:center;min-height:38px;background:#fff;border:1px solid var(--line);border-radius:6px;color:#111820;padding:0 13px;font-weight:900;box-shadow:0 8px 22px rgba(12,18,24,.06)}.page-links a:hover,.back:hover{border-color:var(--accent);color:#0079b6}.estate-hero{min-height:640px;background-size:cover;background-position:center;display:flex;align-items:center;color:#fff}.estate-hero-plain{background:#090d14}.estate-hero .wrap{padding-top:118px;padding-bottom:88px}.estate-hero p{max-width:720px;color:#f2f6f8;font-size:21px}.estate-hero>div>p:first-child,.hero p,.feature-kicker{margin:0 0 12px;color:var(--accent);text-transform:uppercase;font-size:15px;font-weight:1000;letter-spacing:.08em}.estate-hero h1{max-width:790px;margin:0;color:#fff;font-size:76px;line-height:.92;text-transform:uppercase}.estate-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}.estate-actions a{background:var(--accent2);color:#fff;padding:12px 18px;border-radius:5px;font-weight:1000;box-shadow:0 12px 32px rgba(199,0,255,.24)}.estate-actions a+a{background:#fff;color:#111820}.estate-actions a:hover{color:#fff;background:#a900e0}.estate-actions a+a:hover{color:#0079b6;background:#edf9ff}")
+                .Append("main{background:var(--paper)}.estate-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-top:-38px;position:relative;z-index:2}.estate-stats div{background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;box-shadow:var(--shadow)}.estate-stats strong{display:block;font-size:34px;line-height:1}.estate-stats span{color:var(--muted);font-weight:800}.feature-section{padding-top:58px}.feature-section h2,.list h2{font-size:36px;line-height:1.05;margin:0 0 22px}.feature-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px}.feature-card{display:block;background:#fff;border:1px solid var(--line);border-radius:8px;color:var(--text);padding:22px;min-height:190px;box-shadow:0 12px 36px rgba(5,10,15,.07)}.feature-card:hover{border-color:var(--accent);transform:translateY(-2px);transition:transform .16s ease,border-color .16s ease}.feature-card h3{margin:0 0 8px;font-size:22px}.feature-card p{margin:0;color:#56616a}.feature-card span{display:inline-block;margin-top:18px;color:#0079b6;font-weight:1000}.feature-page,.script-reference,.wallet-page{padding-top:50px;padding-bottom:78px}.feature-page{max-width:920px}.feature-page h1,.script-reference h1,.wallet-page h1{font-size:56px;line-height:1;margin:0 0 18px}.feature-page .lead,.script-reference .lead,.wallet-page .lead{font-size:22px;color:#45505a;margin:0 0 22px}.feature-page section{border-top:1px solid var(--line);padding-top:26px;margin-top:28px}.feature-page h2{font-size:30px;margin:0 0 12px}.feature-page li{margin:0 0 10px;color:#38424b}")
+                .Append(".hero{min-height:430px;background-size:cover;background-position:center;display:flex;align-items:flex-end;color:#fff}.hero .wrap{padding-top:100px;padding-bottom:54px}.hero h1{margin:0;color:#fff;font-size:64px;line-height:.95;text-transform:uppercase}.meta{margin-top:16px;color:#edf4f7}.layout{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:36px;padding-top:42px;padding-bottom:64px}.story{min-width:0}.story>p{font-size:19px;color:#34404a}.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;margin:32px 0}.gallery figure{margin:0;background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 12px 34px rgba(5,10,15,.08)}.gallery img{aspect-ratio:4/3;object-fit:cover}.gallery figcaption{padding:11px;color:#59636c;font-size:14px}.panel{align-self:start}.map{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid var(--line);box-shadow:var(--shadow)}.stats,.parcels{margin-top:18px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;box-shadow:0 12px 34px rgba(5,10,15,.07)}.stats h2,.parcels h2,.story h2{margin:0 0 14px}.stats dl{display:grid;grid-template-columns:1fr auto;gap:8px 16px;margin:0}.stats dt{color:var(--muted)}.stats dd{margin:0;font-weight:900}.parcels div{display:flex;justify-content:space-between;gap:12px;border-top:1px solid var(--line);padding:10px 0}.parcels div:first-of-type{border-top:0}.parcels span{color:var(--muted)}")
+                .Append(".post{border-top:1px solid var(--line);padding:24px 0}.post img{width:100%;max-height:380px;object-fit:cover;margin-bottom:14px;border-radius:8px}.post time{color:var(--muted);font-size:13px}.post h3{margin:4px 0 8px;font-size:25px}.post p{color:#46515a}.post-page{padding-top:42px;padding-bottom:68px;max-width:860px}.post.full h1{font-size:48px;line-height:1.05;margin:6px 0 22px}.post.full p{font-size:18px}.region-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px}.list{padding-top:50px;padding-bottom:70px}.region-card{background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden;color:var(--text);box-shadow:0 12px 36px rgba(5,10,15,.08)}.region-card:hover{border-color:var(--accent);transform:translateY(-2px);transition:transform .16s ease,border-color .16s ease}.region-card img{aspect-ratio:16/9;object-fit:cover}.region-card strong,.region-card span{display:block;padding:0 16px}.region-card strong{padding-top:15px;font-size:21px}.region-card span{padding-bottom:16px;color:#59636c}.empty code{word-break:break-all}")
+                .Append(".script-source{max-width:880px;color:#52606b}.script-toc{border-top:1px solid var(--line);margin-top:32px;padding-top:24px}.script-toc h2,.script-group h2{font-size:30px;margin:0 0 14px}.script-toc div{display:flex;flex-wrap:wrap;gap:10px}.script-toc a{background:#fff;border:1px solid var(--line);border-radius:6px;padding:9px 12px;color:#111820;font-weight:900}.script-toc span{color:#0079b6}.script-group{border-top:1px solid var(--line);margin-top:32px;padding-top:26px}.script-card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;margin:0 0 16px;box-shadow:0 12px 34px rgba(5,10,15,.07)}.script-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.script-card h3{font-size:23px;margin:0}.script-card-head span{color:#67727b;font-size:13px;text-align:right}.signature{margin:12px 0;color:#111820}.signature code,.script-card pre{background:#0d1115;border:1px solid #252d35;border-radius:6px}.signature code{display:block;overflow:auto;padding:11px;color:#eef7fb}.script-detail{margin:8px 0;color:#424d56}.script-detail strong{color:#111820}.script-card details{margin-top:12px}.script-card summary{cursor:pointer;color:#0079b6;font-weight:1000}.script-card pre{overflow:auto;padding:12px;color:#dfeaf0}.script-focus{border-top:1px solid var(--line);margin-top:30px;padding-top:26px}")
+                .Append(".wallet-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:18px;margin-top:26px}.wallet-card,.wallet-summary{background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;box-shadow:0 12px 34px rgba(5,10,15,.07)}.wallet-card h2{margin:0 0 14px;font-size:25px}.wallet-card label{display:block;color:#46515a;font-weight:900;margin:0 0 12px}.wallet-card input{box-sizing:border-box;width:100%;margin-top:6px;background:#f8fbfc;border:1px solid #cfdce2;color:#111820;border-radius:6px;padding:11px;font:inherit}.wallet-card button,.wallet-logout button{border:0;border-radius:5px;background:var(--accent2);color:#fff;padding:11px 15px;font-weight:1000;cursor:pointer}.wallet-card button:hover,.wallet-logout button:hover{background:#a900e0}.wallet-note{color:#65717a;margin:12px 0 0}.wallet-message{border:1px solid #b9e7c4;background:#ecfff1;color:#145923;border-radius:6px;padding:12px 14px}.wallet-message.error{border-color:#f0b6b6;background:#fff0f0;color:#8a1d1d}.wallet-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:24px;padding:0;overflow:hidden}.wallet-summary div{background:#fff;padding:18px}.wallet-summary span{display:block;color:#65717a}.wallet-summary strong{display:block;font-size:28px;word-break:break-word}.wallet-statement{margin-top:18px}.wallet-table{overflow:auto;background:#fff;border-radius:8px;border:1px solid var(--line)}.wallet-table table{width:100%;border-collapse:collapse}.wallet-table th,.wallet-table td{text-align:left;border-top:1px solid var(--line);padding:10px;white-space:nowrap}.wallet-table th{background:#f0f5f7}.wallet-table td:last-child{white-space:normal}.wallet-table .credit{color:#128c3b}.wallet-table .debit{color:#b92828}.wallet-logout{margin-top:18px}")
+                .Append(".back-to-top{position:fixed;right:18px;bottom:18px;z-index:1001;background:#020304;color:#fff;border:1px solid var(--accent);border-radius:6px;padding:10px 13px;font-weight:1000;box-shadow:0 12px 34px rgba(0,0,0,.32)}.back-to-top:hover{background:var(--accent);color:#020304}@media(max-width:980px){.nav-wrap{align-items:flex-start;flex-direction:column;padding-top:12px;padding-bottom:14px}.nav-links{justify-content:flex-start;gap:14px}.layout,.estate-stats,.wallet-summary{grid-template-columns:1fr}.estate-hero{min-height:500px}.hero{min-height:330px}.estate-hero h1,.hero h1,.feature-page h1,.script-reference h1,.wallet-page h1{font-size:44px}.estate-hero .wrap{padding-top:80px;padding-bottom:64px}.wrap{padding-left:18px;padding-right:18px}.script-card-head{display:block}.script-card-head span{text-align:left;display:block;margin-top:5px}.brand{min-width:0}.back-to-top{right:14px;bottom:14px;padding:9px 11px}}");
+            return css.ToString();
+        }
+
         private StringBuilder BeginPage(string title)
         {
             StringBuilder html = new StringBuilder(8192);
@@ -4607,7 +4623,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 .Append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
                 .Append("<title>").Append(Html(title)).Append("</title>")
                 .Append("<style>")
-                .Append("html{scroll-behavior:smooth;scroll-padding-top:78px}body{margin:0;background:#101417;color:#e9efec;font:16px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}a{color:#9bd3e6;text-decoration:none}img{max-width:100%;display:block}.wrap{max-width:1180px;margin:0 auto;padding:0 24px}.site-nav{position:sticky;top:0;z-index:1000;background:rgba(12,17,20,.94);border-bottom:1px solid #263136;backdrop-filter:blur(8px);box-shadow:0 8px 24px rgba(0,0,0,.22)}.site-nav .wrap{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-top:10px;padding-bottom:10px}.site-nav a{color:#dbe7e4;font-weight:700}.site-nav .brand{color:#fff}.site-nav div div{display:flex;flex-wrap:wrap;gap:12px}.page-links{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 18px}.page-links a,.back{display:inline-block;background:#172229;border:1px solid #2c3a41;color:#dce7e4;padding:8px 11px;font-weight:700}.page-links a:hover,.back:hover{border-color:#6da8b7;background:#1a2428}.estate-hero{min-height:520px;background-size:cover;background-position:center;display:flex;align-items:flex-end}.estate-hero-plain{background:linear-gradient(135deg,#11252b,#1e2927 52%,#3a3526)}.estate-hero .wrap{padding-top:110px;padding-bottom:72px}.estate-hero p{max-width:760px;color:#d9e5e1;font-size:19px}.estate-hero>div>p:first-child,.hero p,.feature-kicker{margin:0 0 10px;color:#b9d8d3;text-transform:uppercase;font-size:13px;letter-spacing:.08em}.estate-hero h1{max-width:900px;margin:0;font-size:clamp(44px,8vw,96px);line-height:.92}.estate-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}.estate-actions a{background:#d7e4df;color:#101417;padding:10px 15px;font-weight:700}.estate-actions a+a{background:#223239;color:#dbe7e4}.estate-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;margin-top:28px;background:#2a363a}.estate-stats div{background:#171e22;padding:18px}.estate-stats strong{display:block;font-size:30px}.estate-stats span{color:#aebbb9}.feature-section{padding-top:48px}.feature-section h2,.list h2{font-size:34px;margin:0 0 20px}.feature-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}.feature-card{display:block;background:#171e22;border:1px solid #263136;color:#e9efec;padding:18px;min-height:190px}.feature-card:hover{border-color:#6da8b7;background:#1a2428}.feature-card h3{margin:0 0 8px;font-size:21px}.feature-card p{margin:0;color:#c7d2cf}.feature-card span{display:inline-block;margin-top:18px;color:#9bd3e6;font-weight:700}.feature-page{padding-top:42px;padding-bottom:70px;max-width:900px}.feature-page h1{font-size:clamp(38px,7vw,68px);line-height:1;margin:0 0 18px}.feature-page .lead,.script-reference .lead,.wallet-page .lead{font-size:21px;color:#d4dfdc;margin:0 0 20px}.feature-page section{border-top:1px solid #2a363a;padding-top:24px;margin-top:26px}.feature-page h2{font-size:28px;margin:0 0 12px}.feature-page li{margin:0 0 10px;color:#d2dcda}.hero{min-height:360px;background-size:cover;background-position:center;display:flex;align-items:flex-end}.hero .wrap{padding-top:90px;padding-bottom:46px}.hero h1{margin:0;font-size:clamp(38px,7vw,82px);line-height:.94}.meta{margin-top:16px;color:#cfd8d5}.layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:36px;padding-top:36px;padding-bottom:56px}.story{min-width:0}.story>p{font-size:19px;color:#d5dfdc}.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin:30px 0}.gallery figure{margin:0;background:#182025}.gallery img{aspect-ratio:4/3;object-fit:cover}.gallery figcaption{padding:10px;color:#c7d0ce;font-size:14px}.panel{align-self:start}.map{width:100%;aspect-ratio:1;object-fit:cover;border:1px solid #2a363a}.stats,.parcels{margin-top:18px;background:#171e22;border:1px solid #263136;padding:18px}.stats h2,.parcels h2,.story h2{margin:0 0 14px}.stats dl{display:grid;grid-template-columns:1fr auto;gap:7px 16px;margin:0}.stats dt{color:#9facad}.stats dd{margin:0;font-weight:700}.parcels div{display:flex;justify-content:space-between;gap:12px;border-top:1px solid #263136;padding:9px 0}.parcels div:first-of-type{border-top:0}.parcels span{color:#aab6b8}.post{border-top:1px solid #2a363a;padding:22px 0}.post img{width:100%;max-height:360px;object-fit:cover;margin-bottom:14px}.post time{color:#9facad;font-size:13px}.post h3{margin:4px 0 8px;font-size:24px}.post p{color:#cbd5d2}.post-page{padding-top:36px;padding-bottom:60px;max-width:850px}.post.full h1{font-size:46px;line-height:1.05;margin:6px 0 22px}.post.full p{font-size:18px}.region-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}.list{padding-top:42px;padding-bottom:60px}.region-card{background:#171e22;border:1px solid #263136;color:#e9efec}.region-card img{aspect-ratio:16/9;object-fit:cover}.region-card strong,.region-card span{display:block;padding:0 14px}.region-card strong{padding-top:13px;font-size:20px}.region-card span{padding-bottom:14px;color:#abb8b8}.empty code{word-break:break-all}.script-reference,.wallet-page{padding-top:42px;padding-bottom:70px}.script-reference h1,.wallet-page h1{font-size:clamp(38px,7vw,68px);line-height:1;margin:0 0 18px}.script-source{max-width:880px;color:#b8c6c3}.script-toc{border-top:1px solid #2a363a;margin-top:30px;padding-top:22px}.script-toc h2,.script-group h2{font-size:28px;margin:0 0 14px}.script-toc div{display:flex;flex-wrap:wrap;gap:10px}.script-toc a{background:#172229;border:1px solid #2c3a41;padding:9px 12px;color:#dce7e4}.script-toc span{color:#98b5bd}.script-group{border-top:1px solid #2a363a;margin-top:30px;padding-top:24px}.script-card{background:#161e22;border:1px solid #263238;padding:18px;margin:0 0 14px}.script-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.script-card h3{font-size:22px;margin:0}.script-card-head span{color:#9cb7bd;font-size:13px;text-align:right}.signature{margin:12px 0;color:#dbe7e4}.signature code,.script-card pre{background:#0c1114;border:1px solid #263238}.signature code{display:block;overflow:auto;padding:10px}.script-detail{margin:8px 0;color:#cbd6d3}.script-detail strong{color:#eef7f3}.script-card details{margin-top:12px}.script-card summary{cursor:pointer;color:#9bd3e6;font-weight:700}.script-card pre{overflow:auto;padding:12px;color:#dfeae7}.script-focus{border-top:1px solid #2a363a;margin-top:28px;padding-top:24px}.wallet-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:24px}.wallet-card,.wallet-summary{background:#171e22;border:1px solid #263136;padding:18px}.wallet-card h2{margin:0 0 14px;font-size:24px}.wallet-card label{display:block;color:#b8c6c3;font-weight:700;margin:0 0 12px}.wallet-card input{box-sizing:border-box;width:100%;margin-top:6px;background:#0d1215;border:1px solid #334349;color:#eef7f3;padding:10px;font:inherit}.wallet-card button,.wallet-logout button{border:0;background:#d7e4df;color:#101417;padding:10px 14px;font-weight:800;cursor:pointer}.wallet-card button:hover,.wallet-logout button:hover{background:#9bd3e6}.wallet-note{color:#aab7b6;margin:12px 0 0}.wallet-message{border:1px solid #345042;background:#17251e;color:#d9f4de;padding:12px 14px}.wallet-message.error{border-color:#6d3737;background:#2b1818;color:#ffd6d6}.wallet-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:24px}.wallet-summary div{background:#11181b;padding:16px}.wallet-summary span{display:block;color:#a9b7b5}.wallet-summary strong{display:block;font-size:26px;word-break:break-word}.wallet-statement{margin-top:18px}.wallet-table{overflow:auto}.wallet-table table{width:100%;border-collapse:collapse}.wallet-table th,.wallet-table td{text-align:left;border-top:1px solid #29373c;padding:9px;white-space:nowrap}.wallet-table td:last-child{white-space:normal}.wallet-table .credit{color:#90e2a6}.wallet-table .debit{color:#f0a2a2}.wallet-logout{margin-top:18px}.back-to-top{position:fixed;right:18px;bottom:18px;z-index:1001;background:#d7e4df;color:#101417;border:1px solid #f2fbf7;padding:10px 13px;font-weight:900;box-shadow:0 10px 30px rgba(0,0,0,.38)}.back-to-top:hover{background:#9bd3e6;color:#101417}@media(max-width:820px){.site-nav .wrap{align-items:flex-start;flex-direction:column}.site-nav div div{gap:10px}.layout,.estate-stats,.wallet-summary{grid-template-columns:1fr}.hero{min-height:300px}.estate-hero{min-height:430px}.wrap{padding-left:16px;padding-right:16px}.script-card-head{display:block}.script-card-head span{text-align:left;display:block;margin-top:5px}.back-to-top{right:14px;bottom:14px;padding:9px 11px}}")
+                .Append(RegionWebCss())
                 .Append("</style></head><body id=\"top\">");
             AppendGlobalNavigation(html);
             return html;
@@ -4615,15 +4631,15 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
         private void AppendGlobalNavigation(StringBuilder html)
         {
-            html.Append("<nav class=\"site-nav\" aria-label=\"RegionWeb navigation\"><div class=\"wrap\"><a class=\"brand\" href=\"")
-                .Append(Html(m_basePath)).Append("/\">RegionWeb</a><div>")
+            html.Append("<nav class=\"site-nav\" aria-label=\"Vanilla Sim navigation\"><div class=\"wrap nav-wrap\"><a class=\"brand\" href=\"")
+                .Append(Html(m_basePath)).Append("/\"><span class=\"brand-mark\" aria-hidden=\"true\"><span></span></span><span class=\"brand-type\"><span>Vanilla</span><strong>Sim</strong></span></a><div class=\"nav-links\">")
                 .Append("<a href=\"").Append(Html(m_basePath)).Append("/#regions\">Regions</a>")
                 .Append("<a href=\"").Append(Html(m_basePath)).Append("/#features\">Features</a>")
                 .Append("<a href=\"").Append(Html(m_basePath)).Append("/scripts\">Scripts</a>");
 
             if (m_currencyPortalEnabled)
             {
-                html.Append("<a href=\"").Append(Html(m_basePath)).Append("/currency/\">Wallet</a>")
+                html.Append("<a class=\"nav-cta\" href=\"").Append(Html(m_basePath)).Append("/currency/\">Wallet</a>")
                     .Append("<a href=\"").Append(Html(m_basePath)).Append("/currency/admin\">Money admin</a>");
             }
 
@@ -4851,7 +4867,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             Doc("Script diagnostics", "llGetMemoryLimit", "integer llGetMemoryLimit()", "Current script heap limit in bytes.", "Use it with llGetFreeMemory and llGetUsedMemory for memory panels and self-tests.", "None.", "YEngine returns the active per-script heap limit instead of a static placeholder."),
             Doc("Script diagnostics", "llSetMemoryLimit", "integer llSetMemoryLimit(integer limit)", "TRUE when the requested limit is accepted.", "Call it to lower or restore the active heap limit for the running script.", "The limit must be at least 16384 bytes, not exceed llGetSPMaxMemory and not be below current used memory.", "YEngine enforces the new limit for subsequent heap allocations."),
             Doc("Script diagnostics", "llGetSPMaxMemory", "integer llGetSPMaxMemory()", "Maximum script heap bytes available from the current engine configuration.", "Use it before raising a limit or reporting simulator capacity.", "None.", "Returns the configured YEngine script heap maximum for the instance."),
-            Doc("Script diagnostics", "llScriptProfiler", "void llScriptProfiler(integer flags)", "No return value.", "Enable or disable script profiler flags such as PROFILE_SCRIPT_MEMORY or PROFILE_NONE for compatibility diagnostics.", "None.", "YEngine records profiler flags, heap usage, event count, slice count and CPU milliseconds in prim dynamic attributes for viewer-adjacent tools and RegionWeb-style inspection."),
+            Doc("Script diagnostics", "llScriptProfiler", "void llScriptProfiler(integer flags)", "No return value.", "Enable or disable script profiler flags such as PROFILE_SCRIPT_MEMORY or PROFILE_NONE for compatibility diagnostics.", "None.", "YEngine records profiler flags, heap usage, event count, slice count and CPU milliseconds in prim dynamic attributes for viewer-adjacent tools and Vanilla Sim web inspection."),
             Doc("Object inspection", "llGetObjectDetails", "list llGetObjectDetails(key id, list params)", "Values matching the requested OBJECT_* constants.", "Use OBJECT_SERVER_COST, OBJECT_STREAMING_COST, OBJECT_PHYSICS_COST, OBJECT_PRIM_EQUIVALENCE, OBJECT_RENDER_WEIGHT, OBJECT_HOVER_HEIGHT and OBJECT_SELECT_COUNT to build SL-style diagnostics panels.", "None for visible in-region objects or avatars.", "This build returns linkset-level object cost estimates, avatar attachment cost estimates, avatar hover height and selected-linkset state instead of placeholder zeroes for those details."),
             Doc("Physics and movement", "llGetEnergy", "float llGetEnergy()", "A 0.0 to 1.0 script energy value.", "Check available object energy before repeated physical pushes, impulses, hover, buoyancy or look-at control.", "None.", "Energy is tracked per linkset, drains on supported physical-control calls and recharges over time; it is readback-compatible and does not clamp physics calls."),
             Doc("Materials and rendering", "llSetRenderMaterial", "void llSetRenderMaterial(string material, integer face)", "No return value.", "Apply a render material inventory item or material id to one face on the current prim.", "The material must resolve from object inventory or a valid asset id.", "Use an empty string to clear where supported."),
@@ -4937,10 +4953,10 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     returnValue = FormatScriptFunctionReturn(method);
                 string usage = hasApiDescription
                     ? apiDescription
-                    : "Auto-discovered from the public ILSL_Api surface so the RegionWeb reference stays complete when new LSL functions are exposed.";
+                    : "Auto-discovered from the public ILSL_Api surface so the Vanilla Sim reference stays complete when new LSL functions are exposed.";
                 string notes = hasApiDescription
-                    ? "Description imported from the //ApiDesc comment beside the ILSL_Api declaration; add a hand-written RegionWeb entry when this function receives compatibility-specific behavior, examples or caveats."
-                    : "Add a hand-written RegionWeb entry when this function receives compatibility-specific behavior, examples or caveats.";
+                    ? "Description imported from the //ApiDesc comment beside the ILSL_Api declaration; add a hand-written Vanilla Sim entry when this function receives compatibility-specific behavior, examples or caveats."
+                    : "Add a hand-written Vanilla Sim entry when this function receives compatibility-specific behavior, examples or caveats.";
 
                 docs.Add(Doc(
                     AutoScriptFunctionCategory,
