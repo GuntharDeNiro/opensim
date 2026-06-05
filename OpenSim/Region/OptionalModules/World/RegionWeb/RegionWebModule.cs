@@ -110,6 +110,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private string m_basePath = "/regionweb";
         private string m_contentDirectory = "RegionWeb";
         private string m_inventoryCarouselFolder = "RegionWeb Carousel";
+        private string m_regionInventoryCarouselFolderTemplate = "RegionWeb {RegionName} Carousel";
         private string m_currencyBuyMode = "grant";
         private string m_currencyPurchaseStoragePath = "Currency/regionweb-purchases.tsv";
         private string m_payPalEnvironment = "sandbox";
@@ -143,6 +144,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             m_postsPerPage = Math.Max(1, config.GetInt("PostsPerPage", 5));
             m_inventoryCarouselEnabled = config.GetBoolean("InventoryCarouselEnabled", true);
             m_inventoryCarouselFolder = config.GetString("InventoryCarouselFolder", "RegionWeb Carousel").Trim();
+            m_regionInventoryCarouselFolderTemplate = config.GetString("RegionInventoryCarouselFolderTemplate", "RegionWeb {RegionName} Carousel").Trim();
             m_inventoryCarouselLimit = Math.Max(1, config.GetInt("InventoryCarouselLimit", 12));
             m_inventoryCarouselCacheSeconds = Math.Max(0, config.GetInt("InventoryCarouselCacheSeconds", 300));
             m_currencyPortalEnabled = config.GetBoolean("CurrencyPortalEnabled", true);
@@ -171,6 +173,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 m_contentDirectory = "RegionWeb";
             if (string.IsNullOrEmpty(m_inventoryCarouselFolder))
                 m_inventoryCarouselFolder = "RegionWeb Carousel";
+            if (string.IsNullOrEmpty(m_regionInventoryCarouselFolderTemplate))
+                m_regionInventoryCarouselFolderTemplate = "RegionWeb {RegionName} Carousel";
             if (string.IsNullOrEmpty(m_currencyPurchaseStoragePath))
                 m_currencyPurchaseStoragePath = "Currency/regionweb-purchases.tsv";
             if (string.IsNullOrEmpty(m_payPalOrderStoragePath))
@@ -255,6 +259,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             if (m_autoCreateContent)
                 EnsureRegionContent(scene);
+
+            EnsureInventoryCarouselFolders(scene);
         }
 
         public void RemoveRegion(Scene scene)
@@ -3400,10 +3406,20 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             RegionWebStats stats = GetStats(scene);
             List<BlogPost> posts = LoadPosts(scene).Take(m_postsPerPage).ToList();
             string slug = MakeSlug(scene.RegionInfo.RegionName);
+            string carousel = BuildRegionCarousel(scene);
+            bool hasCarousel = !string.IsNullOrEmpty(carousel);
+            string heroURL = GetHeroURL(scene, content);
 
             StringBuilder html = BeginPage(content.Title);
-            html.Append("<header class=\"hero\" style=\"background-image:linear-gradient(90deg,rgba(0,0,0,.76),rgba(0,0,0,.28)),url('")
-                .Append(Html(GetHeroURL(scene, content))).Append("')\">")
+            html.Append("<header class=\"hero\"");
+            if (!hasCarousel && !string.IsNullOrEmpty(heroURL))
+            {
+                html.Append(" style=\"background-image:linear-gradient(90deg,rgba(0,0,0,.76),rgba(0,0,0,.28)),url('")
+                    .Append(Html(heroURL)).Append("')\"");
+            }
+
+            html.Append(">")
+                .Append(carousel)
                 .Append("<div class=\"wrap\">");
             AppendPageLinks(html,
                 "Estate", m_basePath + "/",
@@ -3418,7 +3434,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 .Append(", ").Append(Html(scene.RegionInfo.RegionLocY.ToString(CultureInfo.InvariantCulture))).Append("</div></div></header>");
 
             html.Append("<main class=\"wrap layout\">");
-            html.Append("<section class=\"story\">").Append(Paragraphs(content.Description));
+            html.Append("<section id=\"region-photos\" class=\"story\">").Append(Paragraphs(content.Description));
 
             if (content.Gallery.Count > 0)
             {
@@ -3752,7 +3768,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Usage.Add("Open /regionweb/ on the simulator HTTP address to view the estate landing page.");
                     content.Usage.Add("Edit bin/RegionWeb/estate.ini for the central title, tagline, hero image and feature cards.");
                     content.Usage.Add("Edit bin/RegionWeb/<region-slug>/profile.ini for each region page, and add JPEG or PNG files under that region's media folder.");
-                    content.Usage.Add("As the region estate owner, create an inventory folder named RegionWeb Carousel and drop inworld snapshots or textures into it; the landing page carousel uses those images automatically before falling back to generated map tiles.");
+                    content.Usage.Add("RegionWeb auto-creates inventory folders for owner-managed carousel images: RegionWeb Carousel for the estate landing page, and RegionWeb <Region Name> Carousel for each region page. Drop inworld snapshots or textures into those folders to replace generated map tiles.");
                     content.Usage.Add("Create posts as text files under bin/RegionWeb/<region-slug>/posts/ using the Title, Date, Summary, Image and body format created by the sample file.");
                     content.Notes.Add("The module auto-creates starter folders without overwriting existing content.");
                     break;
@@ -4336,10 +4352,21 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             return BuildEstateMapCarousel(scenes);
         }
 
+        private string BuildRegionCarousel(Scene scene)
+        {
+            List<InventoryCarouselItem> items = GetRegionInventoryCarouselItems(scene, true);
+            return BuildInventoryCarouselMarkup(items, "#region-photos", "View " + scene.RegionInfo.RegionName + " photos", "region-inventory-snapshots", "Vanilla Sim region snapshot");
+        }
+
         private string BuildInventoryCarousel(IEnumerable<Scene> scenes)
         {
-            List<InventoryCarouselItem> items = GetInventoryCarouselItems(scenes);
-            if (items.Count == 0)
+            List<InventoryCarouselItem> items = GetEstateInventoryCarouselItems(scenes, true);
+            return BuildInventoryCarouselMarkup(items, "#regions", "View Vanilla Sim regions", "inventory-snapshots", "Vanilla Sim snapshot");
+        }
+
+        private string BuildInventoryCarouselMarkup(List<InventoryCarouselItem> items, string href, string ariaLabel, string carouselName, string fallbackAlt)
+        {
+            if (items == null || items.Count == 0)
                 return string.Empty;
 
             StringBuilder slides = new StringBuilder();
@@ -4350,21 +4377,22 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 slides.Append("<a class=\"estate-slide");
                 if (count == 0)
                     slides.Append(" is-active");
-                slides.Append("\" href=\"#regions\" aria-label=\"View Vanilla Sim regions\"><img src=\"")
+                slides.Append("\" href=\"").Append(Html(href)).Append("\" aria-label=\"")
+                    .Append(Html(ariaLabel)).Append("\"><img src=\"")
                     .Append(Html(m_basePath)).Append("/inventory-carousel/")
                     .Append(Html(item.AssetID.ToString())).Append(".jpg\" alt=\"")
-                    .Append(Html(string.IsNullOrWhiteSpace(item.Name) ? "Vanilla Sim snapshot" : item.Name)).Append("\"");
+                    .Append(Html(string.IsNullOrWhiteSpace(item.Name) ? fallbackAlt : item.Name)).Append("\"");
                 if (count > 0)
                     slides.Append(" loading=\"lazy\"");
                 slides.Append("></a>");
                 count++;
             }
 
-            return "<div class=\"estate-carousel\" data-carousel=\"inventory-snapshots\">" + slides
+            return "<div class=\"estate-carousel\" data-carousel=\"" + Html(carouselName) + "\">" + slides
                 + "<div class=\"estate-carousel-shade\" aria-hidden=\"true\"></div></div>";
         }
 
-        private List<InventoryCarouselItem> GetInventoryCarouselItems(IEnumerable<Scene> scenes)
+        private List<InventoryCarouselItem> GetEstateInventoryCarouselItems(IEnumerable<Scene> scenes, bool createFolders)
         {
             List<InventoryCarouselItem> items = new List<InventoryCarouselItem>();
             if (!m_inventoryCarouselEnabled || scenes == null || string.IsNullOrWhiteSpace(m_inventoryCarouselFolder))
@@ -4379,7 +4407,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 if (ownerID == UUID.Zero || !owners.Add(ownerID))
                     continue;
 
-                InventoryFolderBase folder = FindInventoryCarouselFolder(scene, ownerID);
+                InventoryFolderBase folder = FindInventoryCarouselFolder(scene, ownerID, m_inventoryCarouselFolder, createFolders);
                 if (folder == null)
                     continue;
 
@@ -4408,6 +4436,49 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 .ToList();
         }
 
+        private List<InventoryCarouselItem> GetRegionInventoryCarouselItems(Scene scene, bool createFolder)
+        {
+            List<InventoryCarouselItem> items = new List<InventoryCarouselItem>();
+            if (!m_inventoryCarouselEnabled || scene == null)
+                return items;
+
+            UUID ownerID = GetRegionOwnerID(scene);
+            if (ownerID == UUID.Zero)
+                return items;
+
+            string folderName = GetRegionInventoryCarouselFolderName(scene);
+            if (string.IsNullOrWhiteSpace(folderName))
+                return items;
+
+            InventoryFolderBase folder = FindInventoryCarouselFolder(scene, ownerID, folderName, createFolder);
+            if (folder == null)
+                return items;
+
+            InventoryCollection content = GetInventoryFolderContent(scene, ownerID, folder.ID);
+            if (content == null || content.Items == null)
+                return items;
+
+            HashSet<UUID> assets = new HashSet<UUID>();
+            foreach (InventoryItemBase item in content.Items)
+            {
+                if (!IsInventoryCarouselItem(item) || !assets.Add(item.AssetID))
+                    continue;
+
+                items.Add(new InventoryCarouselItem
+                {
+                    AssetID = item.AssetID,
+                    Name = item.Name,
+                    CreationDate = item.CreationDate
+                });
+            }
+
+            return items
+                .OrderByDescending(i => i.CreationDate)
+                .ThenBy(i => i.Name, StringComparer.OrdinalIgnoreCase)
+                .Take(m_inventoryCarouselLimit)
+                .ToList();
+        }
+
         private bool TryFindInventoryCarouselItem(UUID assetID, out Scene scene, out InventoryItemBase item)
         {
             scene = null;
@@ -4416,28 +4487,44 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             if (assetID == UUID.Zero || !m_inventoryCarouselEnabled)
                 return false;
 
-            HashSet<UUID> owners = new HashSet<UUID>();
+            HashSet<string> checkedFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (Scene candidateScene in GetSceneSnapshot().OrderBy(s => s.RegionInfo.RegionName))
             {
                 UUID ownerID = GetRegionOwnerID(candidateScene);
-                if (ownerID == UUID.Zero || !owners.Add(ownerID))
+                if (ownerID == UUID.Zero)
                     continue;
 
-                InventoryFolderBase folder = FindInventoryCarouselFolder(candidateScene, ownerID);
-                if (folder == null)
-                    continue;
+                List<string> folderNames = new List<string>();
+                folderNames.Add(m_inventoryCarouselFolder);
+                string regionFolderName = GetRegionInventoryCarouselFolderName(candidateScene);
+                if (!string.Equals(regionFolderName, m_inventoryCarouselFolder, StringComparison.OrdinalIgnoreCase))
+                    folderNames.Add(regionFolderName);
 
-                InventoryCollection content = GetInventoryFolderContent(candidateScene, ownerID, folder.ID);
-                if (content == null || content.Items == null)
-                    continue;
-
-                foreach (InventoryItemBase candidateItem in content.Items)
+                foreach (string folderName in folderNames)
                 {
-                    if (IsInventoryCarouselItem(candidateItem) && candidateItem.AssetID == assetID)
+                    if (string.IsNullOrWhiteSpace(folderName))
+                        continue;
+
+                    string folderKey = ownerID.ToString() + ":" + folderName;
+                    if (!checkedFolders.Add(folderKey))
+                        continue;
+
+                    InventoryFolderBase folder = FindInventoryCarouselFolder(candidateScene, ownerID, folderName, false);
+                    if (folder == null)
+                        continue;
+
+                    InventoryCollection content = GetInventoryFolderContent(candidateScene, ownerID, folder.ID);
+                    if (content == null || content.Items == null)
+                        continue;
+
+                    foreach (InventoryItemBase candidateItem in content.Items)
                     {
-                        scene = candidateScene;
-                        item = candidateItem;
-                        return true;
+                        if (IsInventoryCarouselItem(candidateItem) && candidateItem.AssetID == assetID)
+                        {
+                            scene = candidateScene;
+                            item = candidateItem;
+                            return true;
+                        }
                     }
                 }
             }
@@ -4445,9 +4532,9 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             return false;
         }
 
-        private InventoryFolderBase FindInventoryCarouselFolder(Scene scene, UUID ownerID)
+        private InventoryFolderBase FindInventoryCarouselFolder(Scene scene, UUID ownerID, string folderName, bool createIfMissing)
         {
-            if (scene == null || ownerID == UUID.Zero)
+            if (scene == null || scene.InventoryService == null || ownerID == UUID.Zero || string.IsNullOrWhiteSpace(folderName))
                 return null;
 
             InventoryFolderBase root = null;
@@ -4474,7 +4561,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 if (folder == null || !visited.Add(folder.ID))
                     continue;
 
-                if (string.Equals(folder.Name, m_inventoryCarouselFolder, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(folder.Name, folderName, StringComparison.OrdinalIgnoreCase))
                     return folder;
 
                 InventoryCollection content = GetInventoryFolderContent(scene, ownerID, folder.ID);
@@ -4485,11 +4572,59 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     pending.Enqueue(child);
             }
 
+            return createIfMissing ? CreateInventoryCarouselFolder(scene, ownerID, root, folderName) : null;
+        }
+
+        private InventoryFolderBase CreateInventoryCarouselFolder(Scene scene, UUID ownerID, InventoryFolderBase root, string folderName)
+        {
+            if (scene == null || scene.InventoryService == null || ownerID == UUID.Zero || root == null || string.IsNullOrWhiteSpace(folderName))
+                return null;
+
+            InventoryFolderBase folder = new InventoryFolderBase(UUID.Random(), folderName, ownerID, (short)FolderType.None, root.ID, root.Version);
+            try
+            {
+                if (scene.InventoryService.AddFolder(folder))
+                {
+                    m_log.InfoFormat("[REGION WEB]: Created inventory carousel folder \"{0}\" for owner {1}", folderName, ownerID);
+                    return folder;
+                }
+            }
+            catch (Exception e)
+            {
+                m_log.DebugFormat("[REGION WEB]: Could not create inventory carousel folder \"{0}\" for owner {1}: {2}", folderName, ownerID, e.Message);
+            }
+
             return null;
+        }
+
+        private void EnsureInventoryCarouselFolders(Scene scene)
+        {
+            if (!m_inventoryCarouselEnabled || scene == null)
+                return;
+
+            UUID ownerID = GetRegionOwnerID(scene);
+            if (ownerID == UUID.Zero)
+                return;
+
+            FindInventoryCarouselFolder(scene, ownerID, m_inventoryCarouselFolder, true);
+
+            string regionFolderName = GetRegionInventoryCarouselFolderName(scene);
+            if (!string.Equals(regionFolderName, m_inventoryCarouselFolder, StringComparison.OrdinalIgnoreCase))
+                FindInventoryCarouselFolder(scene, ownerID, regionFolderName, true);
+        }
+
+        private string GetRegionInventoryCarouselFolderName(Scene scene)
+        {
+            string regionName = scene != null && scene.RegionInfo != null ? scene.RegionInfo.RegionName : "Region";
+            string folderName = m_regionInventoryCarouselFolderTemplate.Replace("{RegionName}", regionName);
+            return folderName.Trim();
         }
 
         private InventoryCollection GetInventoryFolderContent(Scene scene, UUID ownerID, UUID folderID)
         {
+            if (scene == null || scene.InventoryService == null)
+                return null;
+
             try
             {
                 return scene.InventoryService.GetFolderContent(ownerID, folderID);
@@ -5088,7 +5223,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 .Append(".site-nav{position:sticky;top:0;z-index:1000;background:#020304;border-bottom:2px solid var(--accent);box-shadow:0 14px 40px rgba(0,0,0,.32)}.nav-wrap{display:flex;align-items:center;justify-content:space-between;gap:28px;min-height:68px}.site-nav a{color:#f6f7f8;font-weight:900}.brand{display:flex;align-items:center;gap:13px;color:#fff;min-width:190px}.brand-mark{position:relative;width:52px;height:52px;flex:0 0 52px;border:3px solid var(--accent);border-radius:14px;background:linear-gradient(135deg,rgba(18,189,244,.18),rgba(199,0,255,.14));box-shadow:0 0 0 1px rgba(255,255,255,.08) inset,0 10px 28px rgba(18,189,244,.22);transform:rotate(-6deg);overflow:hidden}.brand-mark:before{content:'V';position:absolute;left:8px;top:4px;color:var(--accent);font-size:30px;line-height:1;font-weight:1000;transform:rotate(6deg)}.brand-mark:after{content:'S';position:absolute;right:7px;bottom:2px;color:#fff;font-size:30px;line-height:1;font-weight:1000;transform:rotate(6deg)}.brand-mark span{position:absolute;left:9px;right:9px;top:25px;height:3px;background:var(--accent);border-radius:999px;transform:rotate(-22deg)}.brand-mark span:before{content:'';position:absolute;right:-4px;top:-4px;width:11px;height:11px;background:var(--accent2);border-radius:50%;box-shadow:0 0 18px rgba(199,0,255,.5)}.brand-type{display:grid;text-transform:uppercase;line-height:.84;color:#fff}.brand-type span{font-size:16px;font-weight:1000;letter-spacing:.08em}.brand-type strong{font-size:35px;font-weight:1000;letter-spacing:0}.nav-links{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:28px}.nav-links a{font-size:17px}.nav-links a:hover{color:var(--accent)}.nav-github{display:inline-flex;align-items:center;gap:8px}.nav-github svg{width:21px;height:21px;fill:currentColor}.nav-cta{background:var(--accent2);color:#fff!important;padding:11px 20px;border-radius:5px;box-shadow:0 12px 30px rgba(199,0,255,.24)}.nav-cta:hover{background:#a900e0!important;color:#fff!important}")
                 .Append(".page-links{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 22px}.page-links a,.back{display:inline-flex;align-items:center;min-height:38px;background:#fff;border:1px solid var(--line);border-radius:6px;color:#111820;padding:0 13px;font-weight:900;box-shadow:0 8px 22px rgba(12,18,24,.06)}.page-links a:hover,.back:hover{border-color:var(--accent);color:#0079b6}.estate-hero{position:relative;min-height:640px;background-size:cover;background-position:center;display:flex;align-items:center;color:#fff;overflow:hidden;background:#090d14}.estate-hero-plain{background:#090d14}.estate-carousel{position:absolute;inset:0;z-index:0;background:#090d14}.estate-slide{position:absolute;inset:0;opacity:0;transition:opacity 1.2s ease;transform:scale(1.025)}.estate-slide.is-active{opacity:1}.estate-slide img{width:100%;height:100%;object-fit:cover;filter:saturate(1.08) contrast(1.05)}.estate-carousel-shade{position:absolute;inset:0;background:linear-gradient(90deg,rgba(0,0,0,.78),rgba(0,0,0,.42) 48%,rgba(0,0,0,.30)),linear-gradient(0deg,rgba(3,8,12,.90),rgba(3,8,12,.10) 45%,rgba(3,8,12,.18));pointer-events:none}.estate-hero .wrap{position:relative;z-index:2;padding-top:118px;padding-bottom:88px}.estate-hero p{max-width:720px;color:#f2f6f8;font-size:21px}.estate-hero>div>p:first-child,.hero p,.feature-kicker{margin:0 0 12px;color:var(--accent);text-transform:uppercase;font-size:15px;font-weight:1000;letter-spacing:.08em}.estate-hero h1{max-width:790px;margin:0;color:#fff;font-size:76px;line-height:.92;text-transform:uppercase}.estate-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}.estate-actions a{background:var(--accent2);color:#fff;padding:12px 18px;border-radius:5px;font-weight:1000;box-shadow:0 12px 32px rgba(199,0,255,.24)}.estate-actions a+a{background:#fff;color:#111820}.estate-actions a:hover{color:#fff;background:#a900e0}.estate-actions a+a:hover{color:#0079b6;background:#edf9ff}")
                 .Append("main{background:var(--paper)}.estate-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-top:-38px;position:relative;z-index:2}.estate-stats div{background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;box-shadow:var(--shadow)}.estate-stats strong{display:block;font-size:34px;line-height:1}.estate-stats span{color:var(--muted);font-weight:800}.feature-section{padding-top:58px}.feature-section h2,.list h2{font-size:36px;line-height:1.05;margin:0 0 22px}.feature-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px}.feature-card{display:block;background:#fff;border:1px solid var(--line);border-radius:8px;color:var(--text);padding:22px;min-height:190px;box-shadow:0 12px 36px rgba(5,10,15,.07)}.feature-card:hover{border-color:var(--accent);transform:translateY(-2px);transition:transform .16s ease,border-color .16s ease}.feature-card h3{margin:0 0 8px;font-size:22px}.feature-card p{margin:0;color:#56616a}.feature-card span{display:inline-block;margin-top:18px;color:#0079b6;font-weight:1000}.feature-page,.script-reference,.wallet-page{padding-top:50px;padding-bottom:78px}.feature-page{max-width:920px}.feature-page h1,.script-reference h1,.wallet-page h1{font-size:56px;line-height:1;margin:0 0 18px}.feature-page .lead,.script-reference .lead,.wallet-page .lead{font-size:22px;color:#45505a;margin:0 0 22px}.feature-page section{border-top:1px solid var(--line);padding-top:26px;margin-top:28px}.feature-page h2{font-size:30px;margin:0 0 12px}.feature-page li{margin:0 0 10px;color:#38424b}")
-                .Append(".hero{min-height:430px;background-size:cover;background-position:center;display:flex;align-items:flex-end;color:#fff}.hero .wrap{padding-top:100px;padding-bottom:54px}.hero h1{margin:0;color:#fff;font-size:64px;line-height:.95;text-transform:uppercase}.meta{margin-top:16px;color:#edf4f7}.layout{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:36px;padding-top:42px;padding-bottom:64px}.story{min-width:0}.story>p{font-size:19px;color:#34404a}.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;margin:32px 0}.gallery figure{margin:0;background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 12px 34px rgba(5,10,15,.08)}.gallery img{aspect-ratio:4/3;object-fit:cover}.gallery figcaption{padding:11px;color:#59636c;font-size:14px}.panel{align-self:start}.map{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid var(--line);box-shadow:var(--shadow)}.stats,.parcels{margin-top:18px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;box-shadow:0 12px 34px rgba(5,10,15,.07)}.stats h2,.parcels h2,.story h2{margin:0 0 14px}.stats dl{display:grid;grid-template-columns:1fr auto;gap:8px 16px;margin:0}.stats dt{color:var(--muted)}.stats dd{margin:0;font-weight:900}.parcels div{display:flex;justify-content:space-between;gap:12px;border-top:1px solid var(--line);padding:10px 0}.parcels div:first-of-type{border-top:0}.parcels span{color:var(--muted)}")
+                .Append(".hero{position:relative;min-height:430px;background-size:cover;background-position:center;display:flex;align-items:flex-end;color:#fff;overflow:hidden;background:#090d14}.hero .wrap{position:relative;z-index:2;padding-top:100px;padding-bottom:54px}.hero h1{margin:0;color:#fff;font-size:64px;line-height:.95;text-transform:uppercase}.meta{margin-top:16px;color:#edf4f7}.layout{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:36px;padding-top:42px;padding-bottom:64px}.story{min-width:0}.story>p{font-size:19px;color:#34404a}.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;margin:32px 0}.gallery figure{margin:0;background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 12px 34px rgba(5,10,15,.08)}.gallery img{aspect-ratio:4/3;object-fit:cover}.gallery figcaption{padding:11px;color:#59636c;font-size:14px}.panel{align-self:start}.map{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid var(--line);box-shadow:var(--shadow)}.stats,.parcels{margin-top:18px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;box-shadow:0 12px 34px rgba(5,10,15,.07)}.stats h2,.parcels h2,.story h2{margin:0 0 14px}.stats dl{display:grid;grid-template-columns:1fr auto;gap:8px 16px;margin:0}.stats dt{color:var(--muted)}.stats dd{margin:0;font-weight:900}.parcels div{display:flex;justify-content:space-between;gap:12px;border-top:1px solid var(--line);padding:10px 0}.parcels div:first-of-type{border-top:0}.parcels span{color:var(--muted)}")
                 .Append(".post{border-top:1px solid var(--line);padding:24px 0}.post img{width:100%;max-height:380px;object-fit:cover;margin-bottom:14px;border-radius:8px}.post time{color:var(--muted);font-size:13px}.post h3{margin:4px 0 8px;font-size:25px}.post p{color:#46515a}.post-page{padding-top:42px;padding-bottom:68px;max-width:860px}.post.full h1{font-size:48px;line-height:1.05;margin:6px 0 22px}.post.full p{font-size:18px}.region-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px}.list{padding-top:50px;padding-bottom:70px}.region-card{background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden;color:var(--text);box-shadow:0 12px 36px rgba(5,10,15,.08)}.region-card:hover{border-color:var(--accent);transform:translateY(-2px);transition:transform .16s ease,border-color .16s ease}.region-card img{aspect-ratio:16/9;object-fit:cover}.region-card strong,.region-card span{display:block;padding:0 16px}.region-card strong{padding-top:15px;font-size:21px}.region-card span{padding-bottom:16px;color:#59636c}.empty code{word-break:break-all}")
                 .Append(".script-source{max-width:880px;color:#52606b}.script-toc{border-top:1px solid var(--line);margin-top:32px;padding-top:24px}.script-toc h2,.script-group h2{font-size:30px;margin:0 0 14px}.script-toc div{display:flex;flex-wrap:wrap;gap:10px}.script-toc a{background:#fff;border:1px solid var(--line);border-radius:6px;padding:9px 12px;color:#111820;font-weight:900}.script-toc span{color:#0079b6}.script-group{border-top:1px solid var(--line);margin-top:32px;padding-top:26px}.script-card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;margin:0 0 16px;box-shadow:0 12px 34px rgba(5,10,15,.07)}.script-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.script-card h3{font-size:23px;margin:0}.script-card-head span{color:#67727b;font-size:13px;text-align:right}.signature{margin:12px 0;color:#111820}.signature code,.script-card pre{background:#0d1115;border:1px solid #252d35;border-radius:6px}.signature code{display:block;overflow:auto;padding:11px;color:#eef7fb}.script-detail{margin:8px 0;color:#424d56}.script-detail strong{color:#111820}.script-card details{margin-top:12px}.script-card summary{cursor:pointer;color:#0079b6;font-weight:1000}.script-card pre{overflow:auto;padding:12px;color:#dfeaf0}.script-focus{border-top:1px solid var(--line);margin-top:30px;padding-top:26px}")
                 .Append(".wallet-guide{display:flex;align-items:center;justify-content:space-between;gap:18px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;margin:22px 0 4px;box-shadow:0 12px 34px rgba(5,10,15,.07)}.wallet-guide span{display:block;color:var(--accent);font-size:13px;font-weight:1000;letter-spacing:.08em;text-transform:uppercase}.wallet-guide h2{margin:4px 0 6px;font-size:25px}.wallet-guide p{margin:0;color:#56616a}.wallet-guide a{flex:0 0 auto;background:#020304;color:#fff;border:1px solid var(--accent);border-radius:5px;padding:10px 14px;font-weight:1000}.wallet-guide a:hover{background:var(--accent);color:#020304}")
