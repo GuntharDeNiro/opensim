@@ -102,6 +102,57 @@ What The Standalone Profile Enables
 - PayPal settings present but disabled until real credentials are configured
 - TextBuild enabled on channel `/88` for estate managers
 
+RegionWeb Portal And Inventory Carousels
+----------------------------------------
+
+RegionWeb is enabled by default at:
+
+```text
+http://vanilla-sim.com:9000/regionweb/
+```
+
+The same URL is also advertised through the grid info service as the viewer
+login splash, economy, about, help and registration page. The generated portal
+uses Vanilla Sim branding, sticky top navigation, page-local back links, a
+back-to-top button, a GitHub link, a wallet entry and live estate/region stats.
+Money Admin is not exposed as a main navigation item; it appears from the wallet
+only after an estate owner opens the admin token flow.
+
+RegionWeb can use owner inventory images for the front page and individual
+region hero carousels. At startup it auto-creates these folders when they are
+missing:
+
+```text
+RegionWeb Carousel
+RegionWeb <Region Name> Carousel
+```
+
+Put snapshots or textures in `RegionWeb Carousel` to feed the estate landing
+page carousel. Put snapshots or textures in `RegionWeb Vanilla Code Carousel`,
+`RegionWeb Vanilla Test Carousel`, or the matching folder for another region to
+feed that single region page. The module serves only assets found in authorized
+carousel folders through `/regionweb/inventory-carousel/<asset-id>.jpg`.
+Browser-ready JPEG/PNG/GIF/WebP assets are passed through, and JPEG2000 texture
+assets are decoded to JPEG and cached.
+
+If no inventory images are present, the landing page falls back to a slow
+carousel of generated region map tiles. A single region page falls back to one
+large full-bleed map hero instead of repeating the tile. Tune the behavior in
+`[RegionWeb]`:
+
+```ini
+InventoryCarouselEnabled = true
+InventoryCarouselFolder = "RegionWeb Carousel"
+RegionInventoryCarouselFolderTemplate = "RegionWeb {RegionName} Carousel"
+InventoryCarouselLimit = 12
+InventoryCarouselCacheSeconds = 300
+```
+
+The scripted and generated RegionWeb feature pages also merge newer built-in
+usage notes at render time. Existing `bin\RegionWeb\features\*.ini` files keep
+their custom text, but they still pick up new default checklist items for recent
+portal, wallet, multi-grid and script-engine features.
+
 Multi-Grid Attachments
 ----------------------
 

@@ -55,6 +55,11 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
         private const int InventoryCarouselFolderSearchLimit = 1024;
+        private const string RegionWebFeatureTitle = "Vanilla Sim estate portal";
+        private const string RegionWebFeatureBody =
+            "RegionWeb publishes a branded estate site with sticky navigation, live region pages, map/photo carousels sourced from owner inventory, wallet access and owner-only money administration.";
+        private const string RegionWebFeatureOverview =
+            "RegionWeb turns the simulator HTTP endpoint into a public Vanilla Sim portal. The landing page presents estate stats, features, regions and carousel imagery; each region gets a profile page with a large hero image, map fallback, profile text, gallery, blog posts, parcel data and live simulator statistics. Estate and region owners can manage carousel images by dropping inworld snapshots or textures into automatically created inventory folders, while the wallet area keeps avatar currency tools and owner-only money administration behind inworld token checks.";
         private const string ScriptEngineFeatureTitle = "Second Life-style script engine";
         private const string ScriptEngineFeatureBody =
             "The script engine is moving closer to Second Life behavior with Experience-Lite permissions, scripted sit controls, key-value stores, linkset data, environment, estate-return, parcel media, parcel prim counts/details, guarded money transfer, inventory transfer, damage, RSA, attachment filter, identity lookup, privacy-aware agent language lookup, animation-state introspection, physics energy readback, object-detail cost readback, script memory/profiler diagnostics, GLTF material and physics primitive-param helpers, plus a Vanilla Sim compatibility center and in-world regression lab.";
@@ -3695,7 +3700,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             if (notes.Count > 0)
                 content.Notes = notes;
 
-            MergeFeaturePageDefaults(content, defaults, IsScriptEngineFeature(feature.Title));
+            MergeFeaturePageDefaults(content, defaults, IsScriptEngineFeature(feature.Title) || IsRegionWebFeature(feature.Title));
 
             return content;
         }
@@ -3716,11 +3721,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Overview = defaults.Overview;
             }
 
-            if (preferDefaultText)
-            {
-                AppendMissingFeatureItems(content.Usage, defaults.Usage);
-                AppendMissingFeatureItems(content.Notes, defaults.Notes);
-            }
+            AppendMissingFeatureItems(content.Usage, defaults.Usage);
+            AppendMissingFeatureItems(content.Notes, defaults.Notes);
         }
 
         private static void AppendMissingFeatureItems(List<string> target, List<string> defaults)
@@ -3756,15 +3758,24 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
                 case "regionweb-pages":
                 case "regionweb-estate-portal":
-                    content.Title = "Vanilla Sim estate portal";
-                    content.Summary = "Every estate and region can publish a web page with photos, posts, map tiles, parcels and live simulator statistics.";
-                    content.Overview = "Vanilla Sim turns the simulator HTTP endpoint into a simple estate website. The central page lists online regions and estate features; each region gets a profile page, gallery, blog posts, current map tile, parcel summaries and live stats pulled from the simulator.";
+                case "vanilla-sim-estate-portal":
+                    content.Title = RegionWebFeatureTitle;
+                    content.Summary = RegionWebFeatureBody;
+                    content.Overview = RegionWebFeatureOverview;
                     content.Usage.Add("Open /regionweb/ on the simulator HTTP address to view the estate landing page.");
                     content.Usage.Add("Edit bin/RegionWeb/estate.ini for the central title, tagline, hero image and feature cards.");
                     content.Usage.Add("Edit bin/RegionWeb/<region-slug>/profile.ini for each region page, and add JPEG or PNG files under that region's media folder.");
                     content.Usage.Add("RegionWeb auto-creates inventory folders for owner-managed carousel images: RegionWeb Carousel for the estate landing page, and RegionWeb <Region Name> Carousel for each region page. Drop inworld snapshots or textures into those folders to replace generated map tiles.");
+                    content.Usage.Add("Use the estate owner's RegionWeb Carousel folder for the front page carousel; use each region owner's RegionWeb <Region Name> Carousel folder for that region's hero carousel.");
+                    content.Usage.Add("If a carousel folder is empty, the estate page falls back to region map tiles and each single-region page falls back to one large map hero image.");
                     content.Usage.Add("Create posts as text files under bin/RegionWeb/<region-slug>/posts/ using the Title, Date, Summary, Image and body format created by the sample file.");
+                    content.Usage.Add("Use the sticky top navigation for Regions, Features, Wallet and GitHub. Money Admin lives inside the Wallet flow and appears only to the estate owner after a valid admin token login.");
+                    content.Usage.Add("Use the Top button on long pages to return to the sticky navigation without scrolling back manually.");
                     content.Notes.Add("The module auto-creates starter folders without overwriting existing content.");
+                    content.Notes.Add("Inventory carousel image URLs are served through /regionweb/inventory-carousel/<asset-id>.jpg only when the asset is found inside an authorized RegionWeb carousel folder.");
+                    content.Notes.Add("Snapshots, textures and common browser image formats are accepted; JPEG2000 texture assets are decoded to JPEG for web delivery and cached for InventoryCarouselCacheSeconds.");
+                    content.Notes.Add("InventoryCarouselLimit caps how many owner inventory images are used on a carousel, keeping the landing page responsive even if the folder contains many snapshots.");
+                    content.Notes.Add("Existing Vanilla Sim feature files merge with these built-in usage notes at render time, so older generated RegionWeb docs pick up new portal features without deleting local edits.");
                     break;
 
                 case "weather-and-visitor-polish":
@@ -4172,7 +4183,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 + "HeroImage = \"\"\n"
                 + "; Feature entries use title|description.\n"
                 + "Feature1 = \"High quality world map|Terrain textures, water depth shading, land detail, aerial tone mapping, mesh/sculpt geometry projection, cleaner water alpha handling, background generation and cooperative rendering make map tiles sharper, more geographic and safer for simulator responsiveness.\"\n"
-                + "Feature2 = \"Vanilla Sim estate portal|Every region can have a public web page with photos, blog posts, map tile, parcels and live region statistics.\"\n"
+                + "Feature2 = \"" + RegionWebFeatureTitle + "|" + RegionWebFeatureBody + "\"\n"
                 + "Feature3 = \"Weather module|Regions can run rain, storm, snow or sunny presets, with wind, clouds, lightning, thunder and automatic forecast cycling.\"\n"
                 + "Feature4 = \"Wave-following boats|Boats can now move with the sea surface, following wave motion for a more natural marina and sailing experience.\"\n"
                 + "Feature5 = \"Smooth region crossings|Avatar and vehicle crossings between neighbouring regions are smoothed to reduce the hard stop, rubber-banding and visual pop of stock OpenSim border transfers.\"\n"
@@ -4960,6 +4971,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         {
             List<FeatureItem> normalized = new List<FeatureItem>();
             bool mapFeatureAdded = false;
+            bool regionWebFeatureAdded = false;
             bool scriptEngineFeatureAdded = false;
             bool currencyFeatureAdded = false;
 
@@ -4975,6 +4987,21 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                             Body = "Terrain textures, water depth shading, land detail, aerial tone mapping, mesh/sculpt geometry projection, cleaner water alpha handling, background generation and cooperative rendering make map tiles sharper, more geographic and safer for simulator responsiveness."
                         });
                         mapFeatureAdded = true;
+                    }
+
+                    continue;
+                }
+
+                if (IsRegionWebFeature(feature.Title))
+                {
+                    if (!regionWebFeatureAdded)
+                    {
+                        normalized.Add(new FeatureItem
+                        {
+                            Title = RegionWebFeatureTitle,
+                            Body = RegionWebFeatureBody
+                        });
+                        regionWebFeatureAdded = true;
                     }
 
                     continue;
@@ -5039,6 +5066,20 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 || normalized == "cleaner water overlays"
                 || normalized == "background map generation"
                 || normalized == "cooperative heavy rendering";
+        }
+
+        private static bool IsRegionWebFeature(string title)
+        {
+            if (string.IsNullOrEmpty(title))
+                return false;
+
+            string normalized = title.Trim().ToLowerInvariant();
+            return normalized == "vanilla sim estate portal"
+                || normalized == "regionweb pages"
+                || normalized == "regionweb estate portal"
+                || normalized == "regionweb"
+                || normalized == "estate portal"
+                || normalized == "public estate portal";
         }
 
         private static bool IsScriptEngineFeature(string title)
@@ -5109,8 +5150,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             });
             features.Add(new FeatureItem
             {
-                Title = "Vanilla Sim estate portal",
-                Body = "Every region can have a public web page with photos, blog posts, map tile, parcels and live region statistics."
+                Title = RegionWebFeatureTitle,
+                Body = RegionWebFeatureBody
             });
             features.Add(new FeatureItem
             {
@@ -5175,7 +5216,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             {
                 if (feature.Title.Equals(title, StringComparison.OrdinalIgnoreCase))
                 {
-                    if (IsScriptEngineFeature(title) || IsCurrencyFeature(title) || IsMultiGridFeature(title))
+                    if (IsRegionWebFeature(title) || IsScriptEngineFeature(title) || IsCurrencyFeature(title) || IsMultiGridFeature(title))
                         feature.Body = body;
                     return;
                 }

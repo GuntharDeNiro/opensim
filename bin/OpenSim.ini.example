@@ -1579,25 +1579,35 @@
     ; PostsPerPage = 5
 
     ;# {InventoryCarouselEnabled} {Enabled} {Use owner inventory snapshots/textures for RegionWeb carousels} {true false} true
-    ;; RegionWeb creates the estate and per-region carousel folders automatically.
-    ;; Drop inworld snapshots/textures into those folders to replace generated map tiles.
+    ;; RegionWeb creates the estate and per-region carousel folders automatically
+    ;; in the estate/region owner's inventory. Drop inworld snapshots/textures
+    ;; into those folders to replace generated map tiles on the public pages.
+    ;; The estate landing page uses InventoryCarouselFolder. Single region pages
+    ;; use RegionInventoryCarouselFolderTemplate with {RegionName} replaced.
+    ;; If a folder is empty, RegionWeb falls back to generated map tiles.
     ; InventoryCarouselEnabled = true
 
     ;# {InventoryCarouselFolder} {InventoryCarouselEnabled} {Estate owner inventory folder used for carousel images} {} RegionWeb Carousel
+    ;; Default front-page owner folder: RegionWeb Carousel
     ; InventoryCarouselFolder = "RegionWeb Carousel"
 
     ;# {RegionInventoryCarouselFolderTemplate} {InventoryCarouselEnabled} {Region owner inventory folder used for each region page carousel} {} RegionWeb {RegionName} Carousel
+    ;; Example for region "Vanilla Code": RegionWeb Vanilla Code Carousel
     ; RegionInventoryCarouselFolderTemplate = "RegionWeb {RegionName} Carousel"
 
     ;# {InventoryCarouselLimit} {InventoryCarouselEnabled} {Maximum inventory carousel images on the landing page} {} 12
     ; InventoryCarouselLimit = 12
 
     ;# {InventoryCarouselCacheSeconds} {InventoryCarouselEnabled} {Seconds to cache decoded inventory carousel images} {} 300
+    ;; Browser-ready JPEG/PNG/GIF/WebP images are served directly. JPEG2000
+    ;; texture assets are decoded to JPEG and cached for this many seconds.
     ; InventoryCarouselCacheSeconds = 300
 
     ;# {CurrencyPortalEnabled} {Enabled} {Enable the reserved avatar wallet at /regionweb/currency/} {true false} true
     ;; Avatars request a one-time login token inworld, then use RegionWeb to view
-    ;; balance, statement, token purchases and avatar-to-avatar transfers.
+    ;; balance, statement, token purchases and avatar-to-avatar transfers. The
+    ;; currency guide is linked from the wallet, and Money Admin appears only to
+    ;; estate owners after the separate admin token login.
     ; CurrencyPortalEnabled = true
 
     ;# {CurrencyBuyEnabled} {CurrencyPortalEnabled} {Allow wallet token purchases} {true false} true
