@@ -54,6 +54,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
     public class RegionWebModule : ISharedRegionModule
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
+        private const int InventoryCarouselFolderSearchLimit = 1024;
         private const string ScriptEngineFeatureTitle = "Second Life-style script engine";
         private const string ScriptEngineFeatureBody =
             "The script engine is moving closer to Second Life behavior with Experience-Lite permissions, scripted sit controls, key-value stores, linkset data, environment, estate-return, parcel media, parcel prim counts/details, guarded money transfer, inventory transfer, damage, RSA, attachment filter, identity lookup, privacy-aware agent language lookup, animation-state introspection, physics energy readback, object-detail cost readback, script memory/profiler diagnostics, GLTF material and physics primitive-param helpers, plus a Vanilla Sim compatibility center and in-world regression lab.";
@@ -78,11 +79,13 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private readonly object m_currencyAuthLock = new object();
         private readonly object m_currencyPurchaseLock = new object();
         private readonly object m_currencyPayPalLock = new object();
+        private readonly object m_inventoryCarouselCacheLock = new object();
         private readonly Dictionary<string, CurrencyLoginChallenge> m_currencyChallenges = new Dictionary<string, CurrencyLoginChallenge>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, CurrencyWebSession> m_currencySessions = new Dictionary<string, CurrencyWebSession>(StringComparer.Ordinal);
         private readonly Dictionary<UUID, DateTime> m_currencyLastChallengeUTCByAgent = new Dictionary<UUID, DateTime>();
         private readonly Dictionary<string, CurrencyPurchaseRequest> m_currencyPurchaseRequests = new Dictionary<string, CurrencyPurchaseRequest>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, CurrencyPayPalOrder> m_currencyPayPalOrders = new Dictionary<string, CurrencyPayPalOrder>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<UUID, InventoryCarouselAssetCacheEntry> m_inventoryCarouselAssetCache = new Dictionary<UUID, InventoryCarouselAssetCacheEntry>();
 
         private bool m_enabled;
         private bool m_handlerRegistered;
@@ -90,6 +93,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private bool m_showMap;
         private bool m_showStats;
         private bool m_showParcels;
+        private bool m_inventoryCarouselEnabled = true;
         private bool m_currencyPortalEnabled = true;
         private bool m_currencyBuyEnabled = true;
         private bool m_currencyTransferEnabled = true;
@@ -100,9 +104,12 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private int m_currencySessionHours = 12;
         private int m_currencyStatementLimit = 30;
         private int m_currencyBuyLimit = 100000;
+        private int m_inventoryCarouselLimit = 12;
+        private int m_inventoryCarouselCacheSeconds = 300;
         private string m_defaultEstateTitle = "Vanilla Sim";
         private string m_basePath = "/regionweb";
         private string m_contentDirectory = "RegionWeb";
+        private string m_inventoryCarouselFolder = "RegionWeb Carousel";
         private string m_currencyBuyMode = "grant";
         private string m_currencyPurchaseStoragePath = "Currency/regionweb-purchases.tsv";
         private string m_payPalEnvironment = "sandbox";
@@ -134,6 +141,10 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             m_showStats = config.GetBoolean("ShowStats", true);
             m_showParcels = config.GetBoolean("ShowParcels", true);
             m_postsPerPage = Math.Max(1, config.GetInt("PostsPerPage", 5));
+            m_inventoryCarouselEnabled = config.GetBoolean("InventoryCarouselEnabled", true);
+            m_inventoryCarouselFolder = config.GetString("InventoryCarouselFolder", "RegionWeb Carousel").Trim();
+            m_inventoryCarouselLimit = Math.Max(1, config.GetInt("InventoryCarouselLimit", 12));
+            m_inventoryCarouselCacheSeconds = Math.Max(0, config.GetInt("InventoryCarouselCacheSeconds", 300));
             m_currencyPortalEnabled = config.GetBoolean("CurrencyPortalEnabled", true);
             m_currencyBuyEnabled = config.GetBoolean("CurrencyBuyEnabled", true);
             m_currencyTransferEnabled = config.GetBoolean("CurrencyTransferEnabled", true);
@@ -158,6 +169,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             if (string.IsNullOrEmpty(m_contentDirectory))
                 m_contentDirectory = "RegionWeb";
+            if (string.IsNullOrEmpty(m_inventoryCarouselFolder))
+                m_inventoryCarouselFolder = "RegionWeb Carousel";
             if (string.IsNullOrEmpty(m_currencyPurchaseStoragePath))
                 m_currencyPurchaseStoragePath = "Currency/regionweb-purchases.tsv";
             if (string.IsNullOrEmpty(m_payPalOrderStoragePath))
@@ -292,6 +305,9 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             lock (m_currencyPayPalLock)
                 m_currencyPayPalOrders.Clear();
+
+            lock (m_inventoryCarouselCacheLock)
+                m_inventoryCarouselAssetCache.Clear();
         }
 
         private void AddOrUpdateScene(Scene scene)
@@ -418,6 +434,12 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     return;
                 }
 
+                if (parts.Length >= 2 && parts[0].Equals("inventory-carousel", StringComparison.OrdinalIgnoreCase))
+                {
+                    SendInventoryCarouselAsset(parts[1], response);
+                    return;
+                }
+
                 if (parts[0].Equals("scripts", StringComparison.OrdinalIgnoreCase))
                 {
                     SendScriptReference(parts.Length >= 2 ? parts[1] : string.Empty, response);
@@ -489,7 +511,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             EstatePageContent content = LoadEstateContent();
             EstateStats stats = GetEstateStats(scenes);
-            string carousel = BuildEstateMapCarousel(scenes);
+            string carousel = BuildEstateCarousel(scenes);
             bool hasCarousel = !string.IsNullOrEmpty(carousel);
 
             StringBuilder html = BeginPage(content.Title);
@@ -3517,6 +3539,52 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             response.RawBuffer = File.ReadAllBytes(path);
         }
 
+        private void SendInventoryCarouselAsset(string unsafeName, IOSHttpResponse response)
+        {
+            if (!TryParseInventoryCarouselAssetID(unsafeName, out UUID assetID))
+            {
+                SendNotFound(response, "Inventory carousel image not found.");
+                return;
+            }
+
+            if (!TryFindInventoryCarouselItem(assetID, out Scene scene, out InventoryItemBase item))
+            {
+                SendNotFound(response, "Inventory carousel image not found.");
+                return;
+            }
+
+            if (TryGetCachedInventoryCarouselAsset(assetID, out byte[] cachedData, out string cachedContentType))
+            {
+                SendInventoryCarouselImageResponse(response, cachedData, cachedContentType);
+                return;
+            }
+
+            AssetBase asset = null;
+            try
+            {
+                asset = scene.AssetService.Get(item.AssetID.ToString());
+            }
+            catch (Exception e)
+            {
+                m_log.DebugFormat("[REGION WEB]: Could not fetch inventory carousel asset {0}: {1}", assetID, e.Message);
+            }
+
+            if (asset == null || asset.Data == null || asset.Data.Length == 0)
+            {
+                SendNotFound(response, "Inventory carousel image not found.");
+                return;
+            }
+
+            if (!TryEncodeInventoryCarouselAsset(scene, asset, out byte[] data, out string contentType))
+            {
+                SendNotFound(response, "Inventory carousel image could not be decoded.");
+                return;
+            }
+
+            SetCachedInventoryCarouselAsset(assetID, data, contentType);
+            SendInventoryCarouselImageResponse(response, data, contentType);
+        }
+
         private EstatePageContent LoadEstateContent()
         {
             EstatePageContent content = new EstatePageContent();
@@ -3684,6 +3752,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Usage.Add("Open /regionweb/ on the simulator HTTP address to view the estate landing page.");
                     content.Usage.Add("Edit bin/RegionWeb/estate.ini for the central title, tagline, hero image and feature cards.");
                     content.Usage.Add("Edit bin/RegionWeb/<region-slug>/profile.ini for each region page, and add JPEG or PNG files under that region's media folder.");
+                    content.Usage.Add("As the region estate owner, create an inventory folder named RegionWeb Carousel and drop inworld snapshots or textures into it; the landing page carousel uses those images automatically before falling back to generated map tiles.");
                     content.Usage.Add("Create posts as text files under bin/RegionWeb/<region-slug>/posts/ using the Title, Date, Summary, Image and body format created by the sample file.");
                     content.Notes.Add("The module auto-creates starter folders without overwriting existing content.");
                     break;
@@ -4256,6 +4325,367 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         private string GetRegionDirectory(Scene scene)
         {
             return Path.Combine(m_absoluteContentDirectory, MakeSlug(scene.RegionInfo.RegionName));
+        }
+
+        private string BuildEstateCarousel(IEnumerable<Scene> scenes)
+        {
+            string inventoryCarousel = BuildInventoryCarousel(scenes);
+            if (!string.IsNullOrEmpty(inventoryCarousel))
+                return inventoryCarousel;
+
+            return BuildEstateMapCarousel(scenes);
+        }
+
+        private string BuildInventoryCarousel(IEnumerable<Scene> scenes)
+        {
+            List<InventoryCarouselItem> items = GetInventoryCarouselItems(scenes);
+            if (items.Count == 0)
+                return string.Empty;
+
+            StringBuilder slides = new StringBuilder();
+            int count = 0;
+
+            foreach (InventoryCarouselItem item in items)
+            {
+                slides.Append("<a class=\"estate-slide");
+                if (count == 0)
+                    slides.Append(" is-active");
+                slides.Append("\" href=\"#regions\" aria-label=\"View Vanilla Sim regions\"><img src=\"")
+                    .Append(Html(m_basePath)).Append("/inventory-carousel/")
+                    .Append(Html(item.AssetID.ToString())).Append(".jpg\" alt=\"")
+                    .Append(Html(string.IsNullOrWhiteSpace(item.Name) ? "Vanilla Sim snapshot" : item.Name)).Append("\"");
+                if (count > 0)
+                    slides.Append(" loading=\"lazy\"");
+                slides.Append("></a>");
+                count++;
+            }
+
+            return "<div class=\"estate-carousel\" data-carousel=\"inventory-snapshots\">" + slides
+                + "<div class=\"estate-carousel-shade\" aria-hidden=\"true\"></div></div>";
+        }
+
+        private List<InventoryCarouselItem> GetInventoryCarouselItems(IEnumerable<Scene> scenes)
+        {
+            List<InventoryCarouselItem> items = new List<InventoryCarouselItem>();
+            if (!m_inventoryCarouselEnabled || scenes == null || string.IsNullOrWhiteSpace(m_inventoryCarouselFolder))
+                return items;
+
+            HashSet<UUID> owners = new HashSet<UUID>();
+            HashSet<UUID> assets = new HashSet<UUID>();
+
+            foreach (Scene scene in scenes.OrderBy(s => s.RegionInfo.RegionName))
+            {
+                UUID ownerID = GetRegionOwnerID(scene);
+                if (ownerID == UUID.Zero || !owners.Add(ownerID))
+                    continue;
+
+                InventoryFolderBase folder = FindInventoryCarouselFolder(scene, ownerID);
+                if (folder == null)
+                    continue;
+
+                InventoryCollection content = GetInventoryFolderContent(scene, ownerID, folder.ID);
+                if (content == null || content.Items == null)
+                    continue;
+
+                foreach (InventoryItemBase item in content.Items)
+                {
+                    if (!IsInventoryCarouselItem(item) || !assets.Add(item.AssetID))
+                        continue;
+
+                    items.Add(new InventoryCarouselItem
+                    {
+                        AssetID = item.AssetID,
+                        Name = item.Name,
+                        CreationDate = item.CreationDate
+                    });
+                }
+            }
+
+            return items
+                .OrderByDescending(i => i.CreationDate)
+                .ThenBy(i => i.Name, StringComparer.OrdinalIgnoreCase)
+                .Take(m_inventoryCarouselLimit)
+                .ToList();
+        }
+
+        private bool TryFindInventoryCarouselItem(UUID assetID, out Scene scene, out InventoryItemBase item)
+        {
+            scene = null;
+            item = null;
+
+            if (assetID == UUID.Zero || !m_inventoryCarouselEnabled)
+                return false;
+
+            HashSet<UUID> owners = new HashSet<UUID>();
+            foreach (Scene candidateScene in GetSceneSnapshot().OrderBy(s => s.RegionInfo.RegionName))
+            {
+                UUID ownerID = GetRegionOwnerID(candidateScene);
+                if (ownerID == UUID.Zero || !owners.Add(ownerID))
+                    continue;
+
+                InventoryFolderBase folder = FindInventoryCarouselFolder(candidateScene, ownerID);
+                if (folder == null)
+                    continue;
+
+                InventoryCollection content = GetInventoryFolderContent(candidateScene, ownerID, folder.ID);
+                if (content == null || content.Items == null)
+                    continue;
+
+                foreach (InventoryItemBase candidateItem in content.Items)
+                {
+                    if (IsInventoryCarouselItem(candidateItem) && candidateItem.AssetID == assetID)
+                    {
+                        scene = candidateScene;
+                        item = candidateItem;
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private InventoryFolderBase FindInventoryCarouselFolder(Scene scene, UUID ownerID)
+        {
+            if (scene == null || ownerID == UUID.Zero)
+                return null;
+
+            InventoryFolderBase root = null;
+            try
+            {
+                root = scene.InventoryService.GetRootFolder(ownerID);
+            }
+            catch (Exception e)
+            {
+                m_log.DebugFormat("[REGION WEB]: Could not read inventory root for carousel owner {0}: {1}", ownerID, e.Message);
+                return null;
+            }
+
+            if (root == null)
+                return null;
+
+            Queue<InventoryFolderBase> pending = new Queue<InventoryFolderBase>();
+            HashSet<UUID> visited = new HashSet<UUID>();
+            pending.Enqueue(root);
+
+            while (pending.Count > 0 && visited.Count < InventoryCarouselFolderSearchLimit)
+            {
+                InventoryFolderBase folder = pending.Dequeue();
+                if (folder == null || !visited.Add(folder.ID))
+                    continue;
+
+                if (string.Equals(folder.Name, m_inventoryCarouselFolder, StringComparison.OrdinalIgnoreCase))
+                    return folder;
+
+                InventoryCollection content = GetInventoryFolderContent(scene, ownerID, folder.ID);
+                if (content == null || content.Folders == null)
+                    continue;
+
+                foreach (InventoryFolderBase child in content.Folders)
+                    pending.Enqueue(child);
+            }
+
+            return null;
+        }
+
+        private InventoryCollection GetInventoryFolderContent(Scene scene, UUID ownerID, UUID folderID)
+        {
+            try
+            {
+                return scene.InventoryService.GetFolderContent(ownerID, folderID);
+            }
+            catch (Exception e)
+            {
+                m_log.DebugFormat("[REGION WEB]: Could not read inventory carousel folder {0}: {1}", folderID, e.Message);
+                return null;
+            }
+        }
+
+        private static UUID GetRegionOwnerID(Scene scene)
+        {
+            if (scene == null || scene.RegionInfo == null || scene.RegionInfo.EstateSettings == null)
+                return UUID.Zero;
+
+            return scene.RegionInfo.EstateSettings.EstateOwner;
+        }
+
+        private static bool IsInventoryCarouselItem(InventoryItemBase item)
+        {
+            if (item == null || item.AssetID == UUID.Zero)
+                return false;
+
+            int assetType = item.AssetType;
+            int invType = item.InvType;
+            return assetType == (int)AssetType.Texture
+                || assetType == (int)AssetType.TextureTGA
+                || invType == (int)InventoryType.Snapshot
+                || invType == (int)InventoryType.Texture;
+        }
+
+        private bool TryParseInventoryCarouselAssetID(string unsafeName, out UUID assetID)
+        {
+            string fileName = Path.GetFileName(unsafeName ?? string.Empty);
+            string rawID = Path.GetFileNameWithoutExtension(fileName);
+            return UUID.TryParse(rawID, out assetID);
+        }
+
+        private bool TryGetCachedInventoryCarouselAsset(UUID assetID, out byte[] data, out string contentType)
+        {
+            data = null;
+            contentType = string.Empty;
+            if (m_inventoryCarouselCacheSeconds <= 0)
+                return false;
+
+            lock (m_inventoryCarouselCacheLock)
+            {
+                if (!m_inventoryCarouselAssetCache.TryGetValue(assetID, out InventoryCarouselAssetCacheEntry entry))
+                    return false;
+
+                if (entry.ExpiresUTC <= DateTime.UtcNow)
+                {
+                    m_inventoryCarouselAssetCache.Remove(assetID);
+                    return false;
+                }
+
+                data = entry.Data;
+                contentType = entry.ContentType;
+                return data != null && data.Length > 0;
+            }
+        }
+
+        private void SetCachedInventoryCarouselAsset(UUID assetID, byte[] data, string contentType)
+        {
+            if (m_inventoryCarouselCacheSeconds <= 0 || data == null || data.Length == 0)
+                return;
+
+            lock (m_inventoryCarouselCacheLock)
+            {
+                m_inventoryCarouselAssetCache[assetID] = new InventoryCarouselAssetCacheEntry
+                {
+                    Data = data,
+                    ContentType = contentType,
+                    ExpiresUTC = DateTime.UtcNow.AddSeconds(m_inventoryCarouselCacheSeconds)
+                };
+            }
+        }
+
+        private void SendInventoryCarouselImageResponse(IOSHttpResponse response, byte[] data, string contentType)
+        {
+            response.StatusCode = (int)HttpStatusCode.OK;
+            response.ContentType = string.IsNullOrEmpty(contentType) ? "image/jpeg" : contentType;
+            if (m_inventoryCarouselCacheSeconds > 0)
+                response.AddHeader("Cache-Control", "public, max-age=" + m_inventoryCarouselCacheSeconds.ToString(CultureInfo.InvariantCulture));
+            response.RawBuffer = data;
+        }
+
+        private bool TryEncodeInventoryCarouselAsset(Scene scene, AssetBase asset, out byte[] data, out string contentType)
+        {
+            data = null;
+            contentType = string.Empty;
+
+            if (asset == null || asset.Data == null || asset.Data.Length == 0)
+                return false;
+
+            if (TryGetBrowserImageContentType(asset.Data, out contentType))
+            {
+                data = asset.Data;
+                return true;
+            }
+
+            OpenMetaverse.Imaging.ManagedImage managedImage = null;
+            System.Drawing.Image image = null;
+            try
+            {
+                IJ2KDecoder decoder = scene == null ? null : scene.RequestModuleInterface<IJ2KDecoder>();
+                if (decoder != null)
+                    image = decoder.DecodeToImage(asset.Data);
+            }
+            catch (Exception e)
+            {
+                m_log.DebugFormat("[REGION WEB]: IJ2KDecoder failed for inventory carousel asset {0}: {1}", asset.ID, e.Message);
+            }
+
+            if (image == null)
+            {
+                try
+                {
+                    System.Drawing.Image decodedImage;
+                    if (OpenMetaverse.Imaging.OpenJPEG.DecodeToImage(asset.Data, out managedImage, out decodedImage))
+                        image = decodedImage;
+                }
+                catch (Exception e)
+                {
+                    m_log.DebugFormat("[REGION WEB]: OpenJPEG failed for inventory carousel asset {0}: {1}", asset.ID, e.Message);
+                }
+            }
+
+            if (image == null)
+            {
+                if (managedImage != null)
+                    managedImage.Clear();
+                return false;
+            }
+
+            try
+            {
+                using (image)
+                using (MemoryStream stream = new MemoryStream())
+                {
+                    image.Save(stream, System.Drawing.Imaging.ImageFormat.Jpeg);
+                    data = stream.ToArray();
+                    contentType = "image/jpeg";
+                    return data.Length > 0;
+                }
+            }
+            catch (Exception e)
+            {
+                m_log.DebugFormat("[REGION WEB]: JPEG encode failed for inventory carousel asset {0}: {1}", asset.ID, e.Message);
+                return false;
+            }
+            finally
+            {
+                if (managedImage != null)
+                    managedImage.Clear();
+            }
+        }
+
+        private static bool TryGetBrowserImageContentType(byte[] data, out string contentType)
+        {
+            contentType = string.Empty;
+            if (data == null || data.Length < 4)
+                return false;
+
+            if (data.Length >= 3 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff)
+            {
+                contentType = "image/jpeg";
+                return true;
+            }
+
+            if (data.Length >= 8
+                && data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4e && data[3] == 0x47
+                && data[4] == 0x0d && data[5] == 0x0a && data[6] == 0x1a && data[7] == 0x0a)
+            {
+                contentType = "image/png";
+                return true;
+            }
+
+            if (data.Length >= 6
+                && data[0] == 0x47 && data[1] == 0x49 && data[2] == 0x46
+                && data[3] == 0x38 && (data[4] == 0x37 || data[4] == 0x39) && data[5] == 0x61)
+            {
+                contentType = "image/gif";
+                return true;
+            }
+
+            if (data.Length >= 12
+                && data[0] == 0x52 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x46
+                && data[8] == 0x57 && data[9] == 0x45 && data[10] == 0x42 && data[11] == 0x50)
+            {
+                contentType = "image/webp";
+                return true;
+            }
+
+            return false;
         }
 
         private string BuildEstateMapCarousel(IEnumerable<Scene> scenes)
@@ -5413,6 +5843,20 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             public DateTime CreatedUTC;
             public DateTime UpdatedUTC;
             public string Note;
+        }
+
+        private class InventoryCarouselItem
+        {
+            public UUID AssetID;
+            public string Name;
+            public int CreationDate;
+        }
+
+        private class InventoryCarouselAssetCacheEntry
+        {
+            public byte[] Data;
+            public string ContentType;
+            public DateTime ExpiresUTC;
         }
 
         private class RegionWebStats
