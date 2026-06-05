@@ -507,10 +507,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 .Append("<div class=\"wrap\"><p>").Append(Html(content.Tagline)).Append("</p><h1>")
                 .Append(Html(content.Title)).Append("</h1>")
                 .Append(Paragraphs(content.Description))
-                .Append("<div class=\"estate-actions\"><a href=\"#regions\">Explore regions</a><a href=\"#features\">New features</a><a href=\"")
-                .Append(Html(m_basePath)).Append("/currency/\">Avatar wallet</a><a href=\"")
-                .Append(Html(m_basePath)).Append("/feature/").Append(Url(MakeSlug(CurrencyFeatureTitle))).Append("/\">Currency guide</a><a href=\"")
-                .Append(Html(m_basePath)).Append("/scripts\">LSL scripts</a></div>")
+                .Append("<div class=\"estate-actions\"><a href=\"#regions\">Explore regions</a><a href=\"#features\">New features</a></div>")
                 .Append("</div></header>");
 
             html.Append("<main><section class=\"wrap estate-stats\"><div>")
@@ -1432,6 +1429,16 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             }
         }
 
+        private void AppendCurrencyGuideCallout(StringBuilder html)
+        {
+            html.Append("<section class=\"wallet-guide\"><div><span>Currency guide</span><h2>")
+                .Append(Html(CurrencyFeatureTitle)).Append("</h2><p>")
+                .Append(Html(CurrencyFeatureBody)).Append("</p></div><a href=\"")
+                .Append(Html(m_basePath)).Append("/feature/")
+                .Append(Url(MakeSlug(CurrencyFeatureTitle)))
+                .Append("/\">Read guide</a></section>");
+        }
+
         private void SendCurrencyLogin(IOSHttpResponse response, string message, string avatarName)
         {
             EstatePageContent estate = LoadEstateContent();
@@ -1439,11 +1446,11 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             html.Append("<main class=\"wrap wallet-page\">");
             AppendPageLinks(html,
                 "Estate", m_basePath + "/",
-                "Currency guide", m_basePath + "/feature/" + MakeSlug(CurrencyFeatureTitle) + "/",
                 "Money admin", m_basePath + "/currency/admin");
             html.Append("<p class=\"feature-kicker\">Reserved area</p><h1>Avatar Wallet</h1>")
                 .Append("<p class=\"lead\">Request a one-time token inworld, then use it here to view your balance, statement, token purchases and avatar transfers.</p>")
                 .Append("<p class=\"wallet-note\"><a href=\"").Append(Html(m_basePath)).Append("/currency/admin\">Estate owner money admin</a></p>");
+            AppendCurrencyGuideCallout(html);
 
             AppendCurrencyMessage(html, message, string.IsNullOrEmpty(message) || message.StartsWith("Token sent", StringComparison.Ordinal) || message.StartsWith("You have", StringComparison.Ordinal) ? "ok" : "error");
 
@@ -1472,8 +1479,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             html.Append("<main class=\"wrap wallet-page\">");
             AppendPageLinks(html,
                 "Avatar wallet", m_basePath + "/currency/",
-                "Estate", m_basePath + "/",
-                "Currency guide", m_basePath + "/feature/" + MakeSlug(CurrencyFeatureTitle) + "/");
+                "Estate", m_basePath + "/");
             html.Append("<p class=\"feature-kicker\">Superadmin area</p><h1>Money Admin</h1>")
                 .Append("<p class=\"lead\">Estate owners request a one-time inworld token before managing wallet requests and avatar balances.</p>");
 
@@ -1520,9 +1526,9 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             html.Append("<main class=\"wrap wallet-page\">");
             AppendPageLinks(html,
                 "Estate", m_basePath + "/",
-                "Currency guide", m_basePath + "/feature/" + MakeSlug(CurrencyFeatureTitle) + "/",
                 "Money admin", m_basePath + "/currency/admin");
             html.Append("<p class=\"feature-kicker\">Reserved area</p><h1>Avatar Wallet</h1>");
+            AppendCurrencyGuideCallout(html);
 
             AppendCurrencyMessage(html, message, severity);
 
@@ -1609,8 +1615,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             html.Append("<main class=\"wrap wallet-page\">");
             AppendPageLinks(html,
                 "Avatar wallet", m_basePath + "/currency/",
-                "Estate", m_basePath + "/",
-                "Currency guide", m_basePath + "/feature/" + MakeSlug(CurrencyFeatureTitle) + "/");
+                "Estate", m_basePath + "/");
             html.Append("<p class=\"feature-kicker\">Superadmin area</p><h1>Money Admin</h1>");
 
             AppendCurrencyMessage(html, message, severity);
@@ -4651,8 +4656,9 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 .Append(".hero{min-height:430px;background-size:cover;background-position:center;display:flex;align-items:flex-end;color:#fff}.hero .wrap{padding-top:100px;padding-bottom:54px}.hero h1{margin:0;color:#fff;font-size:64px;line-height:.95;text-transform:uppercase}.meta{margin-top:16px;color:#edf4f7}.layout{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:36px;padding-top:42px;padding-bottom:64px}.story{min-width:0}.story>p{font-size:19px;color:#34404a}.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;margin:32px 0}.gallery figure{margin:0;background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 12px 34px rgba(5,10,15,.08)}.gallery img{aspect-ratio:4/3;object-fit:cover}.gallery figcaption{padding:11px;color:#59636c;font-size:14px}.panel{align-self:start}.map{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid var(--line);box-shadow:var(--shadow)}.stats,.parcels{margin-top:18px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;box-shadow:0 12px 34px rgba(5,10,15,.07)}.stats h2,.parcels h2,.story h2{margin:0 0 14px}.stats dl{display:grid;grid-template-columns:1fr auto;gap:8px 16px;margin:0}.stats dt{color:var(--muted)}.stats dd{margin:0;font-weight:900}.parcels div{display:flex;justify-content:space-between;gap:12px;border-top:1px solid var(--line);padding:10px 0}.parcels div:first-of-type{border-top:0}.parcels span{color:var(--muted)}")
                 .Append(".post{border-top:1px solid var(--line);padding:24px 0}.post img{width:100%;max-height:380px;object-fit:cover;margin-bottom:14px;border-radius:8px}.post time{color:var(--muted);font-size:13px}.post h3{margin:4px 0 8px;font-size:25px}.post p{color:#46515a}.post-page{padding-top:42px;padding-bottom:68px;max-width:860px}.post.full h1{font-size:48px;line-height:1.05;margin:6px 0 22px}.post.full p{font-size:18px}.region-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px}.list{padding-top:50px;padding-bottom:70px}.region-card{background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden;color:var(--text);box-shadow:0 12px 36px rgba(5,10,15,.08)}.region-card:hover{border-color:var(--accent);transform:translateY(-2px);transition:transform .16s ease,border-color .16s ease}.region-card img{aspect-ratio:16/9;object-fit:cover}.region-card strong,.region-card span{display:block;padding:0 16px}.region-card strong{padding-top:15px;font-size:21px}.region-card span{padding-bottom:16px;color:#59636c}.empty code{word-break:break-all}")
                 .Append(".script-source{max-width:880px;color:#52606b}.script-toc{border-top:1px solid var(--line);margin-top:32px;padding-top:24px}.script-toc h2,.script-group h2{font-size:30px;margin:0 0 14px}.script-toc div{display:flex;flex-wrap:wrap;gap:10px}.script-toc a{background:#fff;border:1px solid var(--line);border-radius:6px;padding:9px 12px;color:#111820;font-weight:900}.script-toc span{color:#0079b6}.script-group{border-top:1px solid var(--line);margin-top:32px;padding-top:26px}.script-card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;margin:0 0 16px;box-shadow:0 12px 34px rgba(5,10,15,.07)}.script-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.script-card h3{font-size:23px;margin:0}.script-card-head span{color:#67727b;font-size:13px;text-align:right}.signature{margin:12px 0;color:#111820}.signature code,.script-card pre{background:#0d1115;border:1px solid #252d35;border-radius:6px}.signature code{display:block;overflow:auto;padding:11px;color:#eef7fb}.script-detail{margin:8px 0;color:#424d56}.script-detail strong{color:#111820}.script-card details{margin-top:12px}.script-card summary{cursor:pointer;color:#0079b6;font-weight:1000}.script-card pre{overflow:auto;padding:12px;color:#dfeaf0}.script-focus{border-top:1px solid var(--line);margin-top:30px;padding-top:26px}")
+                .Append(".wallet-guide{display:flex;align-items:center;justify-content:space-between;gap:18px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;margin:22px 0 4px;box-shadow:0 12px 34px rgba(5,10,15,.07)}.wallet-guide span{display:block;color:var(--accent);font-size:13px;font-weight:1000;letter-spacing:.08em;text-transform:uppercase}.wallet-guide h2{margin:4px 0 6px;font-size:25px}.wallet-guide p{margin:0;color:#56616a}.wallet-guide a{flex:0 0 auto;background:#020304;color:#fff;border:1px solid var(--accent);border-radius:5px;padding:10px 14px;font-weight:1000}.wallet-guide a:hover{background:var(--accent);color:#020304}")
                 .Append(".wallet-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:18px;margin-top:26px}.wallet-card,.wallet-summary{background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;box-shadow:0 12px 34px rgba(5,10,15,.07)}.wallet-card h2{margin:0 0 14px;font-size:25px}.wallet-card label{display:block;color:#46515a;font-weight:900;margin:0 0 12px}.wallet-card input{box-sizing:border-box;width:100%;margin-top:6px;background:#f8fbfc;border:1px solid #cfdce2;color:#111820;border-radius:6px;padding:11px;font:inherit}.wallet-card button,.wallet-logout button{border:0;border-radius:5px;background:var(--accent2);color:#fff;padding:11px 15px;font-weight:1000;cursor:pointer}.wallet-card button:hover,.wallet-logout button:hover{background:#a900e0}.wallet-note{color:#65717a;margin:12px 0 0}.wallet-message{border:1px solid #b9e7c4;background:#ecfff1;color:#145923;border-radius:6px;padding:12px 14px}.wallet-message.error{border-color:#f0b6b6;background:#fff0f0;color:#8a1d1d}.wallet-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:24px;padding:0;overflow:hidden}.wallet-summary div{background:#fff;padding:18px}.wallet-summary span{display:block;color:#65717a}.wallet-summary strong{display:block;font-size:28px;word-break:break-word}.wallet-statement{margin-top:18px}.wallet-table{overflow:auto;background:#fff;border-radius:8px;border:1px solid var(--line)}.wallet-table table{width:100%;border-collapse:collapse}.wallet-table th,.wallet-table td{text-align:left;border-top:1px solid var(--line);padding:10px;white-space:nowrap}.wallet-table th{background:#f0f5f7}.wallet-table td:last-child{white-space:normal}.wallet-table .credit{color:#128c3b}.wallet-table .debit{color:#b92828}.wallet-logout{margin-top:18px}")
-                .Append(".back-to-top{position:fixed;right:18px;bottom:18px;z-index:1001;background:#020304;color:#fff;border:1px solid var(--accent);border-radius:6px;padding:10px 13px;font-weight:1000;box-shadow:0 12px 34px rgba(0,0,0,.32)}.back-to-top:hover{background:var(--accent);color:#020304}@media(max-width:980px){.nav-wrap{align-items:flex-start;flex-direction:column;padding-top:12px;padding-bottom:14px}.nav-links{justify-content:flex-start;gap:14px}.layout,.estate-stats,.wallet-summary{grid-template-columns:1fr}.estate-hero{min-height:500px}.hero{min-height:330px}.estate-hero h1,.hero h1,.feature-page h1,.script-reference h1,.wallet-page h1{font-size:44px}.estate-hero .wrap{padding-top:80px;padding-bottom:64px}.wrap{padding-left:18px;padding-right:18px}.script-card-head{display:block}.script-card-head span{text-align:left;display:block;margin-top:5px}.brand{min-width:0}.back-to-top{right:14px;bottom:14px;padding:9px 11px}}");
+                .Append(".back-to-top{position:fixed;right:18px;bottom:18px;z-index:1001;background:#020304;color:#fff;border:1px solid var(--accent);border-radius:6px;padding:10px 13px;font-weight:1000;box-shadow:0 12px 34px rgba(0,0,0,.32)}.back-to-top:hover{background:var(--accent);color:#020304}@media(max-width:980px){.nav-wrap{align-items:flex-start;flex-direction:column;padding-top:12px;padding-bottom:14px}.nav-links{justify-content:flex-start;gap:14px}.layout,.estate-stats,.wallet-summary{grid-template-columns:1fr}.wallet-guide{display:block}.wallet-guide a{display:inline-flex;margin-top:14px}.estate-hero{min-height:500px}.hero{min-height:330px}.estate-hero h1,.hero h1,.feature-page h1,.script-reference h1,.wallet-page h1{font-size:44px}.estate-hero .wrap{padding-top:80px;padding-bottom:64px}.wrap{padding-left:18px;padding-right:18px}.script-card-head{display:block}.script-card-head span{text-align:left;display:block;margin-top:5px}.brand{min-width:0}.back-to-top{right:14px;bottom:14px;padding:9px 11px}}");
             return css.ToString();
         }
 
