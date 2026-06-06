@@ -5339,11 +5339,20 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             html.Append("<!doctype html><html><head><meta charset=\"utf-8\">")
                 .Append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
                 .Append("<title>").Append(Html(title)).Append("</title>")
+                .Append("<link rel=\"icon\" type=\"image/svg+xml\" href=\"")
+                .Append(VanillaSimFaviconDataUri())
+                .Append("\">")
                 .Append("<style>")
                 .Append(RegionWebCss())
                 .Append("</style></head><body id=\"top\">");
             AppendGlobalNavigation(html);
             return html;
+        }
+
+        private static string VanillaSimFaviconDataUri()
+        {
+            const string svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='#05070a'/><rect x='8' y='8' width='48' height='48' rx='11' fill='#111820' stroke='#12bdf4' stroke-width='4'/><path d='M17 18l8 28 8-28' fill='none' stroke='#12bdf4' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/><path d='M45 21c-8-4-17 2-9 8 8 5 2 13-8 8' fill='none' stroke='#fff' stroke-width='7' stroke-linecap='round'/><circle cx='45' cy='20' r='6' fill='#c700ff'/></svg>";
+            return "data:image/svg+xml," + Uri.EscapeDataString(svg);
         }
 
         private void AppendGlobalNavigation(StringBuilder html)
