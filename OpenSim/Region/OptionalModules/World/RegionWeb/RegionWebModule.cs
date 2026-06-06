@@ -55,11 +55,18 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
         private const int InventoryCarouselFolderSearchLimit = 1024;
-        private const string RegionWebFeatureTitle = "Vanilla Sim estate portal";
+        private const string EstateLegacyDescription =
+            "A public portal for regions, maps, news and technical improvements. This build keeps OpenSim's flexibility while adding a cleaner visitor experience, better cartography, richer presentation pages and smoother simulator startup behavior.";
+        private const string EstatePreviousDefaultDescription =
+            "Explore Vanilla Sim from one live Hypergrid portal: region maps, owner-curated snapshots, feature guides, wallet tools and inworld updates stay connected to the simulator. Creators can keep each region's story fresh from inventory folders and simple RegionWeb content files.";
+        private const string EstateDefaultTagline = "Virtual world feature showroom";
+        private const string EstateDefaultDescription =
+            "Beautiful maps, a website for every region, live weather, local money, AI help for building, boats that move like real boats, Second Life scripts that work and one-click sharing to many grids such as OSGrid, Neverworld, Craft and more.";
+        private const string RegionWebFeatureTitle = "Your region gets a website";
         private const string RegionWebFeatureBody =
-            "RegionWeb publishes a branded estate site with sticky navigation, live region pages, map/photo carousels sourced from owner inventory, wallet access and owner-only money administration.";
+            "Show each region with its own shareable web page, including maps, photos, news, visitor info and live details, without building a separate website.";
         private const string RegionWebFeatureOverview =
-            "RegionWeb turns the simulator HTTP endpoint into a public Vanilla Sim portal. The landing page presents estate stats, features, regions and carousel imagery; each region gets a profile page with a large hero image, map fallback, profile text, gallery, blog posts, parcel data and live simulator statistics. Estate and region owners can manage carousel images by dropping inworld snapshots or textures into automatically created inventory folders, while the wallet area keeps avatar currency tools and owner-only money administration behind inworld token checks.";
+            "Vanilla Sim gives your world a real web front door. Visitors can land on one clean site, browse your regions, see big pictures, open maps, read updates and understand what makes each place special before they teleport in. Region owners can keep the page fresh by dropping snapshots into simple inworld folders instead of running a separate website.";
         private const string ScriptEngineFeatureTitle = "Second Life-style script engine";
         private const string ScriptEngineFeatureBody =
             "The script engine is moving closer to Second Life behavior with Experience-Lite permissions, scripted sit controls, key-value stores, linkset data, environment, estate-return, parcel media, parcel prim counts/details, guarded money transfer, inventory transfer, damage, RSA, attachment filter, identity lookup, privacy-aware agent language lookup, animation-state introspection, physics energy readback, object-detail cost readback, script memory/profiler diagnostics, GLTF material and physics primitive-param helpers, plus a Vanilla Sim compatibility center and in-world regression lab.";
@@ -70,11 +77,11 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             "The estate can run a local persistent currency ledger that sends live balances to the viewer, handles transfers, object payments, land/object purchases and simulator economy charges without requiring a separate currency server.";
         private const string CurrencyFeatureOverview =
             "The bundled BetaGridLikeMoneyModule now works as a lightweight local economy backend. It persists avatar balances in a tab-separated ledger, grants a configurable first-use balance, pushes MoneyBalanceReply updates so compatible viewers show the current balance, and applies the same balance path to viewer transfers, scripted money calls, object payments, land/object purchases, upload charges and group creation charges.";
-        private const string MultiGridFeatureTitle = "Multi-grid region attachments";
+        private const string MultiGridFeatureTitle = "Attach to many grids";
         private const string MultiGridFeatureBody =
-            "Regions can keep one primary grid for identity, assets, inventory and presence while publishing their simulator endpoint to additional grid registries as configured secondary attachments.";
+            "Attach your region to many grids at the same time, like OSGrid, Neverworld, Craft or any public grid you choose, with one click.";
         private const string MultiGridFeatureOverview =
-            "The region grid connector can now fan out successful primary region registrations to a configurable list of secondary grid services. Each attachment can target all regions or selected region names/UUIDs, override the advertised DNS name, HTTP endpoint, map location and region name, and use optional HTTP Basic authentication. Secondary attachments are best-effort by default so a public grid outage does not stop the simulator from booting.";
+            "Vanilla Sim lets one region appear on more than one grid map at the same time. You can keep your home base on Vanilla Sim, then share the same place with OSGrid, Neverworld, Craft or another friendly public grid from the multigrid switch profile. Visitors can discover the region from the grids they already use, while your simulator still keeps one home for inventory, assets and accounts.";
         private const string VanillaSimRepositoryUrl = "https://github.com/GuntharDeNiro/opensim";
 
         private readonly object m_sync = new object();
@@ -541,6 +548,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 .Append("<div class=\"wrap\"><p>").Append(Html(content.Tagline)).Append("</p><h1>")
                 .Append(Html(content.Title)).Append("</h1>")
                 .Append(Paragraphs(content.Description))
+                .Append(BuildHeroFeatureStrip())
                 .Append("<div class=\"estate-actions\"><a href=\"#regions\">Explore regions</a><a href=\"#features\">New features</a></div>")
                 .Append("</div></header>");
 
@@ -577,6 +585,27 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             html.Append("</div></section></main>");
             html.Append(EndPage());
             SendHtml(response, html.ToString());
+        }
+
+        private static string BuildHeroFeatureStrip()
+        {
+            string[] features =
+            {
+                "High quality maps",
+                "Website for your region",
+                "Live weather",
+                "Money system",
+                "AI build helper",
+                "Boats roll and drift",
+                "Attach to many grids",
+                "Second Life scripts"
+            };
+
+            StringBuilder html = new StringBuilder("<div class=\"hero-feature-strip\" aria-label=\"Vanilla Sim headline features\">");
+            foreach (string feature in features)
+                html.Append("<span>").Append(Html(feature)).Append("</span>");
+            html.Append("</div>");
+            return html.ToString();
         }
 
         private void SendFeaturePage(string slug, IOSHttpResponse response)
@@ -3604,8 +3633,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         {
             EstatePageContent content = new EstatePageContent();
             content.Title = m_defaultEstateTitle;
-            content.Tagline = "Vanilla Sim hypergrid estate";
-            content.Description = "Vanilla Sim runs a tuned OpenSim build with richer maps, better region presentation, weather, visitor tools and simulator polish.";
+            content.Tagline = EstateDefaultTagline;
+            content.Description = EstateDefaultDescription;
             content.HeroImage = string.Empty;
             AddDefaultFeatures(content.Features);
 
@@ -3633,8 +3662,10 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             content.HeroImage = config.GetString("HeroImage", string.Empty).Trim();
             if (IsLegacyEstateBrand(content.Title))
                 content.Title = "Vanilla Sim";
-            if (IsLegacyEstateBrand(content.Tagline))
-                content.Tagline = "Vanilla Sim hypergrid estate";
+            if (IsLegacyEstateBrand(content.Tagline) || IsLegacyEstateTagline(content.Tagline))
+                content.Tagline = EstateDefaultTagline;
+            if (IsLegacyEstateDescription(content.Description))
+                content.Description = EstateDefaultDescription;
 
             List<FeatureItem> configuredFeatures = ParseFeatures(config.GetString("Features", string.Empty));
             if (configuredFeatures.Count == 0)
@@ -3700,7 +3731,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             if (notes.Count > 0)
                 content.Notes = notes;
 
-            MergeFeaturePageDefaults(content, defaults, IsScriptEngineFeature(feature.Title) || IsRegionWebFeature(feature.Title));
+            MergeFeaturePageDefaults(content, defaults, IsScriptEngineFeature(feature.Title) || IsRegionWebFeature(feature.Title) || IsMultiGridFeature(feature.Title));
 
             return content;
         }
@@ -3759,6 +3790,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 case "regionweb-pages":
                 case "regionweb-estate-portal":
                 case "vanilla-sim-estate-portal":
+                case "your-region-gets-a-website":
+                case "website-for-your-region":
                     content.Title = RegionWebFeatureTitle;
                     content.Summary = RegionWebFeatureBody;
                     content.Overview = RegionWebFeatureOverview;
@@ -3876,6 +3909,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 case "multi-grid-attachments":
                 case "multigrid":
                 case "multi-grid":
+                case "attach-to-many-grids":
                     content.Title = MultiGridFeatureTitle;
                     content.Summary = MultiGridFeatureBody;
                     content.Overview = MultiGridFeatureOverview;
@@ -3971,6 +4005,23 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             return (lower.Contains("opensimulator") && lower.Contains("estate"))
                 || (lower.Contains("standalone hypergrid") && lower.Contains("estate"))
                 || lower.Contains(oldPersonalBrand);
+        }
+
+        private static bool IsLegacyEstateDescription(string value)
+        {
+            return string.IsNullOrWhiteSpace(value)
+                || value.Trim().Equals(EstateLegacyDescription, StringComparison.OrdinalIgnoreCase)
+                || value.Trim().Equals(EstatePreviousDefaultDescription, StringComparison.OrdinalIgnoreCase)
+                || value.Trim().Equals("Vanilla Sim runs a tuned OpenSim build with richer maps, better region presentation, weather, visitor tools and simulator polish.", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsLegacyEstateTagline(string value)
+        {
+            return string.IsNullOrWhiteSpace(value)
+                || value.Trim().Equals("Polished for creators and visitors", StringComparison.OrdinalIgnoreCase)
+                || value.Trim().Equals("OpenSim feature showroom", StringComparison.OrdinalIgnoreCase)
+                || value.Trim().Equals("hypergrid estate", StringComparison.OrdinalIgnoreCase)
+                || value.Trim().Equals("Vanilla Sim hypergrid estate", StringComparison.OrdinalIgnoreCase);
         }
 
         private RegionPageContent LoadContent(Scene scene)
@@ -4178,8 +4229,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             File.WriteAllText(file,
                 "[EstateWeb]\n"
                 + "Title = \"" + EscapeIni(m_defaultEstateTitle) + "\"\n"
-                + "Tagline = \"Polished for creators and visitors\"\n"
-                + "Description = \"A public portal for regions, maps, news and technical improvements. This build keeps OpenSim's flexibility while adding a cleaner visitor experience, better cartography, richer presentation pages and smoother simulator startup behavior.\"\n"
+                + "Tagline = \"" + EscapeIni(EstateDefaultTagline) + "\"\n"
+                + "Description = \"" + EscapeIni(EstateDefaultDescription) + "\"\n"
                 + "HeroImage = \"\"\n"
                 + "; Feature entries use title|description.\n"
                 + "Feature1 = \"High quality world map|Terrain textures, water depth shading, land detail, aerial tone mapping, mesh/sculpt geometry projection, cleaner water alpha handling, background generation and cooperative rendering make map tiles sharper, more geographic and safer for simulator responsiveness.\"\n"
@@ -5074,7 +5125,10 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 return false;
 
             string normalized = title.Trim().ToLowerInvariant();
-            return normalized == "vanilla sim estate portal"
+            return normalized == "your region gets a website"
+                || normalized == "website for your region"
+                || normalized == "show your region on the web"
+                || normalized == "vanilla sim estate portal"
                 || normalized == "regionweb pages"
                 || normalized == "regionweb estate portal"
                 || normalized == "regionweb"
@@ -5133,7 +5187,10 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 return false;
 
             string normalized = title.Trim().ToLowerInvariant();
-            return normalized == "multi-grid region attachments"
+            return normalized == "attach to many grids"
+                || normalized == "attach your region to many grids"
+                || normalized == "attach regions to many grids"
+                || normalized == "multi-grid region attachments"
                 || normalized == "multi-grid attachments"
                 || normalized == "multigrid attachments"
                 || normalized == "multigrid"
@@ -5265,7 +5322,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             css.Append(":root{--ink:#05070a;--paper:#f4f7f9;--card:#fff;--text:#111820;--muted:#68727c;--line:#dfe7eb;--dark:#11161b;--dark2:#1d2227;--accent:#12bdf4;--accent2:#c700ff;--shadow:0 22px 60px rgba(5,10,15,.14)}")
                 .Append("html{scroll-behavior:smooth;scroll-padding-top:88px}body{margin:0;background:var(--paper);color:var(--text);font:16px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}a{color:#0079b6;text-decoration:none}a:hover{color:#00aeea}img{max-width:100%;display:block}.wrap{max-width:1320px;margin:0 auto;padding:0 28px}")
                 .Append(".site-nav{position:sticky;top:0;z-index:1000;background:#020304;border-bottom:2px solid var(--accent);box-shadow:0 14px 40px rgba(0,0,0,.32)}.nav-wrap{display:flex;align-items:center;justify-content:space-between;gap:28px;min-height:68px}.site-nav a{color:#f6f7f8;font-weight:900}.brand{display:flex;align-items:center;gap:13px;color:#fff;min-width:190px}.brand-mark{position:relative;width:52px;height:52px;flex:0 0 52px;border:3px solid var(--accent);border-radius:14px;background:linear-gradient(135deg,rgba(18,189,244,.18),rgba(199,0,255,.14));box-shadow:0 0 0 1px rgba(255,255,255,.08) inset,0 10px 28px rgba(18,189,244,.22);transform:rotate(-6deg);overflow:hidden}.brand-mark:before{content:'V';position:absolute;left:8px;top:4px;color:var(--accent);font-size:30px;line-height:1;font-weight:1000;transform:rotate(6deg)}.brand-mark:after{content:'S';position:absolute;right:7px;bottom:2px;color:#fff;font-size:30px;line-height:1;font-weight:1000;transform:rotate(6deg)}.brand-mark span{position:absolute;left:9px;right:9px;top:25px;height:3px;background:var(--accent);border-radius:999px;transform:rotate(-22deg)}.brand-mark span:before{content:'';position:absolute;right:-4px;top:-4px;width:11px;height:11px;background:var(--accent2);border-radius:50%;box-shadow:0 0 18px rgba(199,0,255,.5)}.brand-type{display:grid;text-transform:uppercase;line-height:.84;color:#fff}.brand-type span{font-size:16px;font-weight:1000;letter-spacing:.08em}.brand-type strong{font-size:35px;font-weight:1000;letter-spacing:0}.nav-links{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:28px}.nav-links a{font-size:17px}.nav-links a:hover{color:var(--accent)}.nav-github{display:inline-flex;align-items:center;gap:8px}.nav-github svg{width:21px;height:21px;fill:currentColor}.nav-cta{background:var(--accent2);color:#fff!important;padding:11px 20px;border-radius:5px;box-shadow:0 12px 30px rgba(199,0,255,.24)}.nav-cta:hover{background:#a900e0!important;color:#fff!important}")
-                .Append(".page-links{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 22px}.page-links a,.back{display:inline-flex;align-items:center;min-height:38px;background:#fff;border:1px solid var(--line);border-radius:6px;color:#111820;padding:0 13px;font-weight:900;box-shadow:0 8px 22px rgba(12,18,24,.06)}.page-links a:hover,.back:hover{border-color:var(--accent);color:#0079b6}.estate-hero{position:relative;min-height:640px;background-size:cover;background-position:center;background-repeat:no-repeat;display:flex;align-items:center;color:#fff;overflow:hidden;background-color:#090d14}.estate-hero-plain{background:#090d14}.estate-carousel{position:absolute;inset:0;z-index:0;background:#090d14}.estate-slide{position:absolute;inset:0;opacity:0;transition:opacity 2.2s ease;transform:scale(1.025)}.estate-slide.is-active{opacity:1}.estate-slide img{width:100%;height:100%;object-fit:cover;filter:saturate(1.08) contrast(1.05)}.estate-carousel-shade{position:absolute;inset:0;background:linear-gradient(90deg,rgba(0,0,0,.78),rgba(0,0,0,.42) 48%,rgba(0,0,0,.30)),linear-gradient(0deg,rgba(3,8,12,.90),rgba(3,8,12,.10) 45%,rgba(3,8,12,.18));pointer-events:none}.estate-hero .wrap{position:relative;z-index:2;padding-top:118px;padding-bottom:88px}.estate-hero p{max-width:720px;color:#f2f6f8;font-size:21px}.estate-hero>div>p:first-child,.hero p,.feature-kicker{margin:0 0 12px;color:var(--accent);text-transform:uppercase;font-size:15px;font-weight:1000;letter-spacing:.08em}.estate-hero h1{max-width:790px;margin:0;color:#fff;font-size:76px;line-height:.92;text-transform:uppercase}.estate-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}.estate-actions a{background:var(--accent2);color:#fff;padding:12px 18px;border-radius:5px;font-weight:1000;box-shadow:0 12px 32px rgba(199,0,255,.24)}.estate-actions a+a{background:#fff;color:#111820}.estate-actions a:hover{color:#fff;background:#a900e0}.estate-actions a+a:hover{color:#0079b6;background:#edf9ff}")
+                .Append(".page-links{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 22px}.page-links a,.back{display:inline-flex;align-items:center;min-height:38px;background:#fff;border:1px solid var(--line);border-radius:6px;color:#111820;padding:0 13px;font-weight:900;box-shadow:0 8px 22px rgba(12,18,24,.06)}.page-links a:hover,.back:hover{border-color:var(--accent);color:#0079b6}.estate-hero{position:relative;min-height:640px;background-size:cover;background-position:center;background-repeat:no-repeat;display:flex;align-items:center;color:#fff;overflow:hidden;background-color:#090d14}.estate-hero-plain{background:#090d14}.estate-carousel{position:absolute;inset:0;z-index:0;background:#090d14}.estate-slide{position:absolute;inset:0;opacity:0;transition:opacity 2.2s ease;transform:scale(1.025)}.estate-slide.is-active{opacity:1}.estate-slide img{width:100%;height:100%;object-fit:cover;filter:saturate(1.08) contrast(1.05)}.estate-carousel-shade{position:absolute;inset:0;background:linear-gradient(90deg,rgba(0,0,0,.78),rgba(0,0,0,.42) 48%,rgba(0,0,0,.30)),linear-gradient(0deg,rgba(3,8,12,.90),rgba(3,8,12,.10) 45%,rgba(3,8,12,.18));pointer-events:none}.estate-hero .wrap{position:relative;z-index:2;padding-top:118px;padding-bottom:88px}.estate-hero p{max-width:860px;color:#f2f6f8;font-size:21px}.estate-hero>div>p:first-child,.hero p,.feature-kicker{margin:0 0 12px;color:var(--accent);text-transform:uppercase;font-size:15px;font-weight:1000;letter-spacing:.08em}.estate-hero h1{max-width:790px;margin:0;color:#fff;font-size:76px;line-height:.92;text-transform:uppercase}.hero-feature-strip{display:flex;flex-wrap:wrap;gap:9px;max-width:920px;margin:24px 0 0}.hero-feature-strip span{display:inline-flex;align-items:center;min-height:32px;border:1px solid rgba(18,189,244,.55);border-radius:6px;background:rgba(2,3,4,.62);color:#fff;padding:0 11px;font-size:14px;font-weight:1000;box-shadow:0 10px 28px rgba(0,0,0,.26)}.hero-feature-strip span:nth-child(4),.hero-feature-strip span:nth-child(8){border-color:rgba(199,0,255,.62)}.estate-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}.estate-actions a{background:var(--accent2);color:#fff;padding:12px 18px;border-radius:5px;font-weight:1000;box-shadow:0 12px 32px rgba(199,0,255,.24)}.estate-actions a+a{background:#fff;color:#111820}.estate-actions a:hover{color:#fff;background:#a900e0}.estate-actions a+a:hover{color:#0079b6;background:#edf9ff}")
                 .Append("main{background:var(--paper)}.estate-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-top:-38px;position:relative;z-index:2}.estate-stats div{background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;box-shadow:var(--shadow)}.estate-stats strong{display:block;font-size:34px;line-height:1}.estate-stats span{color:var(--muted);font-weight:800}.feature-section{padding-top:58px}.feature-section h2,.list h2{font-size:36px;line-height:1.05;margin:0 0 22px}.feature-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px}.feature-card{display:block;background:#fff;border:1px solid var(--line);border-radius:8px;color:var(--text);padding:22px;min-height:190px;box-shadow:0 12px 36px rgba(5,10,15,.07)}.feature-card:hover{border-color:var(--accent);transform:translateY(-2px);transition:transform .16s ease,border-color .16s ease}.feature-card h3{margin:0 0 8px;font-size:22px}.feature-card p{margin:0;color:#56616a}.feature-card span{display:inline-block;margin-top:18px;color:#0079b6;font-weight:1000}.feature-page,.script-reference,.wallet-page{padding-top:50px;padding-bottom:78px}.feature-page{max-width:920px}.feature-page h1,.script-reference h1,.wallet-page h1{font-size:56px;line-height:1;margin:0 0 18px}.feature-page .lead,.script-reference .lead,.wallet-page .lead{font-size:22px;color:#45505a;margin:0 0 22px}.feature-page section{border-top:1px solid var(--line);padding-top:26px;margin-top:28px}.feature-page h2{font-size:30px;margin:0 0 12px}.feature-page li{margin:0 0 10px;color:#38424b}")
                 .Append(".hero{position:relative;min-height:430px;background-size:cover;background-position:center;background-repeat:no-repeat;display:flex;align-items:flex-end;color:#fff;overflow:hidden;background-color:#090d14}.hero .wrap{position:relative;z-index:2;padding-top:100px;padding-bottom:54px}.hero h1{margin:0;color:#fff;font-size:64px;line-height:.95;text-transform:uppercase}.meta{margin-top:16px;color:#edf4f7}.layout{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:36px;padding-top:42px;padding-bottom:64px}.story{min-width:0}.story>p{font-size:19px;color:#34404a}.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;margin:32px 0}.gallery figure{margin:0;background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 12px 34px rgba(5,10,15,.08)}.gallery img{aspect-ratio:4/3;object-fit:cover}.gallery figcaption{padding:11px;color:#59636c;font-size:14px}.panel{align-self:start}.map{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid var(--line);box-shadow:var(--shadow)}.stats,.parcels{margin-top:18px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;box-shadow:0 12px 34px rgba(5,10,15,.07)}.stats h2,.parcels h2,.story h2{margin:0 0 14px}.stats dl{display:grid;grid-template-columns:1fr auto;gap:8px 16px;margin:0}.stats dt{color:var(--muted)}.stats dd{margin:0;font-weight:900}.parcels div{display:flex;justify-content:space-between;gap:12px;border-top:1px solid var(--line);padding:10px 0}.parcels div:first-of-type{border-top:0}.parcels span{color:var(--muted)}")
                 .Append(".post{border-top:1px solid var(--line);padding:24px 0}.post img{width:100%;max-height:380px;object-fit:cover;margin-bottom:14px;border-radius:8px}.post time{color:var(--muted);font-size:13px}.post h3{margin:4px 0 8px;font-size:25px}.post p{color:#46515a}.post-page{padding-top:42px;padding-bottom:68px;max-width:860px}.post.full h1{font-size:48px;line-height:1.05;margin:6px 0 22px}.post.full p{font-size:18px}.region-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px}.list{padding-top:50px;padding-bottom:70px}.region-card{background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden;color:var(--text);box-shadow:0 12px 36px rgba(5,10,15,.08)}.region-card:hover{border-color:var(--accent);transform:translateY(-2px);transition:transform .16s ease,border-color .16s ease}.region-card img{aspect-ratio:16/9;object-fit:cover}.region-card strong,.region-card span{display:block;padding:0 16px}.region-card strong{padding-top:15px;font-size:21px}.region-card span{padding-bottom:16px;color:#59636c}.empty code{word-break:break-all}")
