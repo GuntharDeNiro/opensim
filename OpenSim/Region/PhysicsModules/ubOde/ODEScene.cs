@@ -178,7 +178,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
         //private int threadid = 0;
 
-        const UBOdeNative.ContactFlags commomContactFlags =
+        const UBOdeNative.ContactFlags commonContactFlags =
             UBOdeNative.ContactFlags.Bounce |
             UBOdeNative.ContactFlags.SoftERP |
             UBOdeNative.ContactFlags.SoftCFM |
@@ -188,9 +188,10 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         private float commonContactERP = 0.75f;
         private float commonContactCFM = 0.0001f;
         private float commonContactSLIP = 0f;
+        private float commonContactBounceVelocity = 0.05f;
 
-        private float TerrainBounce = 0.02f;
-        private float TerrainFriction = 0.65f;
+        private float TerrainBounce = 0.28f;
+        private float TerrainFriction = 0.70f;
         private float worldLinearDamping = 0.001f;
         private float worldAngularDamping = 0.002f;
         private float contactMaxCorrectingVelocity = 60.0f;
@@ -252,7 +253,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         public float bodyPIDD = 35f;
         public float bodyPIDG = 25;
 
-        public int bodyFramesAutoDisable = 10;
+        public int bodyFramesAutoDisable = 90;
 
         private UBOdeNative.NearCallback NearCallback;
 
@@ -397,6 +398,16 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             return value;
         }
 
+        private static float CombineContactBounce(float bounce1, float bounce2)
+        {
+            if (bounce1 <= 0f || bounce2 <= 0f)
+                return 0f;
+
+            // Direct multiplication makes rubber-on-terrain almost inert when
+            // terrain bounce is low; sqrt keeps both surfaces meaningful.
+            return MathF.Sqrt(bounce1 * bounce2);
+        }
+
         private void SetMaterialContact(Material material, float friction, float bounce)
         {
             m_materialContactsData[(int)material].mu = friction;
@@ -407,25 +418,25 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         {
             SetMaterialContact(Material.Stone,
                 ConfigFloat(config, "material_stone_friction", 0.85f, 0f, 2f),
-                ConfigFloat(config, "material_stone_bounce", 0.08f, 0f, 1f));
+                ConfigFloat(config, "material_stone_bounce", 0.10f, 0f, 1f));
             SetMaterialContact(Material.Metal,
                 ConfigFloat(config, "material_metal_friction", 0.45f, 0f, 2f),
-                ConfigFloat(config, "material_metal_bounce", 0.12f, 0f, 1f));
+                ConfigFloat(config, "material_metal_bounce", 0.18f, 0f, 1f));
             SetMaterialContact(Material.Glass,
                 ConfigFloat(config, "material_glass_friction", 0.18f, 0f, 2f),
-                ConfigFloat(config, "material_glass_bounce", 0.04f, 0f, 1f));
+                ConfigFloat(config, "material_glass_bounce", 0.08f, 0f, 1f));
             SetMaterialContact(Material.Wood,
                 ConfigFloat(config, "material_wood_friction", 0.6f, 0f, 2f),
-                ConfigFloat(config, "material_wood_bounce", 0.12f, 0f, 1f));
+                ConfigFloat(config, "material_wood_bounce", 0.18f, 0f, 1f));
             SetMaterialContact(Material.Flesh,
                 ConfigFloat(config, "material_flesh_friction", 0.9f, 0f, 2f),
                 ConfigFloat(config, "material_flesh_bounce", 0.02f, 0f, 1f));
             SetMaterialContact(Material.Plastic,
                 ConfigFloat(config, "material_plastic_friction", 0.35f, 0f, 2f),
-                ConfigFloat(config, "material_plastic_bounce", 0.18f, 0f, 1f));
+                ConfigFloat(config, "material_plastic_bounce", 0.35f, 0f, 1f));
             SetMaterialContact(Material.Rubber,
-                ConfigFloat(config, "material_rubber_friction", 1.1f, 0f, 2f),
-                ConfigFloat(config, "material_rubber_bounce", 0.45f, 0f, 1f));
+                ConfigFloat(config, "material_rubber_friction", 0.85f, 0f, 2f),
+                ConfigFloat(config, "material_rubber_bounce", 0.90f, 0f, 1f));
             SetMaterialContact(Material.light,
                 ConfigFloat(config, "material_light_friction", 0.0f, 0f, 2f),
                 ConfigFloat(config, "material_light_bounce", 0.0f, 0f, 1f));
@@ -527,6 +538,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     commonContactERP = ConfigFloat(physicsconfig, "world_erp", commonContactERP, 0.05f, 1.0f);
                     commonContactCFM = ConfigFloat(physicsconfig, "world_cfm", commonContactCFM, 0.000001f, 0.1f);
                     commonContactSLIP = ConfigFloat(physicsconfig, "world_contact_slip", commonContactSLIP, 0f, 1f);
+                    commonContactBounceVelocity = ConfigFloat(physicsconfig, "world_contact_bounce_velocity", commonContactBounceVelocity, 0f, 5f);
                     contactsurfacelayer = ConfigFloat(physicsconfig, "world_contact_surface_layer", contactsurfacelayer, 0f, 0.1f);
                     contactMaxCorrectingVelocity = ConfigFloat(physicsconfig, "world_contact_max_correcting_velocity", contactMaxCorrectingVelocity, 0.1f, 200f);
 
@@ -606,10 +618,10 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             contactSharedForJoints.geom.side1 = -1;
             contactSharedForJoints.geom.side2 = -1;
 
-            contactSharedForJoints.surface.mode = commomContactFlags;
+            contactSharedForJoints.surface.mode = commonContactFlags;
             contactSharedForJoints.surface.mu = 0;
             contactSharedForJoints.surface.bounce = 0;
-            contactSharedForJoints.surface.bounce_vel = 1.5f;
+            contactSharedForJoints.surface.bounce_vel = commonContactBounceVelocity;
             contactSharedForJoints.surface.soft_cfm = commonContactCFM;
             contactSharedForJoints.surface.soft_erp = commonContactERP;
             contactSharedForJoints.surface.slip1 = commonContactSLIP;
@@ -618,9 +630,9 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             LoadMaterialContactSettings(physicsconfig);
 
             m_log.InfoFormat(
-                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} terrain=({7:0.###} friction,{8:0.###} bounce) boatWater={9}",
+                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} bounceVel={7:0.###} terrain=({8:0.###} friction,{9:0.###} bounce) boatWater={10}",
                 ODE_STEPSIZE, m_physicsiterations, bodyFramesAutoDisable, worldLinearDamping, worldAngularDamping,
-                commonContactERP, commonContactCFM, TerrainFriction, TerrainBounce,
+                commonContactERP, commonContactCFM, commonContactBounceVelocity, TerrainFriction, TerrainBounce,
                 BoatWaterDynamicsEnabled ? "enabled" : "disabled");
 
             m_lastframe = Util.GetTimeStamp();
@@ -813,7 +825,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                                 }
                                 p1.getContactData(ref contactdata1);
                                 p2.getContactData(ref contactdata2);
-                                bounce = contactdata1.bounce * contactdata2.bounce;
+                                bounce = CombineContactBounce(contactdata1.bounce, contactdata2.bounce);
                                 mu = (float)Math.Sqrt(contactdata1.mu * contactdata2.mu);
 
                                 //if (relVlenSQ > 0.01f)
@@ -826,7 +838,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
                             case (int)ActorTypes.Ground:
                                 p1.getContactData(ref contactdata1);
-                                bounce = contactdata1.bounce * TerrainBounce;
+                                bounce = CombineContactBounce(contactdata1.bounce, TerrainBounce);
                                 mu = (float)Math.Sqrt(contactdata1.mu * TerrainFriction);
 
                                 //Vector3 v1 = p1.rootVelocity;
@@ -851,7 +863,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     {
                         p2.CollidingGround = true;
                         p2.getContactData(ref contactdata2);
-                        bounce = contactdata2.bounce * TerrainBounce;
+                        bounce = CombineContactBounce(contactdata2.bounce, TerrainBounce);
                         mu = (float)Math.Sqrt(contactdata2.mu * TerrainFriction);
 
                         //if (curContact.side1 > 0) // should be 2 ?

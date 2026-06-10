@@ -110,11 +110,13 @@ Vanilla Sim uses ubODE by default and reads the realism profile from
 
 ```ini
 world_solver_iterations = 18
-body_frames_auto_disable = 20
+body_frames_auto_disable = 90
 world_linear_damping = 0.001
 world_angular_damping = 0.002
-ubode_terrain_friction = 0.65
-ubode_terrain_bounce = 0.02
+world_contact_bounce_velocity = 0.05
+ubode_terrain_friction = 0.70
+ubode_terrain_bounce = 0.28
+material_rubber_bounce = 0.90
 boat_water_dynamics_enabled = true
 boat_wave_height_1 = 0.09
 boat_wave_drift_scale = 0.25
@@ -123,7 +125,9 @@ boat_turn_banking_enabled = true
 
 At startup ubODE writes a `Vanilla physics tuning` line to `OpenSim.log` so you
 can confirm which solver, contact and boat-water settings are active on the
-server.
+server. Rubber and plastic use a more visible bounce profile for inworld demos;
+terrain contact uses a square-root bounce blend so low terrain restitution does
+not cancel a bouncy material.
 
 RegionWeb Portal And Inventory Carousels
 ----------------------------------------
