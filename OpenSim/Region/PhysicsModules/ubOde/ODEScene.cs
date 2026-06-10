@@ -252,6 +252,9 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         internal float PhysicalPrimWaterDriftScale = 12.0f;
         internal float PhysicalPrimWaterDriftResponse = 0.8f;
         internal float PhysicalPrimWaterTiltScale = 0.35f;
+        internal float PhysicalPrimWaterRightingStrength = 3.0f;
+        internal float PhysicalPrimWaterAngularDamping = 5.0f;
+        internal float PhysicalPrimWaterMaxTorque = 25000f;
         internal float PhysicalPrimWaterMaxMass = 20000f;
 
         public float maximumAngularVelocity = 12.0f; // default 12rad/s
@@ -689,6 +692,9 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     PhysicalPrimWaterDriftScale = ConfigFloat(physicsconfig, "physical_prim_water_drift_scale", PhysicalPrimWaterDriftScale, 0f, 100f);
                     PhysicalPrimWaterDriftResponse = ConfigFloat(physicsconfig, "physical_prim_water_drift_response", PhysicalPrimWaterDriftResponse, 0f, 20f);
                     PhysicalPrimWaterTiltScale = ConfigFloat(physicsconfig, "physical_prim_water_tilt_scale", PhysicalPrimWaterTiltScale, 0f, 20f);
+                    PhysicalPrimWaterRightingStrength = ConfigFloat(physicsconfig, "physical_prim_water_righting_strength", PhysicalPrimWaterRightingStrength, 0f, 50f);
+                    PhysicalPrimWaterAngularDamping = ConfigFloat(physicsconfig, "physical_prim_water_angular_damping", PhysicalPrimWaterAngularDamping, 0f, 50f);
+                    PhysicalPrimWaterMaxTorque = ConfigFloat(physicsconfig, "physical_prim_water_max_torque", PhysicalPrimWaterMaxTorque, 1f, 1000000f);
                     PhysicalPrimWaterMaxMass = ConfigFloat(physicsconfig, "physical_prim_water_max_mass", PhysicalPrimWaterMaxMass, 1f, 100000f);
 
                     avDensity *= 3f / 80f;  // scale other engines density option to this

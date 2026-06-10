@@ -127,6 +127,8 @@ boat_wave_height_1 = 0.09
 boat_wave_drift_scale = 0.25
 physical_prim_water_dynamics_enabled = true
 physical_prim_water_drift_scale = 12.0
+physical_prim_water_righting_strength = 3.0
+physical_prim_water_angular_damping = 5.0
 water_buoyancy_wood = 2.20
 water_buoyancy_metal = 0.15
 boat_turn_banking_enabled = true
@@ -141,7 +143,10 @@ buoyancy: wood, plastic and rubber float, while metal and stone mostly sink.
 Floating prims receive wave drift and a small water-normal tilt so simple
 inworld boat hulls can move without being scripted as vehicles first. The solver
 runs at a slightly smaller step with softer contact correction so high-bounce
-objects move smoothly instead of jittering between frames.
+objects move smoothly instead of jittering between frames. Buoyant prims also
+use their current orientation and dimensions to find a stable floating face:
+cube-like shapes damp their spin, while stretched boxes right themselves so
+their broad face settles toward the water surface.
 
 RegionWeb Portal And Inventory Carousels
 ----------------------------------------

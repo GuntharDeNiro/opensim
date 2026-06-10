@@ -3621,9 +3621,101 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             if (m_parentScene.GetTerrainHeightAtXY(pos.X, pos.Y) > waterHeight - 0.1f)
                 return false;
 
-            float halfHeight = MathF.Max(m_size.Z * 0.5f, 0.1f);
+            Quaternion orientation = Body != IntPtr.Zero ? UBOdeNative.BodyGetQuaternionOMV(Body) : m_orientation;
+            float halfHeight = GetProjectedHalfExtent(orientation, Vector3.UnitZ);
             return pos.Z - halfHeight <= waterHeight + m_parentScene.PhysicalPrimWaterSurfaceRange &&
                 pos.Z + halfHeight >= waterHeight - m_parentScene.PhysicalPrimWaterSurfaceRange;
+        }
+
+        private float GetProjectedHalfExtent(Quaternion orientation, Vector3 axis)
+        {
+            axis.Normalize();
+
+            Vector3 xAxis = Vector3.UnitX * orientation;
+            Vector3 yAxis = Vector3.UnitY * orientation;
+            Vector3 zAxis = Vector3.UnitZ * orientation;
+
+            return MathF.Max(0.1f,
+                MathF.Abs(Vector3.Dot(xAxis, axis)) * m_size.X * 0.5f +
+                MathF.Abs(Vector3.Dot(yAxis, axis)) * m_size.Y * 0.5f +
+                MathF.Abs(Vector3.Dot(zAxis, axis)) * m_size.Z * 0.5f);
+        }
+
+        private bool TryGetWaterStableAxis(Quaternion orientation, Vector3 targetUp, out Vector3 stableAxis, out float shapeBias)
+        {
+            float minSize = MathF.Min(m_size.X, MathF.Min(m_size.Y, m_size.Z));
+            float maxSize = MathF.Max(m_size.X, MathF.Max(m_size.Y, m_size.Z));
+
+            stableAxis = Vector3.UnitZ * orientation;
+            shapeBias = maxSize > 0f ? (maxSize - minSize) / maxSize : 0f;
+            if (shapeBias < 0.08f)
+                return false;
+
+            Vector3 localAxis;
+            const float sizeTolerance = 0.02f;
+            bool xCandidate = m_size.X <= minSize + sizeTolerance;
+            bool yCandidate = m_size.Y <= minSize + sizeTolerance;
+            bool zCandidate = m_size.Z <= minSize + sizeTolerance;
+
+            if ((xCandidate && yCandidate) || (xCandidate && zCandidate) || (yCandidate && zCandidate))
+            {
+                Vector3 xAxis = Vector3.UnitX * orientation;
+                Vector3 yAxis = Vector3.UnitY * orientation;
+                Vector3 zAxis = Vector3.UnitZ * orientation;
+                float bestDot = -1f;
+                localAxis = Vector3.UnitZ;
+
+                if (xCandidate)
+                {
+                    bestDot = MathF.Abs(Vector3.Dot(xAxis, targetUp));
+                    localAxis = Vector3.UnitX;
+                }
+
+                if (yCandidate)
+                {
+                    float dot = MathF.Abs(Vector3.Dot(yAxis, targetUp));
+                    if (dot > bestDot)
+                    {
+                        bestDot = dot;
+                        localAxis = Vector3.UnitY;
+                    }
+                }
+
+                if (zCandidate)
+                {
+                    float dot = MathF.Abs(Vector3.Dot(zAxis, targetUp));
+                    if (dot > bestDot)
+                        localAxis = Vector3.UnitZ;
+                }
+            }
+            else if (m_size.X <= m_size.Y && m_size.X <= m_size.Z)
+            {
+                localAxis = Vector3.UnitX;
+            }
+            else if (m_size.Y <= m_size.X && m_size.Y <= m_size.Z)
+            {
+                localAxis = Vector3.UnitY;
+            }
+            else
+            {
+                localAxis = Vector3.UnitZ;
+            }
+
+            stableAxis = localAxis * orientation;
+            stableAxis.Normalize();
+            if (Vector3.Dot(stableAxis, targetUp) < 0f)
+                stableAxis = -stableAxis;
+
+            return true;
+        }
+
+        private static Vector3 ClampVectorMagnitude(Vector3 value, float maxLength)
+        {
+            float lenSq = value.LengthSquared();
+            if (lenSq <= maxLength * maxLength || lenSq <= 0f)
+                return value;
+
+            return value * (maxLength / MathF.Sqrt(lenSq));
         }
 
         private void ApplyPhysicalPrimWaterDynamics(Vector3 pos, ref float fx, ref float fy, ref float fz)
@@ -3639,8 +3731,13 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             if (m_parentScene.GetTerrainHeightAtXY(pos.X, pos.Y) > waterHeight - 0.1f)
                 return;
 
-            float objectHeight = MathF.Max(m_size.Z, 0.1f);
-            float halfHeight = objectHeight * 0.5f;
+            Quaternion orientation = Body != IntPtr.Zero ? UBOdeNative.BodyGetQuaternionOMV(Body) : m_orientation;
+            Vector3 waterNormal = m_parentScene.GetDynamicWaterNormal(pos.X, pos.Y);
+            Vector3 targetUp = Vector3.UnitZ + (waterNormal - Vector3.UnitZ) * m_parentScene.PhysicalPrimWaterTiltScale;
+            targetUp.Normalize();
+
+            float halfHeight = GetProjectedHalfExtent(orientation, Vector3.UnitZ);
+            float objectHeight = halfHeight * 2f;
             float bottom = pos.Z - halfHeight;
             float top = pos.Z + halfHeight;
 
@@ -3662,10 +3759,23 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             fx += (flow.X - vel.X) * driftResponse;
             fy += (flow.Y - vel.Y) * driftResponse;
 
-            Vector3 normal = m_parentScene.GetDynamicWaterNormal(pos.X, pos.Y);
-            Vector3 tilt = Vector3.Cross(Vector3.UnitZ, normal);
-            float torqueScale = MathF.Min(m_mass, 2000f) * m_parentScene.PhysicalPrimWaterTiltScale * submerged;
-            m_angularForceacc += new Vector3(tilt.X, tilt.Y, 0f) * torqueScale;
+            Vector3 angularVel = UBOdeNative.BodyGetAngularVelOMV(Body);
+            float massScale = MathF.Min(m_mass, 2000f);
+            Vector3 waterTorque = -angularVel * massScale * m_parentScene.PhysicalPrimWaterAngularDamping * submerged;
+
+            if (TryGetWaterStableAxis(orientation, targetUp, out Vector3 stableAxis, out float shapeBias))
+            {
+                Vector3 rightingAxis = Vector3.Cross(stableAxis, targetUp);
+                float error = rightingAxis.Length();
+                if (error > 0.001f)
+                {
+                    rightingAxis.Normalize();
+                    waterTorque += rightingAxis * error * shapeBias * massScale *
+                        m_parentScene.PhysicalPrimWaterRightingStrength * submerged;
+                }
+            }
+
+            m_angularForceacc += ClampVectorMagnitude(waterTorque, m_parentScene.PhysicalPrimWaterMaxTorque);
 
             if (!UBOdeNative.BodyIsEnabled(Body))
                 UBOdeNative.BodyEnable(Body);
