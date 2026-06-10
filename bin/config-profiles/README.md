@@ -110,16 +110,20 @@ Vanilla Sim uses ubODE by default and reads the realism profile from
 
 ```ini
 world_solver_iterations = 18
-body_frames_auto_disable = 90
-world_linear_damping = 0.001
-world_angular_damping = 0.002
-world_contact_bounce_velocity = 0.05
-ubode_terrain_friction = 0.70
-ubode_terrain_bounce = 0.28
-material_rubber_bounce = 0.90
+body_frames_auto_disable = 180
+world_linear_damping = 0.0002
+world_angular_damping = 0.0005
+world_contact_bounce_velocity = 0.0
+ubode_terrain_friction = 0.62
+ubode_terrain_bounce = 0.80
+material_rubber_bounce = 0.98
 boat_water_dynamics_enabled = true
 boat_wave_height_1 = 0.09
 boat_wave_drift_scale = 0.25
+physical_prim_water_dynamics_enabled = true
+physical_prim_water_drift_scale = 12.0
+water_buoyancy_wood = 2.20
+water_buoyancy_metal = 0.15
 boat_turn_banking_enabled = true
 ```
 
@@ -127,7 +131,10 @@ At startup ubODE writes a `Vanilla physics tuning` line to `OpenSim.log` so you
 can confirm which solver, contact and boat-water settings are active on the
 server. Rubber and plastic use a more visible bounce profile for inworld demos;
 terrain contact uses a square-root bounce blend so low terrain restitution does
-not cancel a bouncy material.
+not cancel a bouncy material. Physical prims now also get material-based water
+buoyancy: wood, plastic and rubber float, while metal and stone mostly sink.
+Floating prims receive wave drift and a small water-normal tilt so simple
+inworld boat hulls can move without being scripted as vehicles first.
 
 RegionWeb Portal And Inventory Carousels
 ----------------------------------------

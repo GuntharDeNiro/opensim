@@ -188,12 +188,12 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         private float commonContactERP = 0.75f;
         private float commonContactCFM = 0.0001f;
         private float commonContactSLIP = 0f;
-        private float commonContactBounceVelocity = 0.05f;
+        private float commonContactBounceVelocity = 0f;
 
-        private float TerrainBounce = 0.28f;
-        private float TerrainFriction = 0.70f;
-        private float worldLinearDamping = 0.001f;
-        private float worldAngularDamping = 0.002f;
+        private float TerrainBounce = 0.80f;
+        private float TerrainFriction = 0.62f;
+        private float worldLinearDamping = 0.0002f;
+        private float worldAngularDamping = 0.0005f;
         private float contactMaxCorrectingVelocity = 60.0f;
 
         public float AvatarFriction = 0;// 0.9f * 0.5f;
@@ -246,6 +246,13 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         internal float BoatWaveNormalFollowTimescale = 18f;
         internal float BoatWaveDriftScale = 0.25f;
         internal float BoatWaterTiltStrength = 1.0f;
+        internal bool PhysicalPrimWaterDynamicsEnabled = true;
+        internal float PhysicalPrimWaterSurfaceRange = 2.0f;
+        internal float PhysicalPrimWaterVerticalDamping = 2.4f;
+        internal float PhysicalPrimWaterDriftScale = 12.0f;
+        internal float PhysicalPrimWaterDriftResponse = 0.8f;
+        internal float PhysicalPrimWaterTiltScale = 0.35f;
+        internal float PhysicalPrimWaterMaxMass = 20000f;
 
         public float maximumAngularVelocity = 12.0f; // default 12rad/s
         public float maxAngVelocitySQ = 144f;   // squared value
@@ -253,7 +260,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         public float bodyPIDD = 35f;
         public float bodyPIDG = 25;
 
-        public int bodyFramesAutoDisable = 90;
+        public int bodyFramesAutoDisable = 180;
 
         private UBOdeNative.NearCallback NearCallback;
 
@@ -291,6 +298,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         private IntPtr JointContactGroup;
 
         public readonly ContactData[] m_materialContactsData = new ContactData[8];
+        public readonly float[] m_materialWaterBuoyancy = new float[8];
 
         public IntPtr TerrainGeom;
         private float[] m_terrainHeights;
@@ -408,10 +416,87 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             return MathF.Sqrt(bounce1 * bounce2);
         }
 
+        internal float GetDynamicWaterHeight(float x, float y)
+        {
+            if (!BoatWaterDynamicsEnabled)
+                return WaterLevel;
+
+            float time = SimulatedTime;
+            float dir1 = (x * 0.928477f) + (y * -0.371391f);
+            float dir2 = (x * 0.691905f) + (y * 0.721989f);
+            float waveNumber1 = 2f * MathF.PI / BoatWaveLength1;
+            float waveNumber2 = 2f * MathF.PI / BoatWaveLength2;
+
+            return WaterLevel
+                + BoatWaveHeight1 * MathF.Sin((dir1 * waveNumber1) + time * BoatWaveSpeed1)
+                + BoatWaveHeight2 * MathF.Sin((dir2 * waveNumber2) + time * BoatWaveSpeed2);
+        }
+
+        internal Vector3 GetDynamicWaterNormal(float x, float y)
+        {
+            if (!BoatWaterDynamicsEnabled)
+                return Vector3.UnitZ;
+
+            float time = SimulatedTime;
+            const float dir1x = 0.928477f;
+            const float dir1y = -0.371391f;
+            const float dir2x = 0.691905f;
+            const float dir2y = 0.721989f;
+            float waveNumber1 = 2f * MathF.PI / BoatWaveLength1;
+            float waveNumber2 = 2f * MathF.PI / BoatWaveLength2;
+            float phase1 = ((x * dir1x + y * dir1y) * waveNumber1) + time * BoatWaveSpeed1;
+            float phase2 = ((x * dir2x + y * dir2y) * waveNumber2) + time * BoatWaveSpeed2;
+            float slope1 = BoatWaveHeight1 * waveNumber1 * MathF.Cos(phase1) * BoatWaveNormalScale;
+            float slope2 = BoatWaveHeight2 * waveNumber2 * MathF.Cos(phase2) * BoatWaveNormalScale;
+
+            Vector3 normal = new(
+                -(slope1 * dir1x + slope2 * dir2x),
+                -(slope1 * dir1y + slope2 * dir2y),
+                1f);
+            normal.Normalize();
+            return normal;
+        }
+
+        internal Vector3 GetDynamicWaterFlow(float x, float y)
+        {
+            if (!BoatWaterDynamicsEnabled)
+                return Vector3.Zero;
+
+            float time = SimulatedTime;
+            const float dir1x = 0.928477f;
+            const float dir1y = -0.371391f;
+            const float dir2x = 0.691905f;
+            const float dir2y = 0.721989f;
+            float waveNumber1 = 2f * MathF.PI / BoatWaveLength1;
+            float waveNumber2 = 2f * MathF.PI / BoatWaveLength2;
+            float phase1 = ((x * dir1x + y * dir1y) * waveNumber1) + time * BoatWaveSpeed1;
+            float phase2 = ((x * dir2x + y * dir2y) * waveNumber2) + time * BoatWaveSpeed2;
+            float flow1 = BoatWaveHeight1 * BoatWaveSpeed1 * (0.5f + 0.5f * MathF.Sin(phase1));
+            float flow2 = BoatWaveHeight2 * BoatWaveSpeed2 * (0.5f + 0.5f * MathF.Sin(phase2));
+
+            return new Vector3(
+                -(dir1x * flow1 + dir2x * flow2) * BoatWaveDriftScale,
+                -(dir1y * flow1 + dir2y * flow2) * BoatWaveDriftScale,
+                0f);
+        }
+
         private void SetMaterialContact(Material material, float friction, float bounce)
         {
             m_materialContactsData[(int)material].mu = friction;
             m_materialContactsData[(int)material].bounce = bounce;
+        }
+
+        private void SetMaterialWaterBuoyancy(Material material, float buoyancy)
+        {
+            m_materialWaterBuoyancy[(int)material] = buoyancy;
+        }
+
+        internal float GetMaterialWaterBuoyancy(int material)
+        {
+            if (material < 0 || material >= m_materialWaterBuoyancy.Length)
+                return 0f;
+
+            return m_materialWaterBuoyancy[material];
         }
 
         private void LoadMaterialContactSettings(IConfig config)
@@ -435,11 +520,31 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 ConfigFloat(config, "material_plastic_friction", 0.35f, 0f, 2f),
                 ConfigFloat(config, "material_plastic_bounce", 0.35f, 0f, 1f));
             SetMaterialContact(Material.Rubber,
-                ConfigFloat(config, "material_rubber_friction", 0.85f, 0f, 2f),
-                ConfigFloat(config, "material_rubber_bounce", 0.90f, 0f, 1f));
+                ConfigFloat(config, "material_rubber_friction", 0.70f, 0f, 2f),
+                ConfigFloat(config, "material_rubber_bounce", 0.98f, 0f, 1f));
             SetMaterialContact(Material.light,
                 ConfigFloat(config, "material_light_friction", 0.0f, 0f, 2f),
                 ConfigFloat(config, "material_light_bounce", 0.0f, 0f, 1f));
+        }
+
+        private void LoadMaterialWaterSettings(IConfig config)
+        {
+            SetMaterialWaterBuoyancy(Material.Stone,
+                ConfigFloat(config, "water_buoyancy_stone", 0.35f, 0f, 5f));
+            SetMaterialWaterBuoyancy(Material.Metal,
+                ConfigFloat(config, "water_buoyancy_metal", 0.15f, 0f, 5f));
+            SetMaterialWaterBuoyancy(Material.Glass,
+                ConfigFloat(config, "water_buoyancy_glass", 0.80f, 0f, 5f));
+            SetMaterialWaterBuoyancy(Material.Wood,
+                ConfigFloat(config, "water_buoyancy_wood", 2.20f, 0f, 5f));
+            SetMaterialWaterBuoyancy(Material.Flesh,
+                ConfigFloat(config, "water_buoyancy_flesh", 1.05f, 0f, 5f));
+            SetMaterialWaterBuoyancy(Material.Plastic,
+                ConfigFloat(config, "water_buoyancy_plastic", 2.60f, 0f, 5f));
+            SetMaterialWaterBuoyancy(Material.Rubber,
+                ConfigFloat(config, "water_buoyancy_rubber", 3.00f, 0f, 5f));
+            SetMaterialWaterBuoyancy(Material.light,
+                ConfigFloat(config, "water_buoyancy_light", 4.00f, 0f, 5f));
         }
 
         /// <summary>
@@ -578,6 +683,13 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     BoatWaveNormalFollowTimescale = ConfigFloat(physicsconfig, "boat_wave_normal_follow_timescale", BoatWaveNormalFollowTimescale, ODE_STEPSIZE, 120f);
                     BoatWaveDriftScale = ConfigFloat(physicsconfig, "boat_wave_drift_scale", BoatWaveDriftScale, 0f, 10f);
                     BoatWaterTiltStrength = ConfigFloat(physicsconfig, "boat_water_tilt_strength", BoatWaterTiltStrength, 0f, 10f);
+                    PhysicalPrimWaterDynamicsEnabled = physicsconfig.GetBoolean("physical_prim_water_dynamics_enabled", PhysicalPrimWaterDynamicsEnabled);
+                    PhysicalPrimWaterSurfaceRange = ConfigFloat(physicsconfig, "physical_prim_water_surface_range", PhysicalPrimWaterSurfaceRange, 0.05f, 10f);
+                    PhysicalPrimWaterVerticalDamping = ConfigFloat(physicsconfig, "physical_prim_water_vertical_damping", PhysicalPrimWaterVerticalDamping, 0f, 20f);
+                    PhysicalPrimWaterDriftScale = ConfigFloat(physicsconfig, "physical_prim_water_drift_scale", PhysicalPrimWaterDriftScale, 0f, 100f);
+                    PhysicalPrimWaterDriftResponse = ConfigFloat(physicsconfig, "physical_prim_water_drift_response", PhysicalPrimWaterDriftResponse, 0f, 20f);
+                    PhysicalPrimWaterTiltScale = ConfigFloat(physicsconfig, "physical_prim_water_tilt_scale", PhysicalPrimWaterTiltScale, 0f, 20f);
+                    PhysicalPrimWaterMaxMass = ConfigFloat(physicsconfig, "physical_prim_water_max_mass", PhysicalPrimWaterMaxMass, 1f, 100000f);
 
                     avDensity *= 3f / 80f;  // scale other engines density option to this
                 }
@@ -628,12 +740,14 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             contactSharedForJoints.surface.slip2 = commonContactSLIP;
 
             LoadMaterialContactSettings(physicsconfig);
+            LoadMaterialWaterSettings(physicsconfig);
 
             m_log.InfoFormat(
-                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} bounceVel={7:0.###} terrain=({8:0.###} friction,{9:0.###} bounce) boatWater={10}",
+                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} bounceVel={7:0.###} terrain=({8:0.###} friction,{9:0.###} bounce) boatWater={10} primWater={11}",
                 ODE_STEPSIZE, m_physicsiterations, bodyFramesAutoDisable, worldLinearDamping, worldAngularDamping,
                 commonContactERP, commonContactCFM, commonContactBounceVelocity, TerrainFriction, TerrainBounce,
-                BoatWaterDynamicsEnabled ? "enabled" : "disabled");
+                BoatWaterDynamicsEnabled ? "enabled" : "disabled",
+                PhysicalPrimWaterDynamicsEnabled ? "enabled" : "disabled");
 
             m_lastframe = Util.GetTimeStamp();
             m_lastMeshExpire = m_lastframe;

@@ -3612,6 +3612,66 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
         #endregion
 
+        private bool IsNearDynamicWater(Vector3 pos)
+        {
+            if (!m_parentScene.PhysicalPrimWaterDynamicsEnabled || m_prim_geom == IntPtr.Zero)
+                return false;
+
+            float waterHeight = m_parentScene.GetDynamicWaterHeight(pos.X, pos.Y);
+            if (m_parentScene.GetTerrainHeightAtXY(pos.X, pos.Y) > waterHeight - 0.1f)
+                return false;
+
+            float halfHeight = MathF.Max(m_size.Z * 0.5f, 0.1f);
+            return pos.Z - halfHeight <= waterHeight + m_parentScene.PhysicalPrimWaterSurfaceRange &&
+                pos.Z + halfHeight >= waterHeight - m_parentScene.PhysicalPrimWaterSurfaceRange;
+        }
+
+        private void ApplyPhysicalPrimWaterDynamics(Vector3 pos, ref float fx, ref float fy, ref float fz)
+        {
+            if (!m_parentScene.PhysicalPrimWaterDynamicsEnabled || m_mass > m_parentScene.PhysicalPrimWaterMaxMass)
+                return;
+
+            float buoyancy = m_parentScene.GetMaterialWaterBuoyancy(m_material);
+            if (buoyancy <= 0f)
+                return;
+
+            float waterHeight = m_parentScene.GetDynamicWaterHeight(pos.X, pos.Y);
+            if (m_parentScene.GetTerrainHeightAtXY(pos.X, pos.Y) > waterHeight - 0.1f)
+                return;
+
+            float objectHeight = MathF.Max(m_size.Z, 0.1f);
+            float halfHeight = objectHeight * 0.5f;
+            float bottom = pos.Z - halfHeight;
+            float top = pos.Z + halfHeight;
+
+            if (bottom > waterHeight + m_parentScene.PhysicalPrimWaterSurfaceRange ||
+                top < waterHeight - m_parentScene.PhysicalPrimWaterSurfaceRange)
+                return;
+
+            float submerged = Math.Clamp((waterHeight - bottom) / objectHeight, 0f, 1f);
+            if (submerged <= 0f)
+                return;
+
+            UBOdeNative.Vector3 vel = UBOdeNative.BodyGetLinearVel(Body);
+            float verticalDamping = m_parentScene.PhysicalPrimWaterVerticalDamping * submerged;
+            fz += -m_parentScene.gravityz * buoyancy * submerged;
+            fz -= vel.Z * verticalDamping;
+
+            Vector3 flow = m_parentScene.GetDynamicWaterFlow(pos.X, pos.Y) * m_parentScene.PhysicalPrimWaterDriftScale;
+            float driftResponse = m_parentScene.PhysicalPrimWaterDriftResponse * submerged;
+            fx += (flow.X - vel.X) * driftResponse;
+            fy += (flow.Y - vel.Y) * driftResponse;
+
+            Vector3 normal = m_parentScene.GetDynamicWaterNormal(pos.X, pos.Y);
+            Vector3 tilt = Vector3.Cross(Vector3.UnitZ, normal);
+            float torqueScale = MathF.Min(m_mass, 2000f) * m_parentScene.PhysicalPrimWaterTiltScale * submerged;
+            m_angularForceacc += new Vector3(tilt.X, tilt.Y, 0f) * torqueScale;
+
+            if (!UBOdeNative.BodyIsEnabled(Body))
+                UBOdeNative.BodyEnable(Body);
+            m_bodydisablecontrol = 0;
+        }
+
         public void Move()
         {
             if (!childPrim && m_isphysical && Body != IntPtr.Zero &&
@@ -3623,16 +3683,26 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     if (m_vehicle != null && m_vehicle.Type != Vehicle.TYPE_NONE)
                         return;
 
-                    if (++m_bodydisablecontrol < 50)
-                        return;
+                    Vector3 disabledPos = UBOdeNative.GeomGetPositionOMV(m_prim_geom);
+                    if (IsNearDynamicWater(disabledPos))
+                    {
+                        UBOdeNative.BodySetAutoDisableSteps(Body, m_body_autodisable_frames);
+                        UBOdeNative.BodyEnable(Body);
+                        m_bodydisablecontrol = 0;
+                    }
+                    else
+                    {
+                        if (++m_bodydisablecontrol < 50)
+                            return;
 
-                    // clear residuals
-                    UBOdeNative.BodySetAngularVel(Body,0f,0f,0f);
-                    UBOdeNative.BodySetLinearVel(Body,0f,0f,0f);
-                    _zeroFlag = true;
-                    UBOdeNative.BodySetAutoDisableSteps(Body, 1);
-                    UBOdeNative.BodyEnable(Body);
-                    m_bodydisablecontrol = -3;
+                        // clear residuals
+                        UBOdeNative.BodySetAngularVel(Body,0f,0f,0f);
+                        UBOdeNative.BodySetLinearVel(Body,0f,0f,0f);
+                        _zeroFlag = true;
+                        UBOdeNative.BodySetAutoDisableSteps(Body, 1);
+                        UBOdeNative.BodyEnable(Body);
+                        m_bodydisablecontrol = -3;
+                    }
                 }
 
                 if(m_bodydisablecontrol < 0)
@@ -3757,6 +3827,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     fy = m_parentScene.gravityy * b;
                     fz = m_parentScene.gravityz * b;
                 }
+
+                ApplyPhysicalPrimWaterDynamics(lpos, ref fx, ref fy, ref fz);
 
                 //aceleration to force +  constant force + acc
                 fx = m_mass * fx + m_force.X + m_forceacc.X;

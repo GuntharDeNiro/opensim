@@ -759,15 +759,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             if (!UsesDynamicBoatWater())
                 return _pParentScene.WaterLevel;
 
-            float time = _pParentScene.SimulatedTime;
-            float dir1 = (x * 0.928477f) + (y * -0.371391f);
-            float dir2 = (x * 0.691905f) + (y * 0.721989f);
-            float waveNumber1 = 2f * MathF.PI / _pParentScene.BoatWaveLength1;
-            float waveNumber2 = 2f * MathF.PI / _pParentScene.BoatWaveLength2;
-
-            return _pParentScene.WaterLevel
-                + _pParentScene.BoatWaveHeight1 * MathF.Sin((dir1 * waveNumber1) + time * _pParentScene.BoatWaveSpeed1)
-                + _pParentScene.BoatWaveHeight2 * MathF.Sin((dir2 * waveNumber2) + time * _pParentScene.BoatWaveSpeed2);
+            return _pParentScene.GetDynamicWaterHeight(x, y);
         }
 
         private Vector3 GetDynamicBoatWaterNormal(float x, float y)
@@ -775,24 +767,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             if (!UsesDynamicBoatWater())
                 return Vector3.UnitZ;
 
-            float time = _pParentScene.SimulatedTime;
-            const float dir1x = 0.928477f;
-            const float dir1y = -0.371391f;
-            const float dir2x = 0.691905f;
-            const float dir2y = 0.721989f;
-            float waveNumber1 = 2f * MathF.PI / _pParentScene.BoatWaveLength1;
-            float waveNumber2 = 2f * MathF.PI / _pParentScene.BoatWaveLength2;
-            float phase1 = ((x * dir1x + y * dir1y) * waveNumber1) + time * _pParentScene.BoatWaveSpeed1;
-            float phase2 = ((x * dir2x + y * dir2y) * waveNumber2) + time * _pParentScene.BoatWaveSpeed2;
-            float slope1 = _pParentScene.BoatWaveHeight1 * waveNumber1 * MathF.Cos(phase1) * _pParentScene.BoatWaveNormalScale;
-            float slope2 = _pParentScene.BoatWaveHeight2 * waveNumber2 * MathF.Cos(phase2) * _pParentScene.BoatWaveNormalScale;
-
-            Vector3 normal = new(
-                -(slope1 * dir1x + slope2 * dir2x),
-                -(slope1 * dir1y + slope2 * dir2y),
-                1f);
-            normal.Normalize();
-
+            Vector3 normal = _pParentScene.GetDynamicWaterNormal(x, y);
             float alpha = Math.Clamp(m_timestep / _pParentScene.BoatWaveNormalFollowTimescale, 0.001f, 0.015f);
             m_smoothedBoatWaterNormal += (normal - m_smoothedBoatWaterNormal) * alpha;
             m_smoothedBoatWaterNormal.Normalize();
@@ -804,22 +779,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             if (!UsesDynamicBoatWater())
                 return Vector3.Zero;
 
-            float time = _pParentScene.SimulatedTime;
-            const float dir1x = 0.928477f;
-            const float dir1y = -0.371391f;
-            const float dir2x = 0.691905f;
-            const float dir2y = 0.721989f;
-            float waveNumber1 = 2f * MathF.PI / _pParentScene.BoatWaveLength1;
-            float waveNumber2 = 2f * MathF.PI / _pParentScene.BoatWaveLength2;
-            float phase1 = ((x * dir1x + y * dir1y) * waveNumber1) + time * _pParentScene.BoatWaveSpeed1;
-            float phase2 = ((x * dir2x + y * dir2y) * waveNumber2) + time * _pParentScene.BoatWaveSpeed2;
-            float flow1 = _pParentScene.BoatWaveHeight1 * _pParentScene.BoatWaveSpeed1 * (0.5f + 0.5f * MathF.Sin(phase1));
-            float flow2 = _pParentScene.BoatWaveHeight2 * _pParentScene.BoatWaveSpeed2 * (0.5f + 0.5f * MathF.Sin(phase2));
-
-            return new Vector3(
-                -(dir1x * flow1 + dir2x * flow2) * _pParentScene.BoatWaveDriftScale,
-                -(dir1y * flow1 + dir2y * flow2) * _pParentScene.BoatWaveDriftScale,
-                0f);
+            return _pParentScene.GetDynamicWaterFlow(x, y);
         }
 
         private float GetBoatTurnBankTargetRoll()
