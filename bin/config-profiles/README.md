@@ -91,7 +91,7 @@ What The Standalone Profile Enables
 - `config-include/StandaloneHypergrid.ini`
 - `GatekeeperURI` and `HomeURI` for Hypergrid travel
 - YEngine
-- ubODE physics with Vanilla Sim realism tuning for solver precision, terrain contact and material friction/bounce
+- ubODE physics with Vanilla Sim realism tuning for solver precision, terrain contact, material friction/bounce and procedural boat water dynamics
 - Warp3D map rendering with depth-shaded water
 - Weather module with automatic forecast cycling and visitor IMs
 - Built-in Groups Module V2 with local SQLite storage
@@ -101,6 +101,29 @@ What The Standalone Profile Enables
 - RegionWeb wallet in request mode by default
 - PayPal settings present but disabled until real credentials are configured
 - TextBuild enabled on channel `/88` for estate managers
+
+Physics Realism Tuning
+----------------------
+
+Vanilla Sim uses ubODE by default and reads the realism profile from
+`[ODEPhysicsSettings]` in `OpenSimDefaults.ini`. The important knobs are:
+
+```ini
+world_solver_iterations = 18
+body_frames_auto_disable = 20
+world_linear_damping = 0.001
+world_angular_damping = 0.002
+ubode_terrain_friction = 0.65
+ubode_terrain_bounce = 0.02
+boat_water_dynamics_enabled = true
+boat_wave_height_1 = 0.09
+boat_wave_drift_scale = 0.25
+boat_turn_banking_enabled = true
+```
+
+At startup ubODE writes a `Vanilla physics tuning` line to `OpenSim.log` so you
+can confirm which solver, contact and boat-water settings are active on the
+server.
 
 RegionWeb Portal And Inventory Carousels
 ----------------------------------------

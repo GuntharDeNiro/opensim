@@ -234,6 +234,17 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         internal float BoatTurnBankingTimescale = 0.35f;
         internal bool BoatTurnBankingInvert = false;
         internal float BoatTurnBankingMaxYaw = 1.0f;
+        internal bool BoatWaterDynamicsEnabled = true;
+        internal float BoatWaveHeight1 = 0.09f;
+        internal float BoatWaveHeight2 = 0.04f;
+        internal float BoatWaveLength1 = 18f;
+        internal float BoatWaveLength2 = 12f;
+        internal float BoatWaveSpeed1 = 0.85f;
+        internal float BoatWaveSpeed2 = 0.55f;
+        internal float BoatWaveNormalScale = 3.0f;
+        internal float BoatWaveNormalFollowTimescale = 18f;
+        internal float BoatWaveDriftScale = 0.25f;
+        internal float BoatWaterTiltStrength = 1.0f;
 
         public float maximumAngularVelocity = 12.0f; // default 12rad/s
         public float maxAngVelocitySQ = 144f;   // squared value
@@ -533,16 +544,28 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     contactsPerCollision = physicsconfig.GetInt("contacts_per_collision", contactsPerCollision);
 
                     geomDefaultDensity = physicsconfig.GetFloat("geometry_default_density", geomDefaultDensity);
-//                    bodyFramesAutoDisable = physicsconfig.GetInt("body_frames_auto_disable", bodyFramesAutoDisable);
+                    bodyFramesAutoDisable = ConfigInt(physicsconfig, "body_frames_auto_disable", bodyFramesAutoDisable, 1, 600);
 
                     minimumGroundFlightOffset = physicsconfig.GetFloat("minimum_ground_flight_offset", minimumGroundFlightOffset);
                     maximumMassObject = physicsconfig.GetFloat("maximum_mass_object", maximumMassObject);
 
                     BoatTurnBankingEnabled = physicsconfig.GetBoolean("boat_turn_banking_enabled", BoatTurnBankingEnabled);
-                    BoatTurnBankingDegrees = physicsconfig.GetFloat("boat_turn_banking_degrees", BoatTurnBankingDegrees);
-                    BoatTurnBankingTimescale = physicsconfig.GetFloat("boat_turn_banking_timescale", BoatTurnBankingTimescale);
+                    BoatTurnBankingDegrees = ConfigFloat(physicsconfig, "boat_turn_banking_degrees", BoatTurnBankingDegrees, 0f, 45f);
+                    BoatTurnBankingTimescale = ConfigFloat(physicsconfig, "boat_turn_banking_timescale", BoatTurnBankingTimescale, ODE_STEPSIZE, 10f);
                     BoatTurnBankingInvert = physicsconfig.GetBoolean("boat_turn_banking_invert", BoatTurnBankingInvert);
-                    BoatTurnBankingMaxYaw = physicsconfig.GetFloat("boat_turn_banking_max_yaw", BoatTurnBankingMaxYaw);
+                    BoatTurnBankingMaxYaw = ConfigFloat(physicsconfig, "boat_turn_banking_max_yaw", BoatTurnBankingMaxYaw, 0.001f, 12.566f);
+
+                    BoatWaterDynamicsEnabled = physicsconfig.GetBoolean("boat_water_dynamics_enabled", BoatWaterDynamicsEnabled);
+                    BoatWaveHeight1 = ConfigFloat(physicsconfig, "boat_wave_height_1", BoatWaveHeight1, 0f, 2f);
+                    BoatWaveHeight2 = ConfigFloat(physicsconfig, "boat_wave_height_2", BoatWaveHeight2, 0f, 2f);
+                    BoatWaveLength1 = ConfigFloat(physicsconfig, "boat_wave_length_1", BoatWaveLength1, 2f, 256f);
+                    BoatWaveLength2 = ConfigFloat(physicsconfig, "boat_wave_length_2", BoatWaveLength2, 2f, 256f);
+                    BoatWaveSpeed1 = ConfigFloat(physicsconfig, "boat_wave_speed_1", BoatWaveSpeed1, 0f, 10f);
+                    BoatWaveSpeed2 = ConfigFloat(physicsconfig, "boat_wave_speed_2", BoatWaveSpeed2, 0f, 10f);
+                    BoatWaveNormalScale = ConfigFloat(physicsconfig, "boat_wave_normal_scale", BoatWaveNormalScale, 0f, 20f);
+                    BoatWaveNormalFollowTimescale = ConfigFloat(physicsconfig, "boat_wave_normal_follow_timescale", BoatWaveNormalFollowTimescale, ODE_STEPSIZE, 120f);
+                    BoatWaveDriftScale = ConfigFloat(physicsconfig, "boat_wave_drift_scale", BoatWaveDriftScale, 0f, 10f);
+                    BoatWaterTiltStrength = ConfigFloat(physicsconfig, "boat_water_tilt_strength", BoatWaterTiltStrength, 0f, 10f);
 
                     avDensity *= 3f / 80f;  // scale other engines density option to this
                 }
@@ -553,7 +576,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             maxAngVelocitySQ = maximumAngularVelocity * maximumAngularVelocity;
 
             UBOdeNative.WorldSetCFM(world, commonContactCFM);
-            UBOdeNative.WorldSetERP(world, commomContactERP);
+            UBOdeNative.WorldSetERP(world, commonContactERP);
 
             UBOdeNative.WorldSetGravity(world, gravityx, gravityy, gravityz);
 
@@ -588,11 +611,17 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             contactSharedForJoints.surface.bounce = 0;
             contactSharedForJoints.surface.bounce_vel = 1.5f;
             contactSharedForJoints.surface.soft_cfm = commonContactCFM;
-            contactSharedForJoints.surface.soft_erp = commomContactERP;
-            contactSharedForJoints.surface.slip1 = commomContactSLIP;
-            contactSharedForJoints.surface.slip2 = commomContactSLIP;
+            contactSharedForJoints.surface.soft_erp = commonContactERP;
+            contactSharedForJoints.surface.slip1 = commonContactSLIP;
+            contactSharedForJoints.surface.slip2 = commonContactSLIP;
 
             LoadMaterialContactSettings(physicsconfig);
+
+            m_log.InfoFormat(
+                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} terrain=({7:0.###} friction,{8:0.###} bounce) boatWater={9}",
+                ODE_STEPSIZE, m_physicsiterations, bodyFramesAutoDisable, worldLinearDamping, worldAngularDamping,
+                commonContactERP, commonContactCFM, TerrainFriction, TerrainBounce,
+                BoatWaterDynamicsEnabled ? "enabled" : "disabled");
 
             m_lastframe = Util.GetTimeStamp();
             m_lastMeshExpire = m_lastframe;
