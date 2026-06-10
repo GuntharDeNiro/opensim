@@ -152,6 +152,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         VehicleFlags,
         SetVehicle,
         SetInertia,
+        Material,
+        MassProperties,
 
         Null             //keep this last used do dim the methods array. does nothing but pulsing the prim
     }
@@ -268,6 +270,10 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         internal float PhysicalPrimRestingAngularDamping = 2.0f;
         internal float PhysicalPrimRestingSpeed = 0.08f;
         internal float PhysicalPrimRestingAngularSpeed = 0.12f;
+        internal bool PhysicalPrimMaterialDensityEnabled = true;
+        internal bool PhysicalPrimShapeInertiaEnabled = true;
+        internal float PhysicalPrimBaseInertiaScale = 1.08f;
+        internal float PhysicalPrimThinShapeInertiaBoost = 0.45f;
 
         public float maximumAngularVelocity = 12.0f; // default 12rad/s
         public float maxAngVelocitySQ = 144f;   // squared value
@@ -314,6 +320,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
         public readonly ContactData[] m_materialContactsData = new ContactData[8];
         public readonly float[] m_materialWaterBuoyancy = new float[8];
+        public readonly float[] m_materialDensity = new float[8];
 
         public IntPtr TerrainGeom;
         private float[] m_terrainHeights;
@@ -506,12 +513,26 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             m_materialWaterBuoyancy[(int)material] = buoyancy;
         }
 
+        private void SetMaterialDensity(Material material, float density)
+        {
+            m_materialDensity[(int)material] = density;
+        }
+
         internal float GetMaterialWaterBuoyancy(int material)
         {
             if (material < 0 || material >= m_materialWaterBuoyancy.Length)
                 return 0f;
 
             return m_materialWaterBuoyancy[material];
+        }
+
+        internal float GetMaterialDensity(int material)
+        {
+            if (material < 0 || material >= m_materialDensity.Length)
+                return geomDefaultDensity;
+
+            float density = m_materialDensity[material];
+            return density > 0f ? density : geomDefaultDensity;
         }
 
         private void LoadMaterialContactSettings(IConfig config)
@@ -560,6 +581,26 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 ConfigFloat(config, "water_buoyancy_rubber", 1.90f, 0f, 5f));
             SetMaterialWaterBuoyancy(Material.light,
                 ConfigFloat(config, "water_buoyancy_light", 2.60f, 0f, 5f));
+        }
+
+        private void LoadMaterialDensitySettings(IConfig config)
+        {
+            SetMaterialDensity(Material.Stone,
+                ConfigFloat(config, "material_stone_density", 18.0f, 0.01f, 225.87f));
+            SetMaterialDensity(Material.Metal,
+                ConfigFloat(config, "material_metal_density", 24.0f, 0.01f, 225.87f));
+            SetMaterialDensity(Material.Glass,
+                ConfigFloat(config, "material_glass_density", 9.0f, 0.01f, 225.87f));
+            SetMaterialDensity(Material.Wood,
+                ConfigFloat(config, "material_wood_density", 6.0f, 0.01f, 225.87f));
+            SetMaterialDensity(Material.Flesh,
+                ConfigFloat(config, "material_flesh_density", 7.0f, 0.01f, 225.87f));
+            SetMaterialDensity(Material.Plastic,
+                ConfigFloat(config, "material_plastic_density", 4.5f, 0.01f, 225.87f));
+            SetMaterialDensity(Material.Rubber,
+                ConfigFloat(config, "material_rubber_density", 3.5f, 0.01f, 225.87f));
+            SetMaterialDensity(Material.light,
+                ConfigFloat(config, "material_light_density", 1.0f, 0.01f, 225.87f));
         }
 
         /// <summary>
@@ -720,6 +761,10 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     PhysicalPrimRestingAngularDamping = ConfigFloat(physicsconfig, "physical_prim_resting_angular_damping", PhysicalPrimRestingAngularDamping, 0f, 20f);
                     PhysicalPrimRestingSpeed = ConfigFloat(physicsconfig, "physical_prim_resting_speed", PhysicalPrimRestingSpeed, 0f, 5f);
                     PhysicalPrimRestingAngularSpeed = ConfigFloat(physicsconfig, "physical_prim_resting_angular_speed", PhysicalPrimRestingAngularSpeed, 0f, 5f);
+                    PhysicalPrimMaterialDensityEnabled = physicsconfig.GetBoolean("physical_prim_material_density_enabled", PhysicalPrimMaterialDensityEnabled);
+                    PhysicalPrimShapeInertiaEnabled = physicsconfig.GetBoolean("physical_prim_shape_inertia_enabled", PhysicalPrimShapeInertiaEnabled);
+                    PhysicalPrimBaseInertiaScale = ConfigFloat(physicsconfig, "physical_prim_base_inertia_scale", PhysicalPrimBaseInertiaScale, 0.1f, 10f);
+                    PhysicalPrimThinShapeInertiaBoost = ConfigFloat(physicsconfig, "physical_prim_thin_shape_inertia_boost", PhysicalPrimThinShapeInertiaBoost, 0f, 10f);
 
                     avDensity *= 3f / 80f;  // scale other engines density option to this
                 }
@@ -769,11 +814,12 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             contactSharedForJoints.surface.slip1 = commonContactSLIP;
             contactSharedForJoints.surface.slip2 = commonContactSLIP;
 
+            LoadMaterialDensitySettings(physicsconfig);
             LoadMaterialContactSettings(physicsconfig);
             LoadMaterialWaterSettings(physicsconfig);
 
             m_log.InfoFormat(
-                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s primWaterRise={16:0.###} primWaterDrag={17:0.###} airDrag={18} restDamp={19}",
+                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s primWaterRise={16:0.###} primWaterDrag={17:0.###} airDrag={18} restDamp={19} materialDensity={20} shapeInertia={21}",
                 ODE_STEPSIZE, m_physicsiterations, bodyFramesAutoDisable, worldLinearDamping, worldAngularDamping,
                 commonContactERP, commonContactCFM, commonContactSLIP, contactsurfacelayer,
                 contactMaxCorrectingVelocity, commonContactBounceVelocity, TerrainFriction, TerrainBounce,
@@ -781,7 +827,9 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 PhysicalPrimWaterDynamicsEnabled ? "enabled" : "disabled",
                 PhysicalPrimWaterSmoothingTimescale, PhysicalPrimWaterMaxRiseAcceleration, PhysicalPrimWaterDrag,
                 PhysicalPrimAirDynamicsEnabled ? "enabled" : "disabled",
-                PhysicalPrimRestingDampingEnabled ? "enabled" : "disabled");
+                PhysicalPrimRestingDampingEnabled ? "enabled" : "disabled",
+                PhysicalPrimMaterialDensityEnabled ? "enabled" : "disabled",
+                PhysicalPrimShapeInertiaEnabled ? "enabled" : "disabled");
 
             m_lastframe = Util.GetTimeStamp();
             m_lastMeshExpire = m_lastframe;

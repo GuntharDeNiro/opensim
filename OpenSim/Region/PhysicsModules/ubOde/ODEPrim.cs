@@ -147,6 +147,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         public IntPtr m_collide_geom; // for objects: geom if single prim space it linkset
 
         private float m_density;
+        private bool m_useMaterialDensity = true;
         private byte m_shapetype;
         private byte m_fakeShapetype;
         public bool _zeroFlag;
@@ -1050,12 +1051,73 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         {
         }
 
+        private bool IsValidMaterial(int material)
+        {
+            return material >= 0 && material < m_parentScene.m_materialContactsData.Length;
+        }
+
+        private void ApplyMaterialContactSettings()
+        {
+            if (!IsValidMaterial(m_material))
+                m_material = (int)Material.Wood;
+
+            mu = m_parentScene.m_materialContactsData[m_material].mu;
+            bounce = m_parentScene.m_materialContactsData[m_material].bounce;
+        }
+
+        private bool ApplyMaterialDensity()
+        {
+            if (!m_parentScene.PhysicalPrimMaterialDensityEnabled || !m_useMaterialDensity)
+                return false;
+
+            float density = m_parentScene.GetMaterialDensity(m_material);
+            if (MathF.Abs(m_density - density) < 0.0001f)
+                return false;
+
+            m_density = density;
+            UpdatePrimBodyData();
+            return true;
+        }
+
+        private void RebuildBodyForMassProperties()
+        {
+            OdePrim root = childPrim ? (OdePrim)_parent : this;
+            if (root == null || root.Body == IntPtr.Zero)
+                return;
+
+            root.DestroyBody();
+            root.MakeBody();
+        }
+
+        private void changeMaterial(int material)
+        {
+            if (!IsValidMaterial(material))
+                return;
+
+            m_material = material;
+            ApplyMaterialContactSettings();
+            if (ApplyMaterialDensity())
+                RebuildBodyForMassProperties();
+        }
+
+        private void changeMassProperties()
+        {
+            UpdatePrimBodyData();
+            RebuildBodyForMassProperties();
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override void SetMaterial(int pMaterial)
         {
+            if (!IsValidMaterial(pMaterial))
+                return;
+
             m_material = pMaterial;
-            mu = m_parentScene.m_materialContactsData[pMaterial].mu;
-            bounce = m_parentScene.m_materialContactsData[pMaterial].bounce;
+            ApplyMaterialContactSettings();
+            OdePrim root = childPrim ? (OdePrim)_parent : this;
+            if (root == null || root.Body == IntPtr.Zero)
+                ApplyMaterialDensity();
+            AddChange(changes.Material, pMaterial);
         }
 
         public override float Density
@@ -1068,10 +1130,20 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             set
             {
-                //float old = m_density;
-                m_density = value / 100f;
-                //if(m_density != old)
-                //    UpdatePrimBodyData();
+                float old = m_density;
+                m_useMaterialDensity = m_parentScene.PhysicalPrimMaterialDensityEnabled &&
+                    MathF.Abs(value - 1000f) <= 0.01f;
+
+                if (m_useMaterialDensity)
+                    m_density = m_parentScene.GetMaterialDensity(m_material);
+                else
+                    m_density = value / 100f;
+
+                if (MathF.Abs(m_density - old) > 0.0001f)
+                {
+                    UpdatePrimBodyData();
+                    AddChange(changes.MassProperties, null);
+                }
             }
         }
         public override float GravModifier
@@ -1289,7 +1361,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             m_sceneTimeStep = parent_scene.ODE_STEPSIZE;
             m_sceneInverseTimeStep = 1f / m_sceneTimeStep;
 
-            m_density = parent_scene.geomDefaultDensity;
+            m_useMaterialDensity = parent_scene.PhysicalPrimMaterialDensityEnabled;
+            m_density = m_useMaterialDensity ? parent_scene.GetMaterialDensity(m_material) : parent_scene.geomDefaultDensity;
             m_body_autodisable_frames = parent_scene.bodyFramesAutoDisable;
 
             m_prim_geom = IntPtr.Zero;
@@ -2427,6 +2500,26 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
         #region Mass Calculation
 
+        private void ApplyShapeInertiaTuning(ref UBOdeNative.Mass mass)
+        {
+            if (!m_parentScene.PhysicalPrimShapeInertiaEnabled)
+                return;
+
+            float minExtent = MathF.Max(0.01f, MathF.Min(m_OBB.X, MathF.Min(m_OBB.Y, m_OBB.Z)));
+            float maxExtent = MathF.Max(minExtent, MathF.Max(m_OBB.X, MathF.Max(m_OBB.Y, m_OBB.Z)));
+            float thinShapeBias = Math.Clamp(1f - minExtent / maxExtent, 0f, 1f);
+            float inertiaScale = MathF.Max(0.1f,
+                m_parentScene.PhysicalPrimBaseInertiaScale +
+                thinShapeBias * m_parentScene.PhysicalPrimThinShapeInertiaBoost);
+
+            mass.I.M00 *= inertiaScale;
+            mass.I.M11 *= inertiaScale;
+            mass.I.M22 *= inertiaScale;
+            mass.I.M01 *= inertiaScale;
+            mass.I.M02 *= inertiaScale;
+            mass.I.M12 *= inertiaScale;
+        }
+
         private void UpdatePrimBodyData()
         {
             primMass = m_density * primVolume;
@@ -2439,6 +2532,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             m_mass = primMass; // just in case
 
             UBOdeNative.MassSetBoxTotal(out primdMass, primMass, 2.0f * m_OBB.X, 2.0f * m_OBB.Y, 2.0f * m_OBB.Z);
+            ApplyShapeInertiaTuning(ref primdMass);
 
             UBOdeNative.MassTranslate(ref primdMass,
                                 m_OBBOffset.X,
@@ -4553,6 +4647,14 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
                 case changes.SetInertia:
                     changeInertia((PhysicsInertiaData) arg);
+                    break;
+
+                case changes.Material:
+                    changeMaterial((int)arg);
+                    break;
+
+                case changes.MassProperties:
+                    changeMassProperties();
                     break;
 
                 case changes.Null:

@@ -122,6 +122,15 @@ world_contact_bounce_velocity = 0.15
 world_contact_slip = 0.01
 ubode_terrain_friction = 0.64
 ubode_terrain_bounce = 0.72
+physical_prim_material_density_enabled = true
+material_stone_density = 18.0
+material_metal_density = 24.0
+material_glass_density = 9.0
+material_wood_density = 6.0
+material_flesh_density = 7.0
+material_plastic_density = 4.5
+material_rubber_density = 3.5
+material_light_density = 1.0
 material_rubber_bounce = 0.98
 boat_water_dynamics_enabled = true
 boat_wave_height_1 = 0.09
@@ -142,6 +151,9 @@ physical_prim_resting_linear_damping = 3.0
 physical_prim_resting_angular_damping = 2.0
 physical_prim_resting_speed = 0.08
 physical_prim_resting_angular_speed = 0.12
+physical_prim_shape_inertia_enabled = true
+physical_prim_base_inertia_scale = 1.08
+physical_prim_thin_shape_inertia_boost = 0.45
 water_buoyancy_wood = 1.55
 water_buoyancy_metal = 0.10
 boat_turn_banking_enabled = true
@@ -149,10 +161,14 @@ boat_turn_banking_enabled = true
 
 At startup ubODE writes a `Vanilla physics tuning` line to `OpenSim.log` so you
 can confirm which solver, contact and boat-water settings are active on the
-server. Rubber and plastic use a more visible bounce profile for inworld demos;
-terrain contact uses a square-root bounce blend so low terrain restitution does
-not cancel a bouncy material. Physical prims now also get material-based water
-buoyancy: wood, plastic and rubber float, while metal and stone mostly sink.
+server. Materials now drive density as well as contact response unless a viewer
+or script has explicitly set a custom density: metal and stone feel heavier,
+wood/plastic/rubber feel lighter, and the same-sized objects no longer all move
+with the same weight. Rubber and plastic use a more visible bounce profile for
+inworld demos; terrain contact uses a square-root bounce blend so low terrain
+restitution does not cancel a bouncy material. Physical prims now also get
+material-based water buoyancy: wood, plastic and rubber float, while metal and
+stone mostly sink.
 Floating prims receive wave drift and a small water-normal tilt so simple
 inworld boat hulls can move without being scripted as vehicles first. The solver
 runs at a slightly smaller step with softer contact correction so high-bounce
@@ -164,10 +180,12 @@ surface damping when an object exits the water, so a wooden cube dropped from
 above settles into the surface instead of pogoing. Submerged objects now receive
 projected-area water drag, so broad faces push more water than narrow ones.
 Physical prims also get light air drag and a near-rest damping pass that removes
-small residual terrain or water jitter once an object is almost still. Buoyant
-prims use their current orientation and dimensions to find a stable floating
-face: cube-like shapes damp their spin, while stretched boxes right themselves
-so their broad face settles toward the water surface.
+small residual terrain or water jitter once an object is almost still. Shape
+inertia tuning adds a little rotational weight, especially for thin or stretched
+objects, so boards and poles do not spin like massless props. Buoyant prims use
+their current orientation and dimensions to find a stable floating face:
+cube-like shapes damp their spin, while stretched boxes right themselves so
+their broad face settles toward the water surface.
 
 RegionWeb Portal And Inventory Carousels
 ----------------------------------------
