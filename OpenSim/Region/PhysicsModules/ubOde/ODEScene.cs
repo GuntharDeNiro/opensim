@@ -185,16 +185,16 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             UBOdeNative.ContactFlags.Slip1 |
             UBOdeNative.ContactFlags.Slip2 |
             UBOdeNative.ContactFlags.Approx1;
-        private float commonContactERP = 0.62f;
-        private float commonContactCFM = 0.00035f;
-        private float commonContactSLIP = 0f;
+        private float commonContactERP = 0.52f;
+        private float commonContactCFM = 0.00075f;
+        private float commonContactSLIP = 0.01f;
         private float commonContactBounceVelocity = 0f;
 
-        private float TerrainBounce = 0.80f;
-        private float TerrainFriction = 0.62f;
-        private float worldLinearDamping = 0.00035f;
-        private float worldAngularDamping = 0.0008f;
-        private float contactMaxCorrectingVelocity = 35.0f;
+        private float TerrainBounce = 0.72f;
+        private float TerrainFriction = 0.64f;
+        private float worldLinearDamping = 0.0005f;
+        private float worldAngularDamping = 0.001f;
+        private float contactMaxCorrectingVelocity = 25.0f;
 
         public float AvatarFriction = 0;// 0.9f * 0.5f;
 
@@ -248,6 +248,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         internal float BoatWaterTiltStrength = 1.0f;
         internal bool PhysicalPrimWaterDynamicsEnabled = true;
         internal float PhysicalPrimWaterSurfaceRange = 2.0f;
+        internal float PhysicalPrimWaterSmoothingTimescale = 0.65f;
         internal float PhysicalPrimWaterVerticalDamping = 2.4f;
         internal float PhysicalPrimWaterDriftScale = 12.0f;
         internal float PhysicalPrimWaterDriftResponse = 0.8f;
@@ -284,7 +285,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         private readonly List<OdeCharacter> _badCharacter = new();
         public readonly Dictionary<IntPtr, PhysicsActor> actor_name_map = new();
 
-        private float contactsurfacelayer = 0.004f;
+        private float contactsurfacelayer = 0.006f;
 
         private readonly int contactsPerCollision = 80;
         internal IntPtr ContactgeomsArray = IntPtr.Zero;
@@ -688,6 +689,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     BoatWaterTiltStrength = ConfigFloat(physicsconfig, "boat_water_tilt_strength", BoatWaterTiltStrength, 0f, 10f);
                     PhysicalPrimWaterDynamicsEnabled = physicsconfig.GetBoolean("physical_prim_water_dynamics_enabled", PhysicalPrimWaterDynamicsEnabled);
                     PhysicalPrimWaterSurfaceRange = ConfigFloat(physicsconfig, "physical_prim_water_surface_range", PhysicalPrimWaterSurfaceRange, 0.05f, 10f);
+                    PhysicalPrimWaterSmoothingTimescale = ConfigFloat(physicsconfig, "physical_prim_water_smoothing_timescale", PhysicalPrimWaterSmoothingTimescale, ODE_STEPSIZE, 10f);
                     PhysicalPrimWaterVerticalDamping = ConfigFloat(physicsconfig, "physical_prim_water_vertical_damping", PhysicalPrimWaterVerticalDamping, 0f, 20f);
                     PhysicalPrimWaterDriftScale = ConfigFloat(physicsconfig, "physical_prim_water_drift_scale", PhysicalPrimWaterDriftScale, 0f, 100f);
                     PhysicalPrimWaterDriftResponse = ConfigFloat(physicsconfig, "physical_prim_water_drift_response", PhysicalPrimWaterDriftResponse, 0f, 20f);
@@ -749,11 +751,13 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             LoadMaterialWaterSettings(physicsconfig);
 
             m_log.InfoFormat(
-                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} bounceVel={7:0.###} terrain=({8:0.###} friction,{9:0.###} bounce) boatWater={10} primWater={11}",
+                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s",
                 ODE_STEPSIZE, m_physicsiterations, bodyFramesAutoDisable, worldLinearDamping, worldAngularDamping,
-                commonContactERP, commonContactCFM, commonContactBounceVelocity, TerrainFriction, TerrainBounce,
+                commonContactERP, commonContactCFM, commonContactSLIP, contactsurfacelayer,
+                contactMaxCorrectingVelocity, commonContactBounceVelocity, TerrainFriction, TerrainBounce,
                 BoatWaterDynamicsEnabled ? "enabled" : "disabled",
-                PhysicalPrimWaterDynamicsEnabled ? "enabled" : "disabled");
+                PhysicalPrimWaterDynamicsEnabled ? "enabled" : "disabled",
+                PhysicalPrimWaterSmoothingTimescale);
 
             m_lastframe = Util.GetTimeStamp();
             m_lastMeshExpire = m_lastframe;

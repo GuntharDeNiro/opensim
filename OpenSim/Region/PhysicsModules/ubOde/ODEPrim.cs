@@ -89,6 +89,11 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         private PIDHoverType m_PIDHoverType;
         private float m_targetHoverHeight;
         private float m_buoyancy;                //KF: m_buoyancy should be set by llSetBuoyancy() for non-vehicle.
+        private bool m_hasWaterDynamicsState;
+        private float m_smoothedWaterHeight;
+        private float m_smoothedWaterSubmerged;
+        private Vector3 m_smoothedWaterNormal = Vector3.UnitZ;
+        private Vector3 m_smoothedWaterFlow = Vector3.Zero;
 
         private readonly int m_body_autodisable_frames;
         public int m_bodydisablecontrol = 0;
@@ -3718,46 +3723,98 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             return value * (maxLength / MathF.Sqrt(lenSq));
         }
 
+        private void ResetWaterDynamicsState()
+        {
+            m_hasWaterDynamicsState = false;
+            m_smoothedWaterHeight = 0f;
+            m_smoothedWaterSubmerged = 0f;
+            m_smoothedWaterNormal = Vector3.UnitZ;
+            m_smoothedWaterFlow = Vector3.Zero;
+        }
+
         private void ApplyPhysicalPrimWaterDynamics(Vector3 pos, ref float fx, ref float fy, ref float fz)
         {
             if (!m_parentScene.PhysicalPrimWaterDynamicsEnabled || m_mass > m_parentScene.PhysicalPrimWaterMaxMass)
+            {
+                ResetWaterDynamicsState();
                 return;
+            }
 
             float buoyancy = m_parentScene.GetMaterialWaterBuoyancy(m_material);
             if (buoyancy <= 0f)
+            {
+                ResetWaterDynamicsState();
                 return;
+            }
 
-            float waterHeight = m_parentScene.GetDynamicWaterHeight(pos.X, pos.Y);
-            if (m_parentScene.GetTerrainHeightAtXY(pos.X, pos.Y) > waterHeight - 0.1f)
+            float rawWaterHeight = m_parentScene.GetDynamicWaterHeight(pos.X, pos.Y);
+            if (m_parentScene.GetTerrainHeightAtXY(pos.X, pos.Y) > rawWaterHeight - 0.1f)
+            {
+                ResetWaterDynamicsState();
                 return;
+            }
 
             Quaternion orientation = Body != IntPtr.Zero ? UBOdeNative.BodyGetQuaternionOMV(Body) : m_orientation;
-            Vector3 waterNormal = m_parentScene.GetDynamicWaterNormal(pos.X, pos.Y);
-            Vector3 targetUp = Vector3.UnitZ + (waterNormal - Vector3.UnitZ) * m_parentScene.PhysicalPrimWaterTiltScale;
-            targetUp.Normalize();
-
             float halfHeight = GetProjectedHalfExtent(orientation, Vector3.UnitZ);
             float objectHeight = halfHeight * 2f;
             float bottom = pos.Z - halfHeight;
             float top = pos.Z + halfHeight;
 
-            if (bottom > waterHeight + m_parentScene.PhysicalPrimWaterSurfaceRange ||
-                top < waterHeight - m_parentScene.PhysicalPrimWaterSurfaceRange)
+            if (bottom > rawWaterHeight + m_parentScene.PhysicalPrimWaterSurfaceRange ||
+                top < rawWaterHeight - m_parentScene.PhysicalPrimWaterSurfaceRange)
+            {
+                ResetWaterDynamicsState();
                 return;
+            }
 
-            float submerged = Math.Clamp((waterHeight - bottom) / objectHeight, 0f, 1f);
+            float rawSubmerged = Math.Clamp((rawWaterHeight - bottom) / objectHeight, 0f, 1f);
+            if (rawSubmerged <= 0f)
+            {
+                ResetWaterDynamicsState();
+                return;
+            }
+
+            Vector3 rawWaterNormal = m_parentScene.GetDynamicWaterNormal(pos.X, pos.Y);
+            Vector3 rawFlow = m_parentScene.GetDynamicWaterFlow(pos.X, pos.Y) * m_parentScene.PhysicalPrimWaterDriftScale;
+            float alpha = Math.Clamp(m_sceneTimeStep / m_parentScene.PhysicalPrimWaterSmoothingTimescale, 0.015f, 1f);
+
+            if (!m_hasWaterDynamicsState)
+            {
+                m_smoothedWaterHeight = rawWaterHeight;
+                m_smoothedWaterNormal = rawWaterNormal;
+                m_smoothedWaterFlow = rawFlow;
+                m_smoothedWaterSubmerged = rawSubmerged;
+                m_hasWaterDynamicsState = true;
+            }
+            else
+            {
+                m_smoothedWaterHeight += (rawWaterHeight - m_smoothedWaterHeight) * alpha;
+                m_smoothedWaterNormal += (rawWaterNormal - m_smoothedWaterNormal) * alpha;
+                m_smoothedWaterFlow += (rawFlow - m_smoothedWaterFlow) * alpha;
+                m_smoothedWaterSubmerged += (rawSubmerged - m_smoothedWaterSubmerged) * alpha;
+            }
+
+            if (m_smoothedWaterNormal.LengthSquared() <= 0.000001f)
+                m_smoothedWaterNormal = Vector3.UnitZ;
+            else
+                m_smoothedWaterNormal.Normalize();
+
+            float submergedByHeight = Math.Clamp((m_smoothedWaterHeight - bottom) / objectHeight, 0f, 1f);
+            float submerged = Math.Clamp((submergedByHeight + m_smoothedWaterSubmerged) * 0.5f, 0f, 1f);
             if (submerged <= 0f)
                 return;
+
+            Vector3 targetUp = Vector3.UnitZ + (m_smoothedWaterNormal - Vector3.UnitZ) * m_parentScene.PhysicalPrimWaterTiltScale;
+            targetUp.Normalize();
 
             UBOdeNative.Vector3 vel = UBOdeNative.BodyGetLinearVel(Body);
             float verticalDamping = m_parentScene.PhysicalPrimWaterVerticalDamping * submerged;
             fz += -m_parentScene.gravityz * buoyancy * submerged;
             fz -= vel.Z * verticalDamping;
 
-            Vector3 flow = m_parentScene.GetDynamicWaterFlow(pos.X, pos.Y) * m_parentScene.PhysicalPrimWaterDriftScale;
             float driftResponse = m_parentScene.PhysicalPrimWaterDriftResponse * submerged;
-            fx += (flow.X - vel.X) * driftResponse;
-            fy += (flow.Y - vel.Y) * driftResponse;
+            fx += (m_smoothedWaterFlow.X - vel.X) * driftResponse;
+            fy += (m_smoothedWaterFlow.Y - vel.Y) * driftResponse;
 
             Vector3 angularVel = UBOdeNative.BodyGetAngularVelOMV(Body);
             float massScale = MathF.Min(m_mass, 2000f);
