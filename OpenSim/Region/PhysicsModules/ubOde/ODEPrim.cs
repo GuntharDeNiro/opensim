@@ -3788,10 +3788,13 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             }
             else
             {
+                float submergedAlpha = rawSubmerged < m_smoothedWaterSubmerged
+                    ? Math.Clamp(alpha * 6f, 0.12f, 1f)
+                    : alpha;
                 m_smoothedWaterHeight += (rawWaterHeight - m_smoothedWaterHeight) * alpha;
                 m_smoothedWaterNormal += (rawWaterNormal - m_smoothedWaterNormal) * alpha;
                 m_smoothedWaterFlow += (rawFlow - m_smoothedWaterFlow) * alpha;
-                m_smoothedWaterSubmerged += (rawSubmerged - m_smoothedWaterSubmerged) * alpha;
+                m_smoothedWaterSubmerged += (rawSubmerged - m_smoothedWaterSubmerged) * submergedAlpha;
             }
 
             if (m_smoothedWaterNormal.LengthSquared() <= 0.000001f)
@@ -3809,8 +3812,12 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
             UBOdeNative.Vector3 vel = UBOdeNative.BodyGetLinearVel(Body);
             float verticalDamping = m_parentScene.PhysicalPrimWaterVerticalDamping * submerged;
-            fz += -m_parentScene.gravityz * buoyancy * submerged;
+            float waterAcceleration = -m_parentScene.gravityz * buoyancy * submerged;
+            float maxWaterAcceleration = -m_parentScene.gravityz + m_parentScene.PhysicalPrimWaterMaxRiseAcceleration;
+            fz += MathF.Min(waterAcceleration, maxWaterAcceleration);
             fz -= vel.Z * verticalDamping;
+            if (vel.Z > 0f && rawSubmerged < 0.45f)
+                fz -= vel.Z * m_parentScene.PhysicalPrimWaterSurfaceDamping * (1f - rawSubmerged / 0.45f);
 
             float driftResponse = m_parentScene.PhysicalPrimWaterDriftResponse * submerged;
             fx += (m_smoothedWaterFlow.X - vel.X) * driftResponse;

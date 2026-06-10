@@ -250,6 +250,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         internal float PhysicalPrimWaterSurfaceRange = 2.0f;
         internal float PhysicalPrimWaterSmoothingTimescale = 0.65f;
         internal float PhysicalPrimWaterVerticalDamping = 2.4f;
+        internal float PhysicalPrimWaterSurfaceDamping = 3.5f;
+        internal float PhysicalPrimWaterMaxRiseAcceleration = 2.5f;
         internal float PhysicalPrimWaterDriftScale = 12.0f;
         internal float PhysicalPrimWaterDriftResponse = 0.8f;
         internal float PhysicalPrimWaterTiltScale = 0.35f;
@@ -534,21 +536,21 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         private void LoadMaterialWaterSettings(IConfig config)
         {
             SetMaterialWaterBuoyancy(Material.Stone,
-                ConfigFloat(config, "water_buoyancy_stone", 0.35f, 0f, 5f));
+                ConfigFloat(config, "water_buoyancy_stone", 0.25f, 0f, 5f));
             SetMaterialWaterBuoyancy(Material.Metal,
-                ConfigFloat(config, "water_buoyancy_metal", 0.15f, 0f, 5f));
+                ConfigFloat(config, "water_buoyancy_metal", 0.10f, 0f, 5f));
             SetMaterialWaterBuoyancy(Material.Glass,
-                ConfigFloat(config, "water_buoyancy_glass", 0.80f, 0f, 5f));
+                ConfigFloat(config, "water_buoyancy_glass", 0.70f, 0f, 5f));
             SetMaterialWaterBuoyancy(Material.Wood,
-                ConfigFloat(config, "water_buoyancy_wood", 2.20f, 0f, 5f));
+                ConfigFloat(config, "water_buoyancy_wood", 1.55f, 0f, 5f));
             SetMaterialWaterBuoyancy(Material.Flesh,
                 ConfigFloat(config, "water_buoyancy_flesh", 1.05f, 0f, 5f));
             SetMaterialWaterBuoyancy(Material.Plastic,
-                ConfigFloat(config, "water_buoyancy_plastic", 2.60f, 0f, 5f));
+                ConfigFloat(config, "water_buoyancy_plastic", 1.75f, 0f, 5f));
             SetMaterialWaterBuoyancy(Material.Rubber,
-                ConfigFloat(config, "water_buoyancy_rubber", 3.00f, 0f, 5f));
+                ConfigFloat(config, "water_buoyancy_rubber", 1.90f, 0f, 5f));
             SetMaterialWaterBuoyancy(Material.light,
-                ConfigFloat(config, "water_buoyancy_light", 4.00f, 0f, 5f));
+                ConfigFloat(config, "water_buoyancy_light", 2.60f, 0f, 5f));
         }
 
         /// <summary>
@@ -691,6 +693,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     PhysicalPrimWaterSurfaceRange = ConfigFloat(physicsconfig, "physical_prim_water_surface_range", PhysicalPrimWaterSurfaceRange, 0.05f, 10f);
                     PhysicalPrimWaterSmoothingTimescale = ConfigFloat(physicsconfig, "physical_prim_water_smoothing_timescale", PhysicalPrimWaterSmoothingTimescale, ODE_STEPSIZE, 10f);
                     PhysicalPrimWaterVerticalDamping = ConfigFloat(physicsconfig, "physical_prim_water_vertical_damping", PhysicalPrimWaterVerticalDamping, 0f, 20f);
+                    PhysicalPrimWaterSurfaceDamping = ConfigFloat(physicsconfig, "physical_prim_water_surface_damping", PhysicalPrimWaterSurfaceDamping, 0f, 30f);
+                    PhysicalPrimWaterMaxRiseAcceleration = ConfigFloat(physicsconfig, "physical_prim_water_max_rise_acceleration", PhysicalPrimWaterMaxRiseAcceleration, 0f, 20f);
                     PhysicalPrimWaterDriftScale = ConfigFloat(physicsconfig, "physical_prim_water_drift_scale", PhysicalPrimWaterDriftScale, 0f, 100f);
                     PhysicalPrimWaterDriftResponse = ConfigFloat(physicsconfig, "physical_prim_water_drift_response", PhysicalPrimWaterDriftResponse, 0f, 20f);
                     PhysicalPrimWaterTiltScale = ConfigFloat(physicsconfig, "physical_prim_water_tilt_scale", PhysicalPrimWaterTiltScale, 0f, 20f);
@@ -751,13 +755,13 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             LoadMaterialWaterSettings(physicsconfig);
 
             m_log.InfoFormat(
-                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s",
+                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s primWaterRise={16:0.###}",
                 ODE_STEPSIZE, m_physicsiterations, bodyFramesAutoDisable, worldLinearDamping, worldAngularDamping,
                 commonContactERP, commonContactCFM, commonContactSLIP, contactsurfacelayer,
                 contactMaxCorrectingVelocity, commonContactBounceVelocity, TerrainFriction, TerrainBounce,
                 BoatWaterDynamicsEnabled ? "enabled" : "disabled",
                 PhysicalPrimWaterDynamicsEnabled ? "enabled" : "disabled",
-                PhysicalPrimWaterSmoothingTimescale);
+                PhysicalPrimWaterSmoothingTimescale, PhysicalPrimWaterMaxRiseAcceleration);
 
             m_lastframe = Util.GetTimeStamp();
             m_lastMeshExpire = m_lastframe;

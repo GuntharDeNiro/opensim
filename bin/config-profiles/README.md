@@ -128,11 +128,13 @@ boat_wave_height_1 = 0.09
 boat_wave_drift_scale = 0.25
 physical_prim_water_dynamics_enabled = true
 physical_prim_water_smoothing_timescale = 0.65
+physical_prim_water_surface_damping = 3.5
+physical_prim_water_max_rise_acceleration = 2.5
 physical_prim_water_drift_scale = 12.0
 physical_prim_water_righting_strength = 3.0
 physical_prim_water_angular_damping = 5.0
-water_buoyancy_wood = 2.20
-water_buoyancy_metal = 0.15
+water_buoyancy_wood = 1.55
+water_buoyancy_metal = 0.10
 boat_turn_banking_enabled = true
 ```
 
@@ -148,9 +150,12 @@ runs at a slightly smaller step with softer contact correction so high-bounce
 objects move smoothly instead of jittering between frames. Buoyant prims also
 low-pass their water height, immersion, wave normal and drift so floating motion
 feels heavier and more continuous instead of twitching with every tiny wave
-sample. They use their current orientation and dimensions to find a stable
-floating face: cube-like shapes damp their spin, while stretched boxes right
-themselves so their broad face settles toward the water surface.
+sample. The water response also limits maximum upward rise and applies extra
+surface damping when an object exits the water, so a wooden cube dropped from
+above settles into the surface instead of pogoing. Buoyant prims use their
+current orientation and dimensions to find a stable floating face: cube-like
+shapes damp their spin, while stretched boxes right themselves so their broad
+face settles toward the water surface.
 
 RegionWeb Portal And Inventory Carousels
 ----------------------------------------
