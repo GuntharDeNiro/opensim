@@ -109,10 +109,15 @@ Vanilla Sim uses ubODE by default and reads the realism profile from
 `[ODEPhysicsSettings]` in `OpenSimDefaults.ini`. The important knobs are:
 
 ```ini
-world_solver_iterations = 18
+world_stepsize = 0.01333
+world_solver_iterations = 24
 body_frames_auto_disable = 180
-world_linear_damping = 0.0002
-world_angular_damping = 0.0005
+world_erp = 0.62
+world_cfm = 0.00035
+world_linear_damping = 0.00035
+world_angular_damping = 0.0008
+world_contact_surface_layer = 0.004
+world_contact_max_correcting_velocity = 35.0
 world_contact_bounce_velocity = 0.0
 ubode_terrain_friction = 0.62
 ubode_terrain_bounce = 0.80
@@ -134,7 +139,9 @@ terrain contact uses a square-root bounce blend so low terrain restitution does
 not cancel a bouncy material. Physical prims now also get material-based water
 buoyancy: wood, plastic and rubber float, while metal and stone mostly sink.
 Floating prims receive wave drift and a small water-normal tilt so simple
-inworld boat hulls can move without being scripted as vehicles first.
+inworld boat hulls can move without being scripted as vehicles first. The solver
+runs at a slightly smaller step with softer contact correction so high-bounce
+objects move smoothly instead of jittering between frames.
 
 RegionWeb Portal And Inventory Carousels
 ----------------------------------------

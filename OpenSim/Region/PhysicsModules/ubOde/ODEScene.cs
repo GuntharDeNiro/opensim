@@ -185,16 +185,16 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             UBOdeNative.ContactFlags.Slip1 |
             UBOdeNative.ContactFlags.Slip2 |
             UBOdeNative.ContactFlags.Approx1;
-        private float commonContactERP = 0.75f;
-        private float commonContactCFM = 0.0001f;
+        private float commonContactERP = 0.62f;
+        private float commonContactCFM = 0.00035f;
         private float commonContactSLIP = 0f;
         private float commonContactBounceVelocity = 0f;
 
         private float TerrainBounce = 0.80f;
         private float TerrainFriction = 0.62f;
-        private float worldLinearDamping = 0.0002f;
-        private float worldAngularDamping = 0.0005f;
-        private float contactMaxCorrectingVelocity = 60.0f;
+        private float worldLinearDamping = 0.00035f;
+        private float worldAngularDamping = 0.0008f;
+        private float contactMaxCorrectingVelocity = 35.0f;
 
         public float AvatarFriction = 0;// 0.9f * 0.5f;
 
@@ -207,7 +207,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         private int m_heightmapWidthSamples = (int)Constants.RegionSize + 3;
         private int m_heightmapHeightSamples = (int)Constants.RegionSize + 3;
 
-        public float ODE_STEPSIZE = 0.020f;
+        public float ODE_STEPSIZE = 0.01333f;
         public float HalfOdeStep = 0.01f;
         public int odetimestepMS = 20; // rounded
         private float m_timeDilation = 1.0f;
@@ -281,7 +281,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         private readonly List<OdeCharacter> _badCharacter = new();
         public readonly Dictionary<IntPtr, PhysicsActor> actor_name_map = new();
 
-        private float contactsurfacelayer = 0.002f;
+        private float contactsurfacelayer = 0.004f;
 
         private readonly int contactsPerCollision = 80;
         internal IntPtr ContactgeomsArray = IntPtr.Zero;
@@ -307,7 +307,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         private int m_lastRegionWidth;
         private int m_lastRegionHeight;
 
-        private int m_physicsiterations = 15;
+        private int m_physicsiterations = 24;
         private const float m_SkipFramesAtms = 0.40f; // Drop frames gracefully at a 400 ms lag
         //private PhysicsActor PANull = new NullPhysicsActor();
         private float step_time = 0.0f;
