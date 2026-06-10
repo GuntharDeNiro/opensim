@@ -178,13 +178,22 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
         //private int threadid = 0;
 
-        const UBOdeNative.ContactFlags commomContactFlags = UBOdeNative.ContactFlags.Bounce | UBOdeNative.ContactFlags.Approx1;
-        const float commomContactERP = 0.75f;
-        const float commonContactCFM = 0.0001f;
-        const float commomContactSLIP = 0f;
+        const UBOdeNative.ContactFlags commomContactFlags =
+            UBOdeNative.ContactFlags.Bounce |
+            UBOdeNative.ContactFlags.SoftERP |
+            UBOdeNative.ContactFlags.SoftCFM |
+            UBOdeNative.ContactFlags.Slip1 |
+            UBOdeNative.ContactFlags.Slip2 |
+            UBOdeNative.ContactFlags.Approx1;
+        private float commonContactERP = 0.75f;
+        private float commonContactCFM = 0.0001f;
+        private float commonContactSLIP = 0f;
 
-        readonly float TerrainBounce = 0.001f;
-        readonly float TerrainFriction = 0.3f;
+        private float TerrainBounce = 0.02f;
+        private float TerrainFriction = 0.65f;
+        private float worldLinearDamping = 0.001f;
+        private float worldAngularDamping = 0.002f;
+        private float contactMaxCorrectingVelocity = 60.0f;
 
         public float AvatarFriction = 0;// 0.9f * 0.5f;
 
@@ -253,7 +262,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         private readonly List<OdeCharacter> _badCharacter = new();
         public readonly Dictionary<IntPtr, PhysicsActor> actor_name_map = new();
 
-        private readonly float contactsurfacelayer = 0.002f;
+        private float contactsurfacelayer = 0.002f;
 
         private readonly int contactsPerCollision = 80;
         internal IntPtr ContactgeomsArray = IntPtr.Zero;
@@ -278,7 +287,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         private int m_lastRegionWidth;
         private int m_lastRegionHeight;
 
-        private readonly int m_physicsiterations = 15;
+        private int m_physicsiterations = 15;
         private const float m_SkipFramesAtms = 0.40f; // Drop frames gracefully at a 400 ms lag
         //private PhysicsActor PANull = new NullPhysicsActor();
         private float step_time = 0.0f;
@@ -347,6 +356,70 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             m_meshWorker = new ODEMeshWorker(this, m_log, mesher, physicsconfig);
             m_frameWorkScene.PhysicsEnabled = true;
         }
+
+        private static float ConfigFloat(IConfig config, string key, float fallback, float min, float max)
+        {
+            if (config == null)
+                return fallback;
+
+            float value = config.GetFloat(key, fallback);
+            if (float.IsNaN(value) || float.IsInfinity(value))
+                return fallback;
+
+            if (value < min)
+                return min;
+            if (value > max)
+                return max;
+            return value;
+        }
+
+        private static int ConfigInt(IConfig config, string key, int fallback, int min, int max)
+        {
+            if (config == null)
+                return fallback;
+
+            int value = config.GetInt(key, fallback);
+            if (value < min)
+                return min;
+            if (value > max)
+                return max;
+            return value;
+        }
+
+        private void SetMaterialContact(Material material, float friction, float bounce)
+        {
+            m_materialContactsData[(int)material].mu = friction;
+            m_materialContactsData[(int)material].bounce = bounce;
+        }
+
+        private void LoadMaterialContactSettings(IConfig config)
+        {
+            SetMaterialContact(Material.Stone,
+                ConfigFloat(config, "material_stone_friction", 0.85f, 0f, 2f),
+                ConfigFloat(config, "material_stone_bounce", 0.08f, 0f, 1f));
+            SetMaterialContact(Material.Metal,
+                ConfigFloat(config, "material_metal_friction", 0.45f, 0f, 2f),
+                ConfigFloat(config, "material_metal_bounce", 0.12f, 0f, 1f));
+            SetMaterialContact(Material.Glass,
+                ConfigFloat(config, "material_glass_friction", 0.18f, 0f, 2f),
+                ConfigFloat(config, "material_glass_bounce", 0.04f, 0f, 1f));
+            SetMaterialContact(Material.Wood,
+                ConfigFloat(config, "material_wood_friction", 0.6f, 0f, 2f),
+                ConfigFloat(config, "material_wood_bounce", 0.12f, 0f, 1f));
+            SetMaterialContact(Material.Flesh,
+                ConfigFloat(config, "material_flesh_friction", 0.9f, 0f, 2f),
+                ConfigFloat(config, "material_flesh_bounce", 0.02f, 0f, 1f));
+            SetMaterialContact(Material.Plastic,
+                ConfigFloat(config, "material_plastic_friction", 0.35f, 0f, 2f),
+                ConfigFloat(config, "material_plastic_bounce", 0.18f, 0f, 1f));
+            SetMaterialContact(Material.Rubber,
+                ConfigFloat(config, "material_rubber_friction", 1.1f, 0f, 2f),
+                ConfigFloat(config, "material_rubber_bounce", 0.45f, 0f, 1f));
+            SetMaterialContact(Material.light,
+                ConfigFloat(config, "material_light_friction", 0.0f, 0f, 2f),
+                ConfigFloat(config, "material_light_bounce", 0.0f, 0f, 1f));
+        }
+
         /// <summary>
         /// Initiailizes the scene
         /// Sets many properties that ODE requires to be stable
@@ -440,9 +513,18 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     gravityy = physicsconfig.GetFloat("world_gravityy", gravityy);
                     gravityz = physicsconfig.GetFloat("world_gravityz", gravityz);
 
-                    //contactsurfacelayer = physicsconfig.GetFloat("world_contact_surface_layer", contactsurfacelayer);
+                    commonContactERP = ConfigFloat(physicsconfig, "world_erp", commonContactERP, 0.05f, 1.0f);
+                    commonContactCFM = ConfigFloat(physicsconfig, "world_cfm", commonContactCFM, 0.000001f, 0.1f);
+                    commonContactSLIP = ConfigFloat(physicsconfig, "world_contact_slip", commonContactSLIP, 0f, 1f);
+                    contactsurfacelayer = ConfigFloat(physicsconfig, "world_contact_surface_layer", contactsurfacelayer, 0f, 0.1f);
+                    contactMaxCorrectingVelocity = ConfigFloat(physicsconfig, "world_contact_max_correcting_velocity", contactMaxCorrectingVelocity, 0.1f, 200f);
 
-                    ODE_STEPSIZE = physicsconfig.GetFloat("world_stepsize", ODE_STEPSIZE);
+                    ODE_STEPSIZE = ConfigFloat(physicsconfig, "world_stepsize", ODE_STEPSIZE, 0.005f, 0.05f);
+                    m_physicsiterations = ConfigInt(physicsconfig, "world_solver_iterations", m_physicsiterations, 1, 80);
+                    worldLinearDamping = ConfigFloat(physicsconfig, "world_linear_damping", worldLinearDamping, 0f, 1f);
+                    worldAngularDamping = ConfigFloat(physicsconfig, "world_angular_damping", worldAngularDamping, 0f, 1f);
+                    TerrainFriction = ConfigFloat(physicsconfig, "ubode_terrain_friction", TerrainFriction, 0f, 2f);
+                    TerrainBounce = ConfigFloat(physicsconfig, "ubode_terrain_bounce", TerrainBounce, 0f, 1f);
 
                     avDensity = physicsconfig.GetFloat("av_density", avDensity);
                     avMovementDivisorWalk = physicsconfig.GetFloat("av_movement_divisor_walk", avMovementDivisorWalk);
@@ -475,8 +557,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
             UBOdeNative.WorldSetGravity(world, gravityx, gravityy, gravityz);
 
-            UBOdeNative.WorldSetLinearDamping(world, 0.001f);
-            UBOdeNative.WorldSetAngularDamping(world, 0.002f);
+            UBOdeNative.WorldSetLinearDamping(world, worldLinearDamping);
+            UBOdeNative.WorldSetAngularDamping(world, worldAngularDamping);
             UBOdeNative.WorldSetAngularDampingThreshold(world, 0f);
             UBOdeNative.WorldSetLinearDampingThreshold(world, 0f);
             UBOdeNative.WorldSetMaxAngularSpeed(world, maximumAngularVelocity);
@@ -484,7 +566,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             UBOdeNative.WorldSetQuickStepNumIterations(world, m_physicsiterations);
 
             UBOdeNative.WorldSetContactSurfaceLayer(world, contactsurfacelayer);
-            UBOdeNative.WorldSetContactMaxCorrectingVel(world, 60.0f);
+            UBOdeNative.WorldSetContactMaxCorrectingVel(world, contactMaxCorrectingVelocity);
 
             HalfOdeStep = ODE_STEPSIZE * 0.5f;
             odetimestepMS = (int)(1000.0f * ODE_STEPSIZE + 0.5f);
@@ -510,29 +592,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             contactSharedForJoints.surface.slip1 = commomContactSLIP;
             contactSharedForJoints.surface.slip2 = commomContactSLIP;
 
-            m_materialContactsData[(int)Material.Stone].mu = 0.8f;
-            m_materialContactsData[(int)Material.Stone].bounce = 0.4f;
-
-            m_materialContactsData[(int)Material.Metal].mu = 0.3f;
-            m_materialContactsData[(int)Material.Metal].bounce = 0.4f;
-
-            m_materialContactsData[(int)Material.Glass].mu = 0.2f;
-            m_materialContactsData[(int)Material.Glass].bounce = 0.7f;
-
-            m_materialContactsData[(int)Material.Wood].mu = 0.6f;
-            m_materialContactsData[(int)Material.Wood].bounce = 0.5f;
-
-            m_materialContactsData[(int)Material.Flesh].mu = 0.9f;
-            m_materialContactsData[(int)Material.Flesh].bounce = 0.3f;
-
-            m_materialContactsData[(int)Material.Plastic].mu = 0.4f;
-            m_materialContactsData[(int)Material.Plastic].bounce = 0.7f;
-
-            m_materialContactsData[(int)Material.Rubber].mu = 0.9f;
-            m_materialContactsData[(int)Material.Rubber].bounce = 0.95f;
-
-            m_materialContactsData[(int)Material.light].mu = 0.0f;
-            m_materialContactsData[(int)Material.light].bounce = 0.0f;
+            LoadMaterialContactSettings(physicsconfig);
 
             m_lastframe = Util.GetTimeStamp();
             m_lastMeshExpire = m_lastframe;

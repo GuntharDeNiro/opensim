@@ -91,7 +91,7 @@ What The Standalone Profile Enables
 - `config-include/StandaloneHypergrid.ini`
 - `GatekeeperURI` and `HomeURI` for Hypergrid travel
 - YEngine
-- ubODE physics
+- ubODE physics with Vanilla Sim realism tuning for solver precision, terrain contact and material friction/bounce
 - Warp3D map rendering with depth-shaded water
 - Weather module with automatic forecast cycling and visitor IMs
 - Built-in Groups Module V2 with local SQLite storage
