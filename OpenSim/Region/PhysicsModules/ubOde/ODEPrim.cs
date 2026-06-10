@@ -3646,6 +3646,23 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 MathF.Abs(Vector3.Dot(zAxis, axis)) * m_size.Z * 0.5f);
         }
 
+        private float GetProjectedArea(Quaternion orientation, Vector3 axis)
+        {
+            if (axis.LengthSquared() <= 0.000001f)
+                return MathF.Max(0.01f, m_size.X * m_size.Y);
+
+            axis.Normalize();
+
+            Vector3 xAxis = Vector3.UnitX * orientation;
+            Vector3 yAxis = Vector3.UnitY * orientation;
+            Vector3 zAxis = Vector3.UnitZ * orientation;
+
+            return MathF.Max(0.01f,
+                MathF.Abs(Vector3.Dot(xAxis, axis)) * m_size.Y * m_size.Z +
+                MathF.Abs(Vector3.Dot(yAxis, axis)) * m_size.X * m_size.Z +
+                MathF.Abs(Vector3.Dot(zAxis, axis)) * m_size.X * m_size.Y);
+        }
+
         private bool TryGetWaterStableAxis(Quaternion orientation, Vector3 targetUp, out Vector3 stableAxis, out float shapeBias)
         {
             float minSize = MathF.Min(m_size.X, MathF.Min(m_size.Y, m_size.Z));
@@ -3730,6 +3747,75 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             m_smoothedWaterSubmerged = 0f;
             m_smoothedWaterNormal = Vector3.UnitZ;
             m_smoothedWaterFlow = Vector3.Zero;
+        }
+
+        private void ApplyPhysicalPrimAirDynamics(Quaternion orientation, ref float fx, ref float fy, ref float fz)
+        {
+            if (!m_parentScene.PhysicalPrimAirDynamicsEnabled || Body == IntPtr.Zero || m_mass <= 0f)
+                return;
+
+            float airExposure = m_hasWaterDynamicsState ? Math.Clamp(1f - m_smoothedWaterSubmerged, 0f, 1f) : 1f;
+            if (airExposure <= 0.05f)
+                return;
+
+            UBOdeNative.Vector3 vel = UBOdeNative.BodyGetLinearVel(Body);
+            Vector3 linearVelocity = new(vel.X, vel.Y, vel.Z);
+            float speed = linearVelocity.Length();
+            if (speed > 0.01f)
+            {
+                Vector3 direction = linearVelocity * (1f / speed);
+                float area = GetProjectedArea(orientation, direction);
+                float dragAcceleration = MathF.Min(
+                    m_parentScene.PhysicalPrimAirLinearDrag * airExposure * area * speed * speed / MathF.Max(m_mass, 0.001f),
+                    25f);
+                Vector3 drag = -direction * dragAcceleration;
+                fx += drag.X;
+                fy += drag.Y;
+                fz += drag.Z;
+            }
+
+            Vector3 angularVel = UBOdeNative.BodyGetAngularVelOMV(Body);
+            float angularSpeed = angularVel.Length();
+            if (angularSpeed > 0.01f)
+            {
+                float surfaceScale = MathF.Min(m_size.X * m_size.Y + m_size.X * m_size.Z + m_size.Y * m_size.Z, 200f);
+                m_angularForceacc += -angularVel * MathF.Min(m_mass, 2000f) *
+                    m_parentScene.PhysicalPrimAirAngularDrag * airExposure * surfaceScale;
+            }
+        }
+
+        private void ApplyPhysicalPrimRestingDamping(Vector3 pos, Quaternion orientation, ref float fx, ref float fy, ref float fz)
+        {
+            if (!m_parentScene.PhysicalPrimRestingDampingEnabled || Body == IntPtr.Zero)
+                return;
+
+            float halfHeight = GetProjectedHalfExtent(orientation, Vector3.UnitZ);
+            float bottom = pos.Z - halfHeight;
+            float terrainHeight = m_parentScene.GetTerrainHeightAtXY(pos.X, pos.Y);
+            bool nearTerrain = bottom <= terrainHeight + 0.08f && bottom >= terrainHeight - 0.25f;
+            bool restingInWater = m_hasWaterDynamicsState && m_smoothedWaterSubmerged > 0.18f;
+
+            if (!nearTerrain && !restingInWater)
+                return;
+
+            UBOdeNative.Vector3 vel = UBOdeNative.BodyGetLinearVel(Body);
+            Vector3 linearVelocity = new(vel.X, vel.Y, vel.Z);
+            if (linearVelocity.LengthSquared() <=
+                m_parentScene.PhysicalPrimRestingSpeed * m_parentScene.PhysicalPrimRestingSpeed)
+            {
+                Vector3 damping = -linearVelocity * m_parentScene.PhysicalPrimRestingLinearDamping;
+                fx += damping.X;
+                fy += damping.Y;
+                fz += damping.Z;
+            }
+
+            Vector3 angularVel = UBOdeNative.BodyGetAngularVelOMV(Body);
+            if (angularVel.LengthSquared() <=
+                m_parentScene.PhysicalPrimRestingAngularSpeed * m_parentScene.PhysicalPrimRestingAngularSpeed)
+            {
+                m_angularForceacc += -angularVel * MathF.Min(m_mass, 2000f) *
+                    m_parentScene.PhysicalPrimRestingAngularDamping;
+            }
         }
 
         private void ApplyPhysicalPrimWaterDynamics(Vector3 pos, ref float fx, ref float fy, ref float fz)
@@ -3818,6 +3904,22 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             fz -= vel.Z * verticalDamping;
             if (vel.Z > 0f && rawSubmerged < 0.45f)
                 fz -= vel.Z * m_parentScene.PhysicalPrimWaterSurfaceDamping * (1f - rawSubmerged / 0.45f);
+
+            Vector3 relativeWaterVelocity = new(vel.X - m_smoothedWaterFlow.X, vel.Y - m_smoothedWaterFlow.Y, vel.Z);
+            float relativeWaterSpeed = relativeWaterVelocity.Length();
+            if (relativeWaterSpeed > 0.01f)
+            {
+                Vector3 waterDragDirection = relativeWaterVelocity * (1f / relativeWaterSpeed);
+                float waterDragArea = GetProjectedArea(orientation, waterDragDirection);
+                float waterDragAcceleration = MathF.Min(
+                    m_parentScene.PhysicalPrimWaterDrag * submerged * waterDragArea *
+                    relativeWaterSpeed * relativeWaterSpeed / MathF.Max(m_mass, 0.001f),
+                    60f);
+                Vector3 waterDrag = -waterDragDirection * waterDragAcceleration;
+                fx += waterDrag.X;
+                fy += waterDrag.Y;
+                fz += waterDrag.Z;
+            }
 
             float driftResponse = m_parentScene.PhysicalPrimWaterDriftResponse * submerged;
             fx += (m_smoothedWaterFlow.X - vel.X) * driftResponse;
@@ -4003,6 +4105,9 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 }
 
                 ApplyPhysicalPrimWaterDynamics(lpos, ref fx, ref fy, ref fz);
+                Quaternion bodyOrientation = UBOdeNative.BodyGetQuaternionOMV(Body);
+                ApplyPhysicalPrimAirDynamics(bodyOrientation, ref fx, ref fy, ref fz);
+                ApplyPhysicalPrimRestingDamping(lpos, bodyOrientation, ref fx, ref fy, ref fz);
 
                 //aceleration to force +  constant force + acc
                 fx = m_mass * fx + m_force.X + m_forceacc.X;

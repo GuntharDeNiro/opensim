@@ -118,7 +118,7 @@ world_linear_damping = 0.0005
 world_angular_damping = 0.001
 world_contact_surface_layer = 0.006
 world_contact_max_correcting_velocity = 25.0
-world_contact_bounce_velocity = 0.0
+world_contact_bounce_velocity = 0.15
 world_contact_slip = 0.01
 ubode_terrain_friction = 0.64
 ubode_terrain_bounce = 0.72
@@ -130,9 +130,18 @@ physical_prim_water_dynamics_enabled = true
 physical_prim_water_smoothing_timescale = 0.65
 physical_prim_water_surface_damping = 3.5
 physical_prim_water_max_rise_acceleration = 2.5
+physical_prim_water_drag = 1.35
 physical_prim_water_drift_scale = 12.0
 physical_prim_water_righting_strength = 3.0
 physical_prim_water_angular_damping = 5.0
+physical_prim_air_dynamics_enabled = true
+physical_prim_air_linear_drag = 0.018
+physical_prim_air_angular_drag = 0.004
+physical_prim_resting_damping_enabled = true
+physical_prim_resting_linear_damping = 3.0
+physical_prim_resting_angular_damping = 2.0
+physical_prim_resting_speed = 0.08
+physical_prim_resting_angular_speed = 0.12
 water_buoyancy_wood = 1.55
 water_buoyancy_metal = 0.10
 boat_turn_banking_enabled = true
@@ -152,10 +161,13 @@ low-pass their water height, immersion, wave normal and drift so floating motion
 feels heavier and more continuous instead of twitching with every tiny wave
 sample. The water response also limits maximum upward rise and applies extra
 surface damping when an object exits the water, so a wooden cube dropped from
-above settles into the surface instead of pogoing. Buoyant prims use their
-current orientation and dimensions to find a stable floating face: cube-like
-shapes damp their spin, while stretched boxes right themselves so their broad
-face settles toward the water surface.
+above settles into the surface instead of pogoing. Submerged objects now receive
+projected-area water drag, so broad faces push more water than narrow ones.
+Physical prims also get light air drag and a near-rest damping pass that removes
+small residual terrain or water jitter once an object is almost still. Buoyant
+prims use their current orientation and dimensions to find a stable floating
+face: cube-like shapes damp their spin, while stretched boxes right themselves
+so their broad face settles toward the water surface.
 
 RegionWeb Portal And Inventory Carousels
 ----------------------------------------
