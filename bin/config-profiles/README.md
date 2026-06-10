@@ -91,7 +91,7 @@ What The Standalone Profile Enables
 - `config-include/StandaloneHypergrid.ini`
 - `GatekeeperURI` and `HomeURI` for Hypergrid travel
 - YEngine
-- ubODE physics with Vanilla Sim realism tuning for solver precision, terrain contact, material friction/bounce and procedural boat water dynamics
+- ubODE physics with Vanilla Sim realism tuning for solver precision, avatar movement, terrain contact, material friction/bounce and procedural boat water dynamics
 - Warp3D map rendering with depth-shaded water
 - Weather module with automatic forecast cycling and visitor IMs
 - Built-in Groups Module V2 with local SQLite storage
@@ -154,6 +154,16 @@ physical_prim_resting_angular_speed = 0.12
 physical_prim_shape_inertia_enabled = true
 physical_prim_base_inertia_scale = 1.08
 physical_prim_thin_shape_inertia_boost = 0.45
+avatar_friction = 0.35
+avatar_physics_tuning_enabled = true
+avatar_ground_rest_damping = 0.55
+avatar_landing_damping = 0.35
+avatar_air_control_scale = 0.65
+avatar_water_dynamics_enabled = true
+avatar_water_buoyancy = 0.92
+avatar_water_drag = 0.85
+avatar_water_walk_speed_scale = 0.55
+avatar_water_surface_damping = 1.8
 water_buoyancy_wood = 1.55
 water_buoyancy_metal = 0.10
 boat_turn_banking_enabled = true
@@ -186,6 +196,10 @@ objects, so boards and poles do not spin like massless props. Buoyant prims use
 their current orientation and dimensions to find a stable floating face:
 cube-like shapes damp their spin, while stretched boxes right themselves so
 their broad face settles toward the water surface.
+Avatar movement also receives a conservative realism pass: light avatar-to-prim
+friction, softer landings, reduced air steering while falling, near-rest ground
+damping and water movement that slows and supports the avatar body instead of
+making water feel like empty air.
 
 RegionWeb Portal And Inventory Carousels
 ----------------------------------------

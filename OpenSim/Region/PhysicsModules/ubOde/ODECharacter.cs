@@ -1134,6 +1134,94 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             return true;
         }
 
+        private float GetAvatarWaterSubmerged(Vector3 pos)
+        {
+            if (!m_parent_scene.AvatarWaterDynamicsEnabled)
+                return 0f;
+
+            float waterHeight = m_parent_scene.GetDynamicWaterHeight(pos.X, pos.Y);
+            float terrainHeight = m_parent_scene.GetTerrainHeightAtXY(pos.X, pos.Y);
+            if (terrainHeight > waterHeight - 0.15f)
+                return 0f;
+
+            float avatarHeight = MathF.Max(CapsuleSizeZ * 2f, 0.1f);
+            float bottom = pos.Z - CapsuleSizeZ;
+            return Math.Clamp((waterHeight - bottom) / avatarHeight, 0f, 1f);
+        }
+
+        private void ApplyAvatarAirControl(ref Vector3 ctv, float waterSubmerged, bool hoverPIDActive)
+        {
+            if (!m_parent_scene.AvatarPhysicsTuningEnabled || m_flying || hoverPIDActive)
+                return;
+
+            if (m_iscolliding || m_iscollidingGround || waterSubmerged > 0.25f)
+                return;
+
+            ctv.X *= m_parent_scene.AvatarAirControlScale;
+            ctv.Y *= m_parent_scene.AvatarAirControlScale;
+        }
+
+        private void ApplyAvatarWaterMovement(float waterSubmerged, ref Vector3 ctv)
+        {
+            if (!m_parent_scene.AvatarWaterDynamicsEnabled || m_flying || waterSubmerged <= 0.05f)
+                return;
+
+            float movementScale = 1f - waterSubmerged * (1f - m_parent_scene.AvatarWaterWalkSpeedScale);
+            ctv.X *= movementScale;
+            ctv.Y *= movementScale;
+        }
+
+        private void ApplyAvatarLandingDamping(Vector3 vel, float depth, ref Vector3 vec)
+        {
+            if (!m_parent_scene.AvatarPhysicsTuningEnabled || m_flying || vel.Z >= -0.25f)
+                return;
+
+            float contactScale = Math.Clamp(depth * 8f, 0.15f, 1f);
+            vec.Z += -vel.Z * PID_D * m_parent_scene.AvatarLandingDamping * contactScale;
+        }
+
+        private void ApplyAvatarGroundRestDamping(Vector3 vel, bool targetVelocityZero, bool hoverPIDActive, ref Vector3 vec)
+        {
+            if (!m_parent_scene.AvatarPhysicsTuningEnabled || !targetVelocityZero || m_flying || hoverPIDActive)
+                return;
+
+            if (!m_iscolliding && !m_iscollidingGround)
+                return;
+
+            float damping = PID_D * m_parent_scene.AvatarGroundRestDamping;
+            if (MathF.Abs(vel.X) < 0.35f)
+                vec.X -= vel.X * damping;
+            if (MathF.Abs(vel.Y) < 0.35f)
+                vec.Y -= vel.Y * damping;
+            if (vel.Z > -0.25f && vel.Z < 0.45f)
+                vec.Z -= vel.Z * damping * 0.35f;
+        }
+
+        private void ApplyAvatarWaterForces(float waterSubmerged, Vector3 vel, ref Vector3 vec)
+        {
+            if (!m_parent_scene.AvatarWaterDynamicsEnabled || waterSubmerged <= 0.05f)
+                return;
+
+            float dragScale = PID_D * m_parent_scene.AvatarWaterDrag * waterSubmerged * 0.18f;
+            vec.X -= vel.X * dragScale;
+            vec.Y -= vel.Y * dragScale;
+
+            if (!m_flying)
+            {
+                vec.Z -= m_scenegravityForceZ * m_parent_scene.AvatarWaterBuoyancy * waterSubmerged;
+
+                if (vel.Z > 0f && waterSubmerged < 0.45f)
+                {
+                    float surfaceScale = 1f - waterSubmerged / 0.45f;
+                    vec.Z -= vel.Z * PID_D * m_parent_scene.AvatarWaterSurfaceDamping * surfaceScale;
+                }
+                else if (vel.Z < 0f)
+                {
+                    vec.Z -= vel.Z * PID_D * m_parent_scene.AvatarWaterDrag * waterSubmerged * 0.08f;
+                }
+            }
+        }
+
         /// <summary>
         /// Called from Simulate
         /// This is the avatar's movement control + PID Controller
@@ -1251,6 +1339,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
             Vector3 vec = Vector3.Zero;
             float terrainheight = m_parent_scene.GetTerrainHeightAtXY(tmpX, tmpY);
+            float waterSubmerged = GetAvatarWaterSubmerged(_position);
 
             bool hoverPIDActive = false;
             if (m_useHoverPID && m_PIDHoverTau != 0 && m_PIDHoverHeight != 0)
@@ -1326,6 +1415,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                             n.Z = 1.0f;
                         }
                     }
+                    ApplyAvatarLandingDamping(vel, depth, ref vec);
                 }
 
                 if (depth < 0.2f)
@@ -1384,6 +1474,9 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             //******************************************
             if (!m_iscolliding)
                 CollideNormal.Z = 0;
+
+            ApplyAvatarAirControl(ref ctv, waterSubmerged, hoverPIDActive);
+            ApplyAvatarWaterMovement(waterSubmerged, ref ctv);
 
             tviszero = ctv.IsZero();
             if (!tviszero)
@@ -1570,6 +1663,9 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             {
                 vec.Z -= m_scenegravityForceZ * m_buoyancy;
             }
+
+            ApplyAvatarWaterForces(waterSubmerged, vel, ref vec);
+            ApplyAvatarGroundRestDamping(vel, tviszero, hoverPIDActive, ref vec);
 
             if ((vec.Z != 0 || vec.X != 0 || vec.Y != 0))
                 UBOdeNative.BodyAddForce(Body, vec.X, vec.Y, vec.Z);
