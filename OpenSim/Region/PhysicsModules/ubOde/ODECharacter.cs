@@ -109,6 +109,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         internal Vector3 CollideNormal;
         private Vector3 m_smoothedCollideNormal = Vector3.UnitZ;
         private bool m_hasSmoothedCollideNormal = false;
+        private Vector3 m_smoothedTargetVelocity = Vector3.Zero;
+        private bool m_hasSmoothedTargetVelocity = false;
         private float m_smoothedWaterSubmerged = 0f;
         private bool m_hasAvatarWaterState = false;
         private int m_feetCollisionFrames = 0;
@@ -1154,6 +1156,12 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             m_smoothedWaterSubmerged = 0f;
         }
 
+        private void ResetAvatarTargetVelocitySmoothing()
+        {
+            m_hasSmoothedTargetVelocity = false;
+            m_smoothedTargetVelocity = Vector3.Zero;
+        }
+
         private void SetAvatarCollideNormal(Vector3 normal)
         {
             if (!normal.IsFinite() || normal.LengthSquared() <= 0.000001f)
@@ -1247,6 +1255,77 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             ctv.Y *= movementScale;
         }
 
+        private void ApplyAvatarSlopeSpeedDamping(ref Vector3 ctv, bool hoverPIDActive)
+        {
+            if (!m_parent_scene.AvatarPhysicsTuningEnabled || m_flying || hoverPIDActive)
+                return;
+
+            if ((!m_iscolliding && !m_iscollidingGround) ||
+                CollideNormal.Z <= 0.15f ||
+                CollideNormal.Z >= 0.98f ||
+                (ctv.X * ctv.X + ctv.Y * ctv.Y) < 0.0001f)
+            {
+                return;
+            }
+
+            float slope = 1f - CollideNormal.Z;
+            float speedScale = Math.Clamp(1f - slope * m_parent_scene.AvatarSlopeSpeedDamping, 0.35f, 1f);
+            ctv.X *= speedScale;
+            ctv.Y *= speedScale;
+        }
+
+        private void SmoothAvatarTargetVelocity(ref Vector3 ctv, bool hoverPIDActive)
+        {
+            if (!m_parent_scene.AvatarPhysicsTuningEnabled ||
+                m_parent_scene.AvatarMovementSmoothingTimescale <= m_sceneTimeStep ||
+                m_flying ||
+                hoverPIDActive)
+            {
+                ResetAvatarTargetVelocitySmoothing();
+                return;
+            }
+
+            if (!ctv.IsFinite())
+            {
+                ResetAvatarTargetVelocitySmoothing();
+                return;
+            }
+
+            float targetSpeedSq = ctv.X * ctv.X + ctv.Y * ctv.Y;
+            if (!m_hasSmoothedTargetVelocity)
+            {
+                m_smoothedTargetVelocity = ctv;
+                m_hasSmoothedTargetVelocity = true;
+                return;
+            }
+
+            float smoothedSpeedSq = m_smoothedTargetVelocity.X * m_smoothedTargetVelocity.X +
+                m_smoothedTargetVelocity.Y * m_smoothedTargetVelocity.Y;
+            float alpha = Math.Clamp(
+                m_sceneTimeStep / m_parent_scene.AvatarMovementSmoothingTimescale,
+                0.04f, 1f);
+
+            if (targetSpeedSq < smoothedSpeedSq)
+                alpha = Math.Clamp(alpha * 2.5f, 0.10f, 1f);
+
+            m_smoothedTargetVelocity.X += (ctv.X - m_smoothedTargetVelocity.X) * alpha;
+            m_smoothedTargetVelocity.Y += (ctv.Y - m_smoothedTargetVelocity.Y) * alpha;
+            m_smoothedTargetVelocity.Z = ctv.Z;
+
+            if (targetSpeedSq <= 0.0001f &&
+                m_smoothedTargetVelocity.X * m_smoothedTargetVelocity.X +
+                m_smoothedTargetVelocity.Y * m_smoothedTargetVelocity.Y <= 0.0004f)
+            {
+                ResetAvatarTargetVelocitySmoothing();
+                ctv.X = 0f;
+                ctv.Y = 0f;
+                return;
+            }
+
+            ctv.X = m_smoothedTargetVelocity.X;
+            ctv.Y = m_smoothedTargetVelocity.Y;
+        }
+
         private void ApplyAvatarLandingDamping(Vector3 vel, float depth, ref Vector3 vec)
         {
             if (!m_parent_scene.AvatarPhysicsTuningEnabled || m_flying || vel.Z >= -0.25f)
@@ -1301,6 +1380,31 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             float lift = (m_parent_scene.AvatarStepAssistMaxVelocity - vel.Z) *
                 PID_D * m_parent_scene.AvatarStepAssistStrength;
             vec.Z += lift;
+        }
+
+        private void ApplyAvatarGroundTraction(Vector3 ctv, Vector3 vel, bool hoverPIDActive, ref Vector3 vec)
+        {
+            if (!m_parent_scene.AvatarPhysicsTuningEnabled || m_flying || hoverPIDActive)
+                return;
+
+            if ((!m_iscolliding && !m_iscollidingGround) || CollideNormal.Z <= 0.2f)
+                return;
+
+            float desiredSpeedSq = ctv.X * ctv.X + ctv.Y * ctv.Y;
+            if (desiredSpeedSq <= 0.0001f)
+                return;
+
+            float desiredSpeed = MathF.Sqrt(desiredSpeedSq);
+            float dirX = ctv.X / desiredSpeed;
+            float dirY = ctv.Y / desiredSpeed;
+            float along = vel.X * dirX + vel.Y * dirY;
+            float lateralX = vel.X - along * dirX;
+            float lateralY = vel.Y - along * dirY;
+            float slopeScale = 1f + (1f - CollideNormal.Z) * 2f;
+            float damping = PID_D * m_parent_scene.AvatarGroundTraction * slopeScale;
+
+            vec.X -= lateralX * damping;
+            vec.Y -= lateralY * damping;
         }
 
         private void ApplyAvatarWaterForces(float waterSubmerged, Vector3 vel, ref Vector3 vec)
@@ -1609,6 +1713,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
             ApplyAvatarAirControl(ref ctv, waterSubmerged, hoverPIDActive);
             ApplyAvatarWaterMovement(waterSubmerged, ref ctv);
+            ApplyAvatarSlopeSpeedDamping(ref ctv, hoverPIDActive);
+            SmoothAvatarTargetVelocity(ref ctv, hoverPIDActive);
 
             tviszero = ctv.IsZero();
             if (!tviszero)
@@ -1801,6 +1907,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             ApplyAvatarSlopeDamping(vel, tviszero, hoverPIDActive, ref vec);
             ApplyAvatarStepAssist(ctv, vel, hoverPIDActive, ref vec);
             ApplyAvatarFallDamping(vel, waterSubmerged, hoverPIDActive, ref vec);
+            ApplyAvatarGroundTraction(ctv, vel, hoverPIDActive, ref vec);
 
             if ((vec.Z != 0 || vec.X != 0 || vec.Y != 0))
                 UBOdeNative.BodyAddForce(Body, vec.X, vec.Y, vec.Z);
