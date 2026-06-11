@@ -95,6 +95,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         private float m_smoothedWaterLift;
         private Vector3 m_smoothedWaterNormal = Vector3.UnitZ;
         private Vector3 m_smoothedWaterFlow = Vector3.Zero;
+        private Vector3 m_smoothedWaterDistributedTorque = Vector3.Zero;
 
         private readonly int m_body_autodisable_frames;
         public int m_bodydisablecontrol = 0;
@@ -3886,19 +3887,39 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             }
         }
 
-        private void AddWaterSurfaceSample(Vector3 samplePosition, ref float heightSum, ref Vector3 normalSum, ref Vector3 flowSum, ref int count)
+        private float AddWaterSurfaceSample(Vector3 samplePosition, ref float heightSum, ref Vector3 normalSum, ref Vector3 flowSum, ref int count)
         {
-            heightSum += m_parentScene.GetDynamicWaterHeight(samplePosition.X, samplePosition.Y);
+            float waterHeight = m_parentScene.GetDynamicWaterHeight(samplePosition.X, samplePosition.Y);
+            heightSum += waterHeight;
             normalSum += m_parentScene.GetDynamicWaterNormal(samplePosition.X, samplePosition.Y);
             flowSum += m_parentScene.GetDynamicWaterFlow(samplePosition.X, samplePosition.Y);
             count++;
+            return waterHeight;
         }
 
-        private void SamplePhysicalPrimWaterSurface(Vector3 pos, Quaternion orientation, out float waterHeight, out Vector3 waterNormal, out Vector3 waterFlow)
+        private Vector3 GetDistributedWaterLiftTorque(Vector3 offset, float waterHeightDelta)
+        {
+            if (!m_parentScene.PhysicalPrimWaterDistributedLiftEnabled ||
+                m_parentScene.PhysicalPrimWaterDistributedLiftTorque <= 0f ||
+                MathF.Abs(waterHeightDelta) <= 0.001f ||
+                offset.LengthSquared() <= 0.0025f)
+                return Vector3.Zero;
+
+            float distributedLift = waterHeightDelta * MathF.Min(m_mass, 2000f) *
+                m_parentScene.PhysicalPrimWaterDistributedLiftTorque;
+
+            return Vector3.Cross(offset, Vector3.UnitZ * distributedLift);
+        }
+
+        private void SamplePhysicalPrimWaterSurface(
+            Vector3 pos, Quaternion orientation,
+            out float waterHeight, out Vector3 waterNormal, out Vector3 waterFlow,
+            out Vector3 distributedWaterTorque)
         {
             float heightSum = 0f;
             Vector3 normalSum = Vector3.Zero;
             Vector3 flowSum = Vector3.Zero;
+            distributedWaterTorque = Vector3.Zero;
             int count = 0;
 
             AddWaterSurfaceSample(pos, ref heightSum, ref normalSum, ref flowSum, ref count);
@@ -3929,14 +3950,16 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
             if (firstLengthSq > 0f)
             {
-                AddWaterSurfaceSample(pos + first, ref heightSum, ref normalSum, ref flowSum, ref count);
-                AddWaterSurfaceSample(pos - first, ref heightSum, ref normalSum, ref flowSum, ref count);
+                float plusHeight = AddWaterSurfaceSample(pos + first, ref heightSum, ref normalSum, ref flowSum, ref count);
+                float minusHeight = AddWaterSurfaceSample(pos - first, ref heightSum, ref normalSum, ref flowSum, ref count);
+                distributedWaterTorque += GetDistributedWaterLiftTorque(first, plusHeight - minusHeight);
             }
 
             if (secondLengthSq > 0f)
             {
-                AddWaterSurfaceSample(pos + second, ref heightSum, ref normalSum, ref flowSum, ref count);
-                AddWaterSurfaceSample(pos - second, ref heightSum, ref normalSum, ref flowSum, ref count);
+                float plusHeight = AddWaterSurfaceSample(pos + second, ref heightSum, ref normalSum, ref flowSum, ref count);
+                float minusHeight = AddWaterSurfaceSample(pos - second, ref heightSum, ref normalSum, ref flowSum, ref count);
+                distributedWaterTorque += GetDistributedWaterLiftTorque(second, plusHeight - minusHeight);
             }
 
             float inverseCount = 1f / count;
@@ -3958,6 +3981,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             m_smoothedWaterLift = 0f;
             m_smoothedWaterNormal = Vector3.UnitZ;
             m_smoothedWaterFlow = Vector3.Zero;
+            m_smoothedWaterDistributedTorque = Vector3.Zero;
         }
 
         private void ApplyPhysicalPrimAirDynamics(Quaternion orientation, ref float fx, ref float fy, ref float fz)
@@ -4093,7 +4117,13 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             }
 
             Quaternion orientation = Body != IntPtr.Zero ? UBOdeNative.BodyGetQuaternionOMV(Body) : m_orientation;
-            SamplePhysicalPrimWaterSurface(pos, orientation, out float rawWaterHeight, out Vector3 rawWaterNormal, out Vector3 rawFlow);
+            SamplePhysicalPrimWaterSurface(
+                pos,
+                orientation,
+                out float rawWaterHeight,
+                out Vector3 rawWaterNormal,
+                out Vector3 rawFlow,
+                out Vector3 distributedWaterTorque);
             if (m_parentScene.GetTerrainHeightAtXY(pos.X, pos.Y) > rawWaterHeight - 0.1f)
             {
                 ResetWaterDynamicsState();
@@ -4136,6 +4166,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 m_smoothedWaterFlow = rawFlow;
                 m_smoothedWaterSubmerged = rawSubmerged;
                 m_smoothedWaterLift = 0f;
+                m_smoothedWaterDistributedTorque = distributedWaterTorque;
                 m_hasWaterDynamicsState = true;
             }
             else
@@ -4146,6 +4177,9 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 m_smoothedWaterHeight += (rawWaterHeight - m_smoothedWaterHeight) * alpha;
                 m_smoothedWaterNormal += (rawWaterNormal - m_smoothedWaterNormal) * alpha;
                 m_smoothedWaterFlow += (rawFlow - m_smoothedWaterFlow) * alpha;
+                m_smoothedWaterDistributedTorque +=
+                    (distributedWaterTorque - m_smoothedWaterDistributedTorque) *
+                    Math.Clamp(alpha * 0.65f, 0.01f, 1f);
                 m_smoothedWaterSubmerged += (rawSubmerged - m_smoothedWaterSubmerged) * submergedAlpha;
             }
 
@@ -4225,6 +4259,13 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             float massScale = MathF.Min(m_mass, 2000f);
             Vector3 waterTorque = -angularVel * massScale * m_parentScene.PhysicalPrimWaterAngularDamping * submerged;
             float angularSpeed = angularVel.Length();
+
+            if (m_parentScene.PhysicalPrimWaterDistributedLiftEnabled)
+            {
+                waterTorque += ClampVectorMagnitude(
+                    m_smoothedWaterDistributedTorque * submerged,
+                    m_parentScene.PhysicalPrimWaterDistributedLiftMaxTorque);
+            }
 
             if (m_parentScene.PhysicalPrimWaterSpinSettleEnabled &&
                 !isVehicle &&

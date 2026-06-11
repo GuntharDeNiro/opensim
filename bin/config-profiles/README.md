@@ -154,6 +154,9 @@ physical_prim_water_footprint_sampling_enabled = true
 physical_prim_water_footprint_sample_scale = 0.35
 physical_prim_water_footprint_min_size = 1.5
 physical_prim_water_footprint_max_offset = 6.0
+physical_prim_water_distributed_lift_enabled = true
+physical_prim_water_distributed_lift_torque = 0.18
+physical_prim_water_distributed_lift_max_torque = 9000.0
 physical_prim_water_righting_strength = 3.0
 physical_prim_water_angular_damping = 5.0
 physical_prim_water_spin_settle_enabled = true
@@ -235,6 +238,10 @@ inworld demos; terrain contact uses a square-root bounce blend so low terrain
 restitution does not cancel a bouncy material. Physical prims now also get
 material-based water buoyancy: wood, plastic and rubber float, while metal and
 stone mostly sink.
+Floating prims sample the water under their footprint, so larger objects feel
+the wave height under each side and get a distributed lift torque instead of one
+flat center push. That makes rafts, boxes and boat-like builds roll and settle
+with the water more naturally.
 Low-speed contact micro-bounce damping keeps rubber/plastic bounce at visible
 impact speeds while fading the tiny resting rebounds that make settled objects
 tremble on terrain.
