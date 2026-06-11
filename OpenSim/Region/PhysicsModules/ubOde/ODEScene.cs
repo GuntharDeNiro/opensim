@@ -213,6 +213,12 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         internal float AvatarStepAssistMaxVelocity = 2.4f;
         internal bool AvatarSocialPhysicsEnabled = true;
         internal string AvatarSocialPhysicsDefaultMode = "friendly";
+        internal float AvatarSocialFriendlyNudge = 0.11f;
+        internal float AvatarSocialPlayfulNudge = 0.22f;
+        internal float AvatarSocialRomanticNudge = 0.035f;
+        internal float AvatarSocialNoTouchNudge = 0.35f;
+        internal float AvatarSocialNudgeFullDepth = 0.12f;
+        internal float AvatarSocialNudgeMaxForce = 0.28f;
         internal bool AvatarAvatarCollisionTuningEnabled = true;
         internal float AvatarAvatarContactERP = 0.24f;
         internal float AvatarAvatarContactCFM = 0.006f;
@@ -906,6 +912,12 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     AvatarStepAssistMaxVelocity = ConfigFloat(physicsconfig, "avatar_step_assist_max_velocity", AvatarStepAssistMaxVelocity, 0f, 10f);
                     AvatarSocialPhysicsEnabled = physicsconfig.GetBoolean("avatar_social_physics_enabled", AvatarSocialPhysicsEnabled);
                     AvatarSocialPhysicsDefaultMode = physicsconfig.GetString("avatar_social_default_mode", AvatarSocialPhysicsDefaultMode).Trim();
+                    AvatarSocialFriendlyNudge = ConfigFloat(physicsconfig, "avatar_social_friendly_nudge", AvatarSocialFriendlyNudge, 0f, 5f);
+                    AvatarSocialPlayfulNudge = ConfigFloat(physicsconfig, "avatar_social_playful_nudge", AvatarSocialPlayfulNudge, 0f, 5f);
+                    AvatarSocialRomanticNudge = ConfigFloat(physicsconfig, "avatar_social_romantic_nudge", AvatarSocialRomanticNudge, 0f, 5f);
+                    AvatarSocialNoTouchNudge = ConfigFloat(physicsconfig, "avatar_social_no_touch_nudge", AvatarSocialNoTouchNudge, 0f, 5f);
+                    AvatarSocialNudgeFullDepth = ConfigFloat(physicsconfig, "avatar_social_nudge_full_depth", AvatarSocialNudgeFullDepth, 0.001f, 1f);
+                    AvatarSocialNudgeMaxForce = ConfigFloat(physicsconfig, "avatar_social_nudge_max_force", AvatarSocialNudgeMaxForce, 0f, 10f);
                     AvatarAvatarCollisionTuningEnabled = physicsconfig.GetBoolean("avatar_avatar_collision_tuning_enabled", AvatarAvatarCollisionTuningEnabled);
                     AvatarAvatarContactERP = ConfigFloat(physicsconfig, "avatar_avatar_contact_erp", AvatarAvatarContactERP, 0.01f, 1f);
                     AvatarAvatarContactCFM = ConfigFloat(physicsconfig, "avatar_avatar_contact_cfm", AvatarAvatarContactCFM, 0.000001f, 0.1f);
@@ -1071,7 +1083,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             LoadMaterialWaterSettings(physicsconfig);
 
             m_log.InfoFormat(
-                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s primWaterRise={16:0.###} primWaterDrag={17:0.###} airDrag={18} restDamp={19} rolling={20:0.###} nearRestSleep={21} microBounce={22} impactSoft={23} materialDensity={24} shapeInertia={25} avatarTune={26} avatarWater={27} avatarWaterSmooth={28:0.###}s avatarMoveSmooth={29:0.###}s avatarSettle={30:0.###} avatarAvatar={31} avatarObject={32} avatarFallDamp={33} waterCushion={34:0.###} liftSmooth={35:0.###}s waterEq={36} waterFootprint={37} waterDistributed={38} waterSpinSettle={39} highBounce=({40:0.###},{41:0.###}) waterDrift=({42:0.###},{43:0.###},max={44:0.###}) avatarSocial={45}",
+                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s primWaterRise={16:0.###} primWaterDrag={17:0.###} airDrag={18} restDamp={19} rolling={20:0.###} nearRestSleep={21} microBounce={22} impactSoft={23} materialDensity={24} shapeInertia={25} avatarTune={26} avatarWater={27} avatarWaterSmooth={28:0.###}s avatarMoveSmooth={29:0.###}s avatarSettle={30:0.###} avatarAvatar={31} avatarObject={32} avatarFallDamp={33} waterCushion={34:0.###} liftSmooth={35:0.###}s waterEq={36} waterFootprint={37} waterDistributed={38} waterSpinSettle={39} highBounce=({40:0.###},{41:0.###}) waterDrift=({42:0.###},{43:0.###},max={44:0.###}) avatarSocial={45} socialNudge=({46:0.###},max={47:0.###})",
                 ODE_STEPSIZE, m_physicsiterations, bodyFramesAutoDisable, worldLinearDamping, worldAngularDamping,
                 commonContactERP, commonContactCFM, commonContactSLIP, contactsurfacelayer,
                 contactMaxCorrectingVelocity, commonContactBounceVelocity, TerrainFriction, TerrainBounce,
@@ -1105,7 +1117,9 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 PhysicalPrimWaterDriftScale,
                 PhysicalPrimWaterDriftResponse,
                 PhysicalPrimWaterDriftMaxAcceleration,
-                AvatarSocialPhysicsEnabled ? AvatarSocialPhysicsDefaultMode : "disabled");
+                AvatarSocialPhysicsEnabled ? AvatarSocialPhysicsDefaultMode : "disabled",
+                AvatarSocialFriendlyNudge,
+                AvatarSocialNudgeMaxForce);
 
             m_lastframe = Util.GetTimeStamp();
             m_lastMeshExpire = m_lastframe;
@@ -1248,6 +1262,63 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             contactSharedForJoints.surface.soft_erp = previousSoftERP;
             contactSharedForJoints.surface.soft_cfm = previousSoftCFM;
             return joint;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private float GetAvatarSocialNudgeStrength()
+        {
+            if (!AvatarSocialPhysicsEnabled || !AvatarAvatarCollisionTuningEnabled)
+                return 0f;
+
+            string mode = AvatarSocialPhysicsDefaultMode?.Trim().ToLowerInvariant();
+            if (string.IsNullOrEmpty(mode))
+                mode = "friendly";
+
+            switch (mode)
+            {
+                case "friendly":
+                    return AvatarSocialFriendlyNudge;
+                case "playful":
+                    return AvatarSocialPlayfulNudge;
+                case "romantic":
+                    return AvatarSocialRomanticNudge;
+                case "no-touch":
+                case "notouch":
+                    return AvatarSocialNoTouchNudge;
+                default:
+                    return 0f;
+            }
+        }
+
+        private void ApplyAvatarSocialNudge(PhysicsActor p1, PhysicsActor p2, float penetrationDepth)
+        {
+            float strength = GetAvatarSocialNudgeStrength();
+            if (strength <= 0f || penetrationDepth <= 0f)
+                return;
+
+            Vector3 delta = p2.Position - p1.Position;
+            delta.Z = 0f;
+
+            float distanceSq = delta.X * delta.X + delta.Y * delta.Y;
+            if (distanceSq < 0.0001f)
+                return;
+
+            float distance = MathF.Sqrt(distanceSq);
+            Vector3 direction = delta / distance;
+
+            float depthAlpha = MathF.Min(penetrationDepth / AvatarSocialNudgeFullDepth, 1f);
+            depthAlpha = depthAlpha * depthAlpha * (3f - 2f * depthAlpha);
+
+            float force = MathF.Min(strength * depthAlpha, AvatarSocialNudgeMaxForce);
+            if (force <= 0f)
+                return;
+
+            Vector3 nudge = direction * force;
+            if (!nudge.IsFinite())
+                return;
+
+            p1.AddForce(-nudge, true);
+            p2.AddForce(nudge, true);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1595,6 +1666,9 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
             if (ncontacts > 0)
             {
+                if (isAvatarAvatarContact)
+                    ApplyAvatarSocialNudge(p1, p2, maxDepth);
+
                 Collision_accounting_events(p1, p2, ref maxDepthContact);
             }
         }
