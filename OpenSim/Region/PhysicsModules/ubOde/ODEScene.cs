@@ -284,21 +284,21 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         internal float BoatWaterTiltStrength = 1.0f;
         internal bool PhysicalPrimWaterDynamicsEnabled = true;
         internal float PhysicalPrimWaterSurfaceRange = 2.0f;
-        internal float PhysicalPrimWaterSmoothingTimescale = 0.65f;
-        internal float PhysicalPrimWaterSurfaceCushion = 0.18f;
-        internal float PhysicalPrimWaterLiftSmoothingTimescale = 0.24f;
+        internal float PhysicalPrimWaterSmoothingTimescale = 0.85f;
+        internal float PhysicalPrimWaterSurfaceCushion = 0.28f;
+        internal float PhysicalPrimWaterLiftSmoothingTimescale = 0.18f;
         internal float PhysicalPrimWaterLiftSlewRate = 35.0f;
-        internal float PhysicalPrimWaterVerticalDamping = 2.4f;
-        internal float PhysicalPrimWaterSurfaceDamping = 3.5f;
-        internal float PhysicalPrimWaterMaxRiseAcceleration = 2.5f;
+        internal float PhysicalPrimWaterVerticalDamping = 4.5f;
+        internal float PhysicalPrimWaterSurfaceDamping = 7.0f;
+        internal float PhysicalPrimWaterMaxRiseAcceleration = 0.9f;
         internal float PhysicalPrimWaterDrag = 1.35f;
         internal float PhysicalPrimWaterDriftScale = 12.0f;
         internal float PhysicalPrimWaterDriftResponse = 0.8f;
         internal bool PhysicalPrimWaterEquilibriumEnabled = true;
-        internal float PhysicalPrimWaterEquilibriumResponse = 1.15f;
-        internal float PhysicalPrimWaterEquilibriumDamping = 1.6f;
-        internal float PhysicalPrimWaterEquilibriumMaxVelocity = 1.1f;
-        internal float PhysicalPrimWaterEquilibriumMaxAcceleration = 4.0f;
+        internal float PhysicalPrimWaterEquilibriumResponse = 0.75f;
+        internal float PhysicalPrimWaterEquilibriumDamping = 4.5f;
+        internal float PhysicalPrimWaterEquilibriumMaxVelocity = 0.45f;
+        internal float PhysicalPrimWaterEquilibriumMaxAcceleration = 4.5f;
         internal bool PhysicalPrimWaterFootprintSamplingEnabled = true;
         internal float PhysicalPrimWaterFootprintSampleScale = 0.35f;
         internal float PhysicalPrimWaterFootprintMinSize = 1.5f;
@@ -711,13 +711,13 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             SetMaterialWaterBuoyancy(Material.Glass,
                 ConfigFloat(config, "water_buoyancy_glass", 0.70f, 0f, 5f));
             SetMaterialWaterBuoyancy(Material.Wood,
-                ConfigFloat(config, "water_buoyancy_wood", 1.55f, 0f, 5f));
+                ConfigFloat(config, "water_buoyancy_wood", 1.42f, 0f, 5f));
             SetMaterialWaterBuoyancy(Material.Flesh,
                 ConfigFloat(config, "water_buoyancy_flesh", 1.05f, 0f, 5f));
             SetMaterialWaterBuoyancy(Material.Plastic,
-                ConfigFloat(config, "water_buoyancy_plastic", 1.75f, 0f, 5f));
+                ConfigFloat(config, "water_buoyancy_plastic", 1.55f, 0f, 5f));
             SetMaterialWaterBuoyancy(Material.Rubber,
-                ConfigFloat(config, "water_buoyancy_rubber", 1.90f, 0f, 5f));
+                ConfigFloat(config, "water_buoyancy_rubber", 1.70f, 0f, 5f));
             SetMaterialWaterBuoyancy(Material.light,
                 ConfigFloat(config, "water_buoyancy_light", 2.60f, 0f, 5f));
         }

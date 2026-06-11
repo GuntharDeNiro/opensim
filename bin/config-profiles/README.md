@@ -92,6 +92,7 @@ What The Standalone Profile Enables
 - `GatekeeperURI` and `HomeURI` for Hypergrid travel
 - YEngine
 - ubODE physics with Vanilla Sim realism tuning for solver precision, avatar movement, terrain contact, material friction/bounce and procedural boat water dynamics
+- Automatic avatar cloud recovery with baked-texture persistence and quick rebake requests
 - Warp3D map rendering with depth-shaded water
 - Weather module with automatic forecast cycling and visitor IMs
 - Built-in Groups Module V2 with local SQLite storage
@@ -137,19 +138,20 @@ boat_water_dynamics_enabled = true
 boat_wave_height_1 = 0.09
 boat_wave_drift_scale = 0.25
 physical_prim_water_dynamics_enabled = true
-physical_prim_water_smoothing_timescale = 0.65
-physical_prim_water_surface_cushion = 0.18
-physical_prim_water_lift_smoothing_timescale = 0.24
+physical_prim_water_smoothing_timescale = 0.85
+physical_prim_water_surface_cushion = 0.28
+physical_prim_water_lift_smoothing_timescale = 0.18
 physical_prim_water_lift_slew_rate = 35.0
-physical_prim_water_surface_damping = 3.5
-physical_prim_water_max_rise_acceleration = 2.5
+physical_prim_water_vertical_damping = 4.5
+physical_prim_water_surface_damping = 7.0
+physical_prim_water_max_rise_acceleration = 0.9
 physical_prim_water_drag = 1.35
 physical_prim_water_drift_scale = 12.0
 physical_prim_water_equilibrium_enabled = true
-physical_prim_water_equilibrium_response = 1.15
-physical_prim_water_equilibrium_damping = 1.6
-physical_prim_water_equilibrium_max_velocity = 1.1
-physical_prim_water_equilibrium_max_acceleration = 4.0
+physical_prim_water_equilibrium_response = 0.75
+physical_prim_water_equilibrium_damping = 4.5
+physical_prim_water_equilibrium_max_velocity = 0.45
+physical_prim_water_equilibrium_max_acceleration = 4.5
 physical_prim_water_footprint_sampling_enabled = true
 physical_prim_water_footprint_sample_scale = 0.35
 physical_prim_water_footprint_min_size = 1.5
@@ -223,7 +225,7 @@ avatar_water_walk_speed_scale = 0.55
 avatar_water_surface_damping = 1.8
 avatar_water_surface_capture = 0.22
 avatar_water_smoothing_timescale = 0.45
-water_buoyancy_wood = 1.55
+water_buoyancy_wood = 1.42
 water_buoyancy_metal = 0.10
 boat_turn_banking_enabled = true
 ```
@@ -261,6 +263,9 @@ into buoyancy instead of getting an instant upward kick at the exact waterline.
 Buoyant materials also use a waterline equilibrium pass that targets a plausible
 submerged fraction for the material and damps toward it, reducing the repeated
 surface jumping that makes light objects look weightless.
+That equilibrium now drives lift as a damped waterline controller rather than a
+simple upward spring, so wooden and plastic prims should stop cycling fully
+underwater and back above the surface forever.
 Large floating objects sample the water across their horizontal footprint
 instead of only at their center, so long boxes and boat-like builds react to an
 averaged surface and flow rather than twitching around one wave point.

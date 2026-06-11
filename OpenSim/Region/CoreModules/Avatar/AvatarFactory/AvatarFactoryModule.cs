@@ -57,10 +57,10 @@ namespace OpenSim.Region.CoreModules.Avatar.AvatarFactory
 
         private int m_savetime = 5; // seconds to wait before saving changed appearance
         private int m_sendtime = 2; // seconds to wait before sending changed appearance
-        private bool m_temporaryDefaultAppearanceFallback = false;
-        private int m_temporaryDefaultAppearanceDelaySeconds = 20;
-        private int m_temporaryDefaultAppearanceRestoreSeconds = 20;
-        private int m_temporaryDefaultAppearanceVerifySeconds = 10;
+        private bool m_temporaryDefaultAppearanceFallback = true;
+        private int m_temporaryDefaultAppearanceDelaySeconds = 6;
+        private int m_temporaryDefaultAppearanceRestoreSeconds = 12;
+        private int m_temporaryDefaultAppearanceVerifySeconds = 8;
 
         private int m_checkTime = 500; // milliseconds to wait between checks for appearance updates
         private System.Timers.Timer m_updateTimer = new System.Timers.Timer();
@@ -461,6 +461,7 @@ namespace OpenSim.Region.CoreModules.Avatar.AvatarFactory
             };
 
             m_temporaryFallbacks[agentId] = fallback;
+            RequestRebake(sp, true);
             m_updateTimer.Start();
 
             m_log.InfoFormat(
@@ -683,7 +684,10 @@ namespace OpenSim.Region.CoreModules.Avatar.AvatarFactory
                         {
                             wcacheidx.CacheId = UUID.Zero;
                             wcacheidx.TextureID = AppearanceManager.DEFAULT_AVATAR_TEXTURE;
-                            hits++;
+                            if (idx == 19 || i >= AvatarAppearance.BAKES_COUNT_PV7)
+                                hits++;
+                            else
+                                wearableCacheValid = false;
                             continue;
                         }
 
@@ -759,16 +763,14 @@ namespace OpenSim.Region.CoreModules.Avatar.AvatarFactory
                         {
                             int idx = AvatarAppearance.BAKE_INDICES[i];
                             var wcacheidx = wearableCache[idx];
-                            var faceTextureidx = spAppearanceTextureFaceTextures[idx];
                             if (wcacheidx.TextureAsset == null)
                             {
-                                if(idx == 19)
+                                if(idx == 19 || i >= AvatarAppearance.BAKES_COUNT_PV7)
                                 {
-                                    faceTextureidx = null;
+                                    spAppearanceTextureFaceTextures[idx] = null;
                                     hits++;
                                 }
-                                else if(faceTextureidx == null || faceTextureidx.TextureID.Equals(AppearanceManager.DEFAULT_AVATAR_TEXTURE))
-                                    hits++;
+
                                 wcacheidx.TextureID = AppearanceManager.DEFAULT_AVATAR_TEXTURE;
                                 wcacheidx.CacheId = UUID.Zero;
                                 continue;

@@ -4198,39 +4198,53 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
             UBOdeNative.Vector3 vel = UBOdeNative.BodyGetLinearVel(Body);
             float verticalDamping = m_parentScene.PhysicalPrimWaterVerticalDamping * submerged;
-            float waterAcceleration = -m_parentScene.gravityz * buoyancy * submerged;
-            float maxWaterAcceleration = -m_parentScene.gravityz + m_parentScene.PhysicalPrimWaterMaxRiseAcceleration;
-            float targetLiftAcceleration = MathF.Min(waterAcceleration, maxWaterAcceleration);
+            bool useFloatingEquilibrium =
+                m_parentScene.PhysicalPrimWaterEquilibriumEnabled &&
+                buoyancy > 1f &&
+                m_parentScene.PhysicalPrimWaterEquilibriumDamping > 0f &&
+                m_parentScene.PhysicalPrimWaterEquilibriumMaxAcceleration > 0f;
+
+            float targetLiftAcceleration;
+            if (useFloatingEquilibrium)
+            {
+                float equilibriumSubmerged = Math.Clamp(1f / buoyancy, 0.08f, 0.95f);
+                float supportBlend = SmoothStep01(submerged / equilibriumSubmerged);
+                float equilibriumError = submerged - equilibriumSubmerged;
+                float targetVerticalVelocity = Math.Clamp(
+                    equilibriumError * m_parentScene.PhysicalPrimWaterEquilibriumResponse,
+                    -m_parentScene.PhysicalPrimWaterEquilibriumMaxVelocity,
+                    m_parentScene.PhysicalPrimWaterEquilibriumMaxVelocity);
+                float equilibriumAcceleration = (targetVerticalVelocity - vel.Z) *
+                    m_parentScene.PhysicalPrimWaterEquilibriumDamping;
+
+                targetLiftAcceleration =
+                    -m_parentScene.gravityz * supportBlend +
+                    Math.Clamp(
+                        equilibriumAcceleration,
+                        -m_parentScene.PhysicalPrimWaterEquilibriumMaxAcceleration,
+                        m_parentScene.PhysicalPrimWaterEquilibriumMaxAcceleration);
+
+                targetLiftAcceleration = Math.Clamp(
+                    targetLiftAcceleration,
+                    -m_parentScene.PhysicalPrimWaterEquilibriumMaxAcceleration,
+                    -m_parentScene.gravityz + m_parentScene.PhysicalPrimWaterMaxRiseAcceleration);
+            }
+            else
+            {
+                float waterAcceleration = -m_parentScene.gravityz * buoyancy * submerged;
+                float maxWaterAcceleration = -m_parentScene.gravityz + m_parentScene.PhysicalPrimWaterMaxRiseAcceleration;
+                targetLiftAcceleration = MathF.Min(waterAcceleration, maxWaterAcceleration);
+            }
+
             float liftAlpha = Math.Clamp(m_sceneTimeStep / m_parentScene.PhysicalPrimWaterLiftSmoothingTimescale, 0.02f, 1f);
             float liftDelta = (targetLiftAcceleration - m_smoothedWaterLift) * liftAlpha;
             float maxLiftDelta = m_parentScene.PhysicalPrimWaterLiftSlewRate * m_sceneTimeStep;
             liftDelta = Math.Clamp(liftDelta, -maxLiftDelta, maxLiftDelta);
             m_smoothedWaterLift += liftDelta;
             fz += m_smoothedWaterLift;
-            fz -= vel.Z * verticalDamping;
+            fz -= vel.Z * verticalDamping * (useFloatingEquilibrium ? 0.35f : 1f);
             if (vel.Z > 0f && rawSubmerged < 0.45f)
                 fz -= vel.Z * m_parentScene.PhysicalPrimWaterSurfaceDamping * (1f - rawSubmerged / 0.45f);
-
-            if (m_parentScene.PhysicalPrimWaterEquilibriumEnabled &&
-                buoyancy > 1f &&
-                m_parentScene.PhysicalPrimWaterEquilibriumDamping > 0f &&
-                m_parentScene.PhysicalPrimWaterEquilibriumMaxAcceleration > 0f)
-            {
-                float equilibriumSubmerged = Math.Clamp(1f / buoyancy, 0.08f, 0.95f);
-                float equilibriumError = submerged - equilibriumSubmerged;
-                float targetVerticalVelocity = Math.Clamp(
-                    equilibriumError * m_parentScene.PhysicalPrimWaterEquilibriumResponse,
-                    -m_parentScene.PhysicalPrimWaterEquilibriumMaxVelocity,
-                    m_parentScene.PhysicalPrimWaterEquilibriumMaxVelocity);
-                float equilibriumBlend = SmoothStep01(submerged);
-                float equilibriumAcceleration = (targetVerticalVelocity - vel.Z) *
-                    m_parentScene.PhysicalPrimWaterEquilibriumDamping * equilibriumBlend;
-
-                fz += Math.Clamp(
-                    equilibriumAcceleration,
-                    -m_parentScene.PhysicalPrimWaterEquilibriumMaxAcceleration,
-                    m_parentScene.PhysicalPrimWaterEquilibriumMaxAcceleration);
-            }
 
             Vector3 relativeWaterVelocity = new(vel.X - m_smoothedWaterFlow.X, vel.Y - m_smoothedWaterFlow.Y, vel.Z);
             float relativeWaterSpeed = relativeWaterVelocity.Length();
