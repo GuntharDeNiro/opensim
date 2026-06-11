@@ -4004,12 +4004,18 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 return;
             }
 
-            float rawSubmerged = Math.Clamp((rawWaterHeight + surfaceCushion - bottom) / (objectHeight + surfaceCushion), 0f, 1f);
-            rawSubmerged = SmoothStep01(rawSubmerged);
-            if (rawSubmerged <= 0f)
+            float trueSubmerged = Math.Clamp((rawWaterHeight - bottom) / objectHeight, 0f, 1f);
+            if (trueSubmerged <= 0f)
             {
                 ResetWaterDynamicsState();
                 return;
+            }
+
+            float rawSubmerged = trueSubmerged;
+            if (surfaceCushion > 0f)
+            {
+                float cushionFraction = Math.Clamp(surfaceCushion / objectHeight, 0.001f, 1f);
+                rawSubmerged *= SmoothStep01(trueSubmerged / cushionFraction);
             }
 
             Vector3 rawWaterNormal = m_parentScene.GetDynamicWaterNormal(pos.X, pos.Y);

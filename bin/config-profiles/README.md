@@ -221,9 +221,9 @@ sample. The water response also limits maximum upward rise and applies extra
 surface damping when an object exits the water, so a wooden cube dropped from
 above settles into the surface instead of pogoing. Submerged objects now receive
 projected-area water drag, so broad faces push more water than narrow ones.
-Water lift now has a small surface cushion plus frame-to-frame smoothing, so
-floating prims ease into buoyancy instead of getting an instant upward kick at
-the exact waterline.
+Water lift now has a small surface-entry cushion plus frame-to-frame smoothing:
+it only starts after real immersion and then ramps in, so floating prims ease
+into buoyancy instead of getting an instant upward kick at the exact waterline.
 Floating prims that are not vehicles and are not being actively torqued also get
 idle spin settling, which damps the last slow rotations of cubes and other
 nearly symmetric objects without fighting scripted boats.
