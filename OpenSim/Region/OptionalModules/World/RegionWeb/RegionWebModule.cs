@@ -82,6 +82,11 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             "Attach your region to many grids at the same time, like OSGrid, Neverworld, Craft or any public grid you choose, with one click.";
         private const string MultiGridFeatureOverview =
             "Vanilla Sim lets one region appear on more than one grid map at the same time. You can keep your home base on Vanilla Sim, then share the same place with OSGrid, Neverworld, Craft or another friendly public grid from the multigrid switch profile. Visitors can discover the region from the grids they already use, while your simulator still keeps one home for inventory, assets and accounts.";
+        private const string EstateAdminFeatureTitle = "Estate owner control room";
+        private const string EstateAdminFeatureBody =
+            "Estate owners get a protected web admin panel to edit OpenSim settings, save with automatic backups, reload what is safe live and see clearly when a restart is still required.";
+        private const string EstateAdminFeatureOverview =
+            "Vanilla Sim adds a practical control room for people who run regions. Instead of opening files over remote desktop for every small change, an estate owner can request an inworld admin token, open a protected web panel, browse the allowed OpenSim configuration files, edit raw INI text or one setting at a time, save with automatic backups and ask the simulator to reload the parts that can safely change while the region is online.";
         private const string VanillaSimRepositoryUrl = "https://github.com/GuntharDeNiro/opensim";
 
         private readonly object m_sync = new object();
@@ -467,6 +472,12 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 if (parts[0].Equals("currency", StringComparison.OrdinalIgnoreCase))
                 {
                     SendCurrencyPortal(parts, request, response);
+                    return;
+                }
+
+                if (parts[0].Equals("admin", StringComparison.OrdinalIgnoreCase))
+                {
+                    SendEstateAdminPortal(parts, request, response);
                     return;
                 }
 
@@ -919,6 +930,401 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             }
 
             SendCurrencyDashboard(response, session, string.Empty, string.Empty);
+        }
+
+        private void SendEstateAdminPortal(string[] parts, IOSHttpRequest request, IOSHttpResponse response)
+        {
+            Dictionary<string, string> form = ReadForm(request);
+            bool isPost = !string.IsNullOrEmpty(request.HttpMethod)
+                && request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase);
+            string action = isPost ? FormValue(form, "action") :
+                (parts.Length >= 2 ? parts[1] : string.Empty);
+
+            CurrencyWebSession session = GetCurrencySession(request);
+
+            if (action.Equals("logout", StringComparison.OrdinalIgnoreCase))
+            {
+                if (session != null && !ValidateCurrencyCsrf(session, form, out string csrfMessage))
+                {
+                    SendEstateAdminDashboard(response, session, FormValue(form, "file"), csrfMessage, "error");
+                    return;
+                }
+
+                string sessionToken = ReadCookie(request, CurrencySessionCookie);
+                if (!string.IsNullOrEmpty(sessionToken))
+                {
+                    lock (m_currencyAuthLock)
+                        m_currencySessions.Remove(sessionToken);
+                }
+
+                ClearCurrencySessionCookie(response);
+                SendEstateAdminLogin(response, "You have been logged out.", string.Empty);
+                return;
+            }
+
+            if (isPost && action.Equals("admin-request-token", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleEstateAdminTokenRequest(form, response);
+                return;
+            }
+
+            if (isPost && action.Equals("admin-login", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleEstateAdminLogin(form, response);
+                return;
+            }
+
+            if (!IsCurrencyAdminSession(session))
+            {
+                SendEstateAdminLogin(response, string.Empty, FormValue(form, "avatar"));
+                return;
+            }
+
+            string selectedFileID = FormValue(form, "file");
+            string message = string.Empty;
+            string severity = string.Empty;
+
+            if (isPost)
+            {
+                if (ValidateCurrencyCsrf(session, form, out message))
+                {
+                    if (action.Equals("admin-save-raw", StringComparison.OrdinalIgnoreCase))
+                    {
+                        SaveEstateAdminRawConfig(selectedFileID, FormRawValue(form, "content"), out message, out severity);
+                    }
+                    else if (action.Equals("admin-save-setting", StringComparison.OrdinalIgnoreCase))
+                    {
+                        SaveEstateAdminSetting(
+                            selectedFileID,
+                            FormValue(form, "section"),
+                            FormValue(form, "key"),
+                            FormRawValue(form, "value"),
+                            out message,
+                            out severity);
+                    }
+                    else if (action.Equals("admin-reload", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ApplyEstateAdminReload(selectedFileID, out message, out severity);
+                    }
+                }
+                else
+                {
+                    severity = "error";
+                }
+            }
+            else if (string.IsNullOrEmpty(selectedFileID))
+            {
+                selectedFileID = FormValue(form, "file");
+            }
+
+            SendEstateAdminDashboard(response, session, selectedFileID, message, severity);
+        }
+
+        private void HandleEstateAdminTokenRequest(Dictionary<string, string> form, IOSHttpResponse response)
+        {
+            string avatarName = FormValue(form, "avatar");
+            if (!TryResolveAvatar(avatarName, out UUID agentID, out string displayName))
+            {
+                SendEstateAdminLogin(response, "Avatar not found. Use the full avatar name, for example First Last.", avatarName);
+                return;
+            }
+
+            if (!IsRegionWebSuperAdmin(agentID))
+            {
+                SendEstateAdminLogin(response, "Only an estate owner of a loaded region can access Estate Admin.", displayName);
+                return;
+            }
+
+            if (!TryFindOnlineClient(agentID, out IClientAPI client))
+            {
+                SendEstateAdminLogin(response, "Admin avatar resolved, but it must be online in one of these regions to receive the token inworld.", displayName);
+                return;
+            }
+
+            string token = GenerateCurrencyChallengeToken();
+            DateTime expires = DateTime.UtcNow.AddMinutes(m_currencyChallengeMinutes);
+            lock (m_currencyAuthLock)
+            {
+                CleanupCurrencyAuthLocked();
+                if (m_currencyChallengeCooldownSeconds > 0
+                    && m_currencyLastChallengeUTCByAgent.TryGetValue(agentID, out DateTime lastChallengeUTC)
+                    && (DateTime.UtcNow - lastChallengeUTC).TotalSeconds < m_currencyChallengeCooldownSeconds)
+                {
+                    SendEstateAdminLogin(response, "Admin token already sent recently. Wait a few seconds before requesting another one.", displayName);
+                    return;
+                }
+
+                m_currencyChallenges[token] = new CurrencyLoginChallenge
+                {
+                    AgentID = agentID,
+                    DisplayName = displayName,
+                    Token = token,
+                    ExpiresUTC = expires,
+                    IsAdmin = true
+                };
+                m_currencyLastChallengeUTCByAgent[agentID] = DateTime.UtcNow;
+            }
+
+            string message = "Vanilla Sim estate admin token for " + displayName + ": " + token
+                + " (expires in " + m_currencyChallengeMinutes.ToString(CultureInfo.InvariantCulture) + " minutes).";
+            try
+            {
+                client.SendBlueBoxMessage(UUID.Zero, "Vanilla Sim", message);
+            }
+            catch
+            {
+                client.SendAgentAlertMessage(message, false);
+            }
+
+            SendEstateAdminLogin(response, "Admin token sent inworld to " + displayName + ". Enter it below to open Estate Admin.", displayName);
+        }
+
+        private void HandleEstateAdminLogin(Dictionary<string, string> form, IOSHttpResponse response)
+        {
+            string avatarName = FormValue(form, "avatar");
+            string token = FormValue(form, "token").Trim().ToUpperInvariant();
+            if (string.IsNullOrEmpty(token))
+            {
+                SendEstateAdminLogin(response, "Enter the admin token received inworld.", avatarName);
+                return;
+            }
+
+            if (!TryResolveAvatar(avatarName, out UUID agentID, out string displayName))
+            {
+                SendEstateAdminLogin(response, "Avatar not found. Request a new admin token using the exact avatar name.", avatarName);
+                return;
+            }
+
+            if (!IsRegionWebSuperAdmin(agentID))
+            {
+                SendEstateAdminLogin(response, "Only an estate owner of a loaded region can access Estate Admin.", displayName);
+                return;
+            }
+
+            CurrencyLoginChallenge challenge;
+            lock (m_currencyAuthLock)
+            {
+                CleanupCurrencyAuthLocked();
+                if (!m_currencyChallenges.TryGetValue(token, out challenge))
+                {
+                    SendEstateAdminLogin(response, "Invalid or expired admin token. Request a new one inworld.", displayName);
+                    return;
+                }
+
+                if (challenge.AgentID != agentID)
+                {
+                    SendEstateAdminLogin(response, "That admin token belongs to a different avatar.", displayName);
+                    return;
+                }
+
+                if (!challenge.IsAdmin)
+                {
+                    SendEstateAdminLogin(response, "That is a wallet token. Request an admin token from this page.", displayName);
+                    return;
+                }
+
+                m_currencyChallenges.Remove(token);
+            }
+
+            string sessionToken = GenerateCurrencySessionToken();
+            CurrencyWebSession session = new CurrencyWebSession
+            {
+                AgentID = agentID,
+                DisplayName = challenge.DisplayName,
+                CsrfToken = GenerateCurrencySessionToken(),
+                ExpiresUTC = DateTime.UtcNow.AddHours(m_currencySessionHours),
+                IsAdmin = true
+            };
+
+            lock (m_currencyAuthLock)
+            {
+                CleanupCurrencyAuthLocked();
+                m_currencySessions[sessionToken] = session;
+            }
+
+            SetCurrencySessionCookie(response, sessionToken, session.ExpiresUTC);
+            SendEstateAdminDashboard(response, session, string.Empty, "Estate Admin login successful.", "ok");
+        }
+
+        private void SendEstateAdminLogin(IOSHttpResponse response, string message, string avatarName)
+        {
+            EstatePageContent estate = LoadEstateContent();
+            StringBuilder html = BeginPage("Estate Admin - " + estate.Title);
+            html.Append("<main class=\"wrap wallet-page estate-admin-page\">");
+            AppendPageLinks(html,
+                "Estate", m_basePath + "/",
+                "Avatar wallet", m_basePath + "/currency/");
+            html.Append("<p class=\"feature-kicker\">Estate owner control room</p><h1>Estate Admin</h1>")
+                .Append("<p class=\"lead\">Install, inspect, edit, save and backup Vanilla Sim configuration from one protected web portal. Request a one-time inworld token before touching simulator files.</p>");
+
+            AppendCurrencyMessage(html, message, string.IsNullOrEmpty(message) || message.StartsWith("Admin token sent", StringComparison.Ordinal) ? "ok" : "error");
+
+            html.Append("<section class=\"wallet-grid\"><article class=\"wallet-card\"><h2>1. Request admin token</h2>")
+                .Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/admin\">")
+                .Append("<input type=\"hidden\" name=\"action\" value=\"admin-request-token\">")
+                .Append("<label>Estate owner avatar<input name=\"avatar\" value=\"").Append(Html(avatarName)).Append("\" required placeholder=\"First Last\"></label>")
+                .Append("<button type=\"submit\">Send admin token inworld</button></form>")
+                .Append("<p class=\"wallet-note\">The avatar must own at least one loaded estate region and must be online.</p></article>");
+
+            html.Append("<article class=\"wallet-card\"><h2>2. Login</h2>")
+                .Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/admin\">")
+                .Append("<input type=\"hidden\" name=\"action\" value=\"admin-login\">")
+                .Append("<label>Estate owner avatar<input name=\"avatar\" value=\"").Append(Html(avatarName)).Append("\" required placeholder=\"First Last\"></label>")
+                .Append("<label>Admin token<input name=\"token\" required autocomplete=\"one-time-code\" placeholder=\"8-character token\"></label>")
+                .Append("<button type=\"submit\">Open Estate Admin</button></form></article></section></main>")
+                .Append(EndPage());
+
+            SendHtml(response, html.ToString());
+        }
+
+        private void SendEstateAdminDashboard(IOSHttpResponse response, CurrencyWebSession session, string selectedFileID, string message, string severity)
+        {
+            EstatePageContent estate = LoadEstateContent();
+            List<EstateAdminConfigFile> files = GetEstateAdminConfigFiles();
+            EstateAdminConfigFile selected = ResolveEstateAdminConfigFile(files, selectedFileID);
+            string configText = string.Empty;
+            string readError = string.Empty;
+            List<EstateAdminIniSection> sections = new List<EstateAdminIniSection>();
+
+            if (selected != null)
+            {
+                try
+                {
+                    configText = File.ReadAllText(selected.AbsolutePath);
+                    sections = ParseEstateAdminIni(configText);
+                }
+                catch (Exception e)
+                {
+                    readError = e.Message;
+                    if (string.IsNullOrEmpty(message))
+                    {
+                        message = "Could not read selected config file: " + e.Message;
+                        severity = "error";
+                    }
+                }
+            }
+
+            StringBuilder html = BeginPage("Estate Admin - " + estate.Title);
+            html.Append("<main class=\"wrap wallet-page estate-admin-page\">");
+            AppendPageLinks(html,
+                "Estate", m_basePath + "/",
+                "Avatar wallet", m_basePath + "/currency/",
+                "Money admin", m_basePath + "/currency/admin");
+            html.Append("<p class=\"feature-kicker\">Estate owner control room</p><h1>Estate Admin</h1>")
+                .Append("<p class=\"lead\">A protected control panel for OpenSim configuration files: browse, edit, backup and apply safe reload operations from the web.</p>");
+
+            AppendCurrencyMessage(html, message, severity);
+
+            html.Append("<section class=\"wallet-summary estate-admin-summary\"><div><span>Admin</span><strong>")
+                .Append(Html(session.DisplayName)).Append("</strong></div><div><span>Config files</span><strong>")
+                .Append(files.Count.ToString(CultureInfo.InvariantCulture)).Append("</strong></div><div><span>Loaded regions</span><strong>")
+                .Append(GetSceneSnapshot().Count.ToString(CultureInfo.InvariantCulture)).Append("</strong></div></section>");
+
+            html.Append("<section class=\"estate-admin-shell\"><aside class=\"estate-admin-files\"><h2>Configuration</h2>");
+            if (files.Count == 0)
+            {
+                html.Append("<p>No editable configuration files were found under the simulator bin folder.</p>");
+            }
+            else
+            {
+                foreach (EstateAdminConfigFile file in files)
+                {
+                    bool current = selected != null && selected.ID.Equals(file.ID, StringComparison.Ordinal);
+                    html.Append("<a class=\"").Append(current ? "is-active" : string.Empty).Append("\" href=\"")
+                        .Append(Html(m_basePath)).Append("/admin?file=").Append(Url(file.ID)).Append("\"><span>")
+                        .Append(Html(file.Label)).Append("</span><small>")
+                        .Append(Html(file.Scope)).Append("</small></a>");
+                }
+            }
+            html.Append("</aside><section class=\"estate-admin-editor\">");
+
+            if (selected == null)
+            {
+                html.Append("<article class=\"wallet-card\"><h2>No file selected</h2><p class=\"wallet-note\">Choose a configuration file from the left to start editing.</p></article>");
+            }
+            else
+            {
+                html.Append("<article class=\"wallet-card estate-admin-file-head\"><div><h2>")
+                    .Append(Html(selected.Label)).Append("</h2><p>")
+                    .Append(Html(selected.RelativePath)).Append("</p></div><span class=\"reload-pill ")
+                    .Append(Html(selected.ReloadClass)).Append("\">")
+                    .Append(Html(selected.ReloadLabel)).Append("</span></article>");
+
+                if (!string.IsNullOrEmpty(readError))
+                {
+                    html.Append("<p class=\"wallet-message error\">").Append(Html(readError)).Append("</p>");
+                }
+                else
+                {
+                    html.Append("<article class=\"wallet-card\"><h2>Raw editor</h2>")
+                        .Append("<p class=\"wallet-note\">Every save creates a timestamped backup before writing. Use raw edit for complete control over comments, sections and values.</p>")
+                        .Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/admin\">")
+                        .Append("<input type=\"hidden\" name=\"action\" value=\"admin-save-raw\">")
+                        .Append("<input type=\"hidden\" name=\"csrf\" value=\"").Append(Html(session.CsrfToken)).Append("\">")
+                        .Append("<input type=\"hidden\" name=\"file\" value=\"").Append(Html(selected.ID)).Append("\">")
+                        .Append("<textarea class=\"config-textarea\" name=\"content\" spellcheck=\"false\">")
+                        .Append(Html(configText)).Append("</textarea>")
+                        .Append("<button type=\"submit\">Save with backup</button></form>")
+                        .Append("<form class=\"inline-admin-form\" method=\"post\" action=\"").Append(Html(m_basePath)).Append("/admin\">")
+                        .Append("<input type=\"hidden\" name=\"action\" value=\"admin-reload\">")
+                        .Append("<input type=\"hidden\" name=\"csrf\" value=\"").Append(Html(session.CsrfToken)).Append("\">")
+                        .Append("<input type=\"hidden\" name=\"file\" value=\"").Append(Html(selected.ID)).Append("\">")
+                        .Append("<button type=\"submit\">Reload what can be reloaded now</button></form>")
+                        .Append("</article>");
+
+                    AppendEstateAdminStructuredEditor(html, session, selected, sections);
+                }
+            }
+
+            html.Append("</section></section>")
+                .Append("<form class=\"wallet-logout\" method=\"post\" action=\"").Append(Html(m_basePath)).Append("/admin\">")
+                .Append("<input type=\"hidden\" name=\"action\" value=\"logout\">")
+                .Append("<input type=\"hidden\" name=\"csrf\" value=\"").Append(Html(session.CsrfToken)).Append("\">")
+                .Append("<button type=\"submit\">Logout</button></form>")
+                .Append("</main>").Append(EndPage());
+
+            SendHtml(response, html.ToString());
+        }
+
+        private void AppendEstateAdminStructuredEditor(StringBuilder html, CurrencyWebSession session, EstateAdminConfigFile file, List<EstateAdminIniSection> sections)
+        {
+            html.Append("<article class=\"wallet-card estate-admin-structured\"><h2>Structured editor</h2>")
+                .Append("<p class=\"wallet-note\">Edit one setting at a time when you want a safer, focused change. Startup-only options are marked so you know when a restart is still needed.</p>");
+
+            if (sections.Count == 0)
+            {
+                html.Append("<p class=\"wallet-note\">No INI-style section/key entries were detected in this file.</p></article>");
+                return;
+            }
+
+            foreach (EstateAdminIniSection section in sections)
+            {
+                html.Append("<details class=\"config-section\" open><summary>")
+                    .Append(Html(string.IsNullOrEmpty(section.Name) ? "Global" : section.Name))
+                    .Append(" <span>")
+                    .Append(section.Entries.Count.ToString(CultureInfo.InvariantCulture))
+                    .Append("</span></summary><div class=\"config-table\">");
+
+                foreach (EstateAdminIniEntry entry in section.Entries)
+                {
+                    string reloadClass;
+                    string reloadLabel = ClassifyEstateAdminSetting(file, section.Name, entry.Key, out reloadClass);
+                    html.Append("<form method=\"post\" action=\"").Append(Html(m_basePath)).Append("/admin\">")
+                        .Append("<input type=\"hidden\" name=\"action\" value=\"admin-save-setting\">")
+                        .Append("<input type=\"hidden\" name=\"csrf\" value=\"").Append(Html(session.CsrfToken)).Append("\">")
+                        .Append("<input type=\"hidden\" name=\"file\" value=\"").Append(Html(file.ID)).Append("\">")
+                        .Append("<input type=\"hidden\" name=\"section\" value=\"").Append(Html(section.Name)).Append("\">")
+                        .Append("<input type=\"hidden\" name=\"key\" value=\"").Append(Html(entry.Key)).Append("\">")
+                        .Append("<label><span>").Append(Html(entry.Key)).Append("</span><input name=\"value\" value=\"")
+                        .Append(Html(entry.Value)).Append("\"></label><em class=\"reload-pill ")
+                        .Append(Html(reloadClass)).Append("\">").Append(Html(reloadLabel)).Append("</em>")
+                        .Append("<button type=\"submit\">Save</button></form>");
+                }
+
+                html.Append("</div></details>");
+            }
+
+            html.Append("</article>");
         }
 
         private void HandleCurrencyTokenRequest(Dictionary<string, string> form, IOSHttpResponse response)
@@ -2730,6 +3136,594 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 + "=; Path=" + m_basePath + "; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax");
         }
 
+        private List<EstateAdminConfigFile> GetEstateAdminConfigFiles()
+        {
+            List<EstateAdminConfigFile> files = new List<EstateAdminConfigFile>();
+            HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+
+            AddEstateAdminConfigFile(files, seen, baseDir, Path.Combine(baseDir, "OpenSim.ini"), "Simulator", "restart required", "reload-restart");
+            AddEstateAdminConfigFile(files, seen, baseDir, Path.Combine(baseDir, "OpenSimDefaults.ini"), "Simulator defaults", "restart required", "reload-restart");
+            AddEstateAdminConfigDirectory(files, seen, baseDir, Path.Combine(baseDir, "config-include"), "Service includes", SearchOption.TopDirectoryOnly);
+            AddEstateAdminConfigDirectory(files, seen, baseDir, Path.Combine(baseDir, "Regions"), "Region definitions", SearchOption.TopDirectoryOnly);
+            AddEstateAdminConfigDirectory(files, seen, baseDir, Path.Combine(baseDir, "Estates"), "Estate definitions", SearchOption.TopDirectoryOnly);
+            AddEstateAdminConfigDirectory(files, seen, baseDir, Path.Combine(baseDir, "config-profiles"), "Switch profiles", SearchOption.AllDirectories);
+
+            files.Sort((a, b) => string.Compare(a.RelativePath, b.RelativePath, StringComparison.OrdinalIgnoreCase));
+            return files;
+        }
+
+        private void AddEstateAdminConfigDirectory(List<EstateAdminConfigFile> files, HashSet<string> seen, string baseDir, string directory, string scope, SearchOption search)
+        {
+            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+                return;
+
+            try
+            {
+                foreach (string file in Directory.GetFiles(directory, "*.ini", search))
+                    AddEstateAdminConfigFile(files, seen, baseDir, file, scope, GetEstateAdminReloadLabel(scope), GetEstateAdminReloadClass(scope));
+            }
+            catch (Exception e)
+            {
+                m_log.DebugFormat("[REGION WEB]: Could not scan estate admin config directory {0}: {1}", directory, e.Message);
+            }
+        }
+
+        private static void AddEstateAdminConfigFile(List<EstateAdminConfigFile> files, HashSet<string> seen, string baseDir, string file, string scope, string reloadLabel, string reloadClass)
+        {
+            if (string.IsNullOrWhiteSpace(file) || !File.Exists(file))
+                return;
+
+            string absolute = Path.GetFullPath(file);
+            if (!seen.Add(absolute))
+                return;
+
+            string relative = MakeEstateAdminRelativePath(baseDir, absolute);
+            files.Add(new EstateAdminConfigFile
+            {
+                ID = relative.Replace('\\', '/'),
+                Label = Path.GetFileName(file),
+                AbsolutePath = absolute,
+                RelativePath = relative,
+                Scope = scope,
+                ReloadLabel = reloadLabel,
+                ReloadClass = reloadClass
+            });
+        }
+
+        private static string GetEstateAdminReloadLabel(string scope)
+        {
+            if (scope != null && scope.IndexOf("Estate", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "estate reload";
+            return "restart required";
+        }
+
+        private static string GetEstateAdminReloadClass(string scope)
+        {
+            if (scope != null && scope.IndexOf("Estate", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "reload-safe";
+            return "reload-restart";
+        }
+
+        private static string MakeEstateAdminRelativePath(string baseDir, string absolute)
+        {
+            string fullBase = Path.GetFullPath(baseDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                + Path.DirectorySeparatorChar;
+            string fullPath = Path.GetFullPath(absolute);
+            if (fullPath.StartsWith(fullBase, StringComparison.OrdinalIgnoreCase))
+                return fullPath.Substring(fullBase.Length).Replace('\\', '/');
+            return fullPath.Replace('\\', '/');
+        }
+
+        private static EstateAdminConfigFile ResolveEstateAdminConfigFile(List<EstateAdminConfigFile> files, string selectedFileID)
+        {
+            if (files == null || files.Count == 0)
+                return null;
+
+            if (!string.IsNullOrWhiteSpace(selectedFileID))
+            {
+                foreach (EstateAdminConfigFile file in files)
+                {
+                    if (file.ID.Equals(selectedFileID, StringComparison.OrdinalIgnoreCase))
+                        return file;
+                }
+            }
+
+            foreach (EstateAdminConfigFile file in files)
+            {
+                if (file.RelativePath.Equals("OpenSim.ini", StringComparison.OrdinalIgnoreCase))
+                    return file;
+            }
+
+            return files[0];
+        }
+
+        private bool TryGetEstateAdminConfigFile(string fileID, out EstateAdminConfigFile selected)
+        {
+            selected = ResolveEstateAdminConfigFile(GetEstateAdminConfigFiles(), fileID);
+            return selected != null && selected.ID.Equals(fileID, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void SaveEstateAdminRawConfig(string fileID, string content, out string message, out string severity)
+        {
+            severity = "error";
+            if (!TryGetEstateAdminConfigFile(fileID, out EstateAdminConfigFile file))
+            {
+                message = "Config file not found or no longer allowed.";
+                return;
+            }
+
+            if (!ValidateEstateAdminIniText(content, out message))
+                return;
+
+            if (!CreateEstateAdminBackup(file, out string backupPath, out message))
+                return;
+
+            try
+            {
+                File.WriteAllText(file.AbsolutePath, content ?? string.Empty, Encoding.UTF8);
+                ApplyEstateAdminReload(file.ID, out string reloadMessage, out string reloadSeverity);
+                severity = reloadSeverity == "error" ? "error" : "ok";
+                message = "Saved " + file.RelativePath + ". Backup: " + backupPath + ". " + reloadMessage;
+            }
+            catch (Exception e)
+            {
+                message = "Could not save " + file.RelativePath + ": " + e.Message;
+            }
+        }
+
+        private void SaveEstateAdminSetting(string fileID, string section, string key, string value, out string message, out string severity)
+        {
+            severity = "error";
+            if (!TryGetEstateAdminConfigFile(fileID, out EstateAdminConfigFile file))
+            {
+                message = "Config file not found or no longer allowed.";
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                message = "Setting key is empty.";
+                return;
+            }
+
+            string content;
+            try
+            {
+                content = File.ReadAllText(file.AbsolutePath);
+            }
+            catch (Exception e)
+            {
+                message = "Could not read " + file.RelativePath + ": " + e.Message;
+                return;
+            }
+
+            string updated = UpdateEstateAdminIniSetting(content, section, key, value);
+            if (!ValidateEstateAdminIniText(updated, out message))
+                return;
+
+            if (!CreateEstateAdminBackup(file, out string backupPath, out message))
+                return;
+
+            try
+            {
+                File.WriteAllText(file.AbsolutePath, updated, Encoding.UTF8);
+                ApplyEstateAdminReload(file.ID, out string reloadMessage, out string reloadSeverity);
+                severity = reloadSeverity == "error" ? "error" : "ok";
+                message = "Saved [" + (string.IsNullOrEmpty(section) ? "Global" : section) + "] " + key
+                    + " in " + file.RelativePath + ". Backup: " + backupPath + ". " + reloadMessage;
+            }
+            catch (Exception e)
+            {
+                message = "Could not save " + file.RelativePath + ": " + e.Message;
+            }
+        }
+
+        private void ApplyEstateAdminReload(string fileID, out string message, out string severity)
+        {
+            severity = "ok";
+            if (!TryGetEstateAdminConfigFile(fileID, out EstateAdminConfigFile file))
+            {
+                severity = "error";
+                message = "Config file not found or no longer allowed.";
+                return;
+            }
+
+            if (file.Scope.IndexOf("Estate", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                int count = 0;
+                foreach (Scene scene in GetSceneSnapshot())
+                {
+                    try
+                    {
+                        scene.ReloadEstateData();
+                        count++;
+                    }
+                    catch (Exception e)
+                    {
+                        m_log.WarnFormat("[REGION WEB]: Estate Admin could not reload estate data for {0}: {1}", scene.RegionInfo.RegionName, e.Message);
+                    }
+                }
+
+                message = "Estate data reload requested for " + count.ToString(CultureInfo.InvariantCulture) + " loaded regions.";
+                return;
+            }
+
+            if (TryApplyEstateAdminRegionWebReload(file, out message, out severity))
+                return;
+
+            if (file.Scope.IndexOf("Region", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                message = "Region definition files are saved immediately, but loaded region identity, coordinates, ports and hostnames are startup-bound. Restart the affected region for full effect.";
+                return;
+            }
+
+            if (file.RelativePath.Equals("OpenSim.ini", StringComparison.OrdinalIgnoreCase)
+                || file.RelativePath.Equals("OpenSimDefaults.ini", StringComparison.OrdinalIgnoreCase)
+                || file.Scope.IndexOf("Service", StringComparison.OrdinalIgnoreCase) >= 0
+                || file.Scope.IndexOf("profile", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                message = "Simulator config saved and validated. Most service, module, network and physics options are read during startup, so restart is required for full effect.";
+                return;
+            }
+
+            message = "Config saved. No live reload hook is available for this file yet.";
+        }
+
+        private bool TryApplyEstateAdminRegionWebReload(EstateAdminConfigFile file, out string message, out string severity)
+        {
+            message = string.Empty;
+            severity = "ok";
+
+            if (file == null || !File.Exists(file.AbsolutePath))
+                return false;
+
+            bool hasRegionWebSection = false;
+            try
+            {
+                using (StringReader reader = new StringReader(File.ReadAllText(file.AbsolutePath)))
+                {
+                    string line;
+                    while ((line = reader.ReadLine()) != null)
+                    {
+                        if (TryParseIniSection(line.Trim(), out string section)
+                            && section.Equals("RegionWeb", StringComparison.OrdinalIgnoreCase))
+                        {
+                            hasRegionWebSection = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (!hasRegionWebSection)
+                return false;
+
+            IniConfigSource source;
+            try
+            {
+                source = new IniConfigSource(file.AbsolutePath);
+            }
+            catch (Exception e)
+            {
+                severity = "error";
+                message = "Config saved, but RegionWeb reload could not parse the INI file: " + e.Message;
+                return true;
+            }
+
+            IConfig config = source.Configs["RegionWeb"];
+            if (config == null)
+                return false;
+
+            string contentDirectory = config.GetString("ContentDirectory", m_contentDirectory).Trim();
+            string inventoryFolder = config.GetString("InventoryCarouselFolder", m_inventoryCarouselFolder).Trim();
+            string regionInventoryTemplate = config.GetString("RegionInventoryCarouselFolderTemplate", m_regionInventoryCarouselFolderTemplate).Trim();
+            string defaultEstateTitle = config.GetString("EstateTitle", m_defaultEstateTitle).Trim();
+
+            if (string.IsNullOrEmpty(contentDirectory))
+                contentDirectory = "RegionWeb";
+            if (string.IsNullOrEmpty(inventoryFolder))
+                inventoryFolder = "RegionWeb Carousel";
+            if (string.IsNullOrEmpty(regionInventoryTemplate))
+                regionInventoryTemplate = "RegionWeb {RegionName} Carousel";
+            if (string.IsNullOrEmpty(defaultEstateTitle))
+                defaultEstateTitle = "Vanilla Sim";
+
+            lock (m_sync)
+            {
+                m_autoCreateContent = config.GetBoolean("AutoCreateContent", m_autoCreateContent);
+                m_showMap = config.GetBoolean("ShowMap", m_showMap);
+                m_showStats = config.GetBoolean("ShowStats", m_showStats);
+                m_showParcels = config.GetBoolean("ShowParcels", m_showParcels);
+                m_postsPerPage = Math.Max(1, config.GetInt("PostsPerPage", m_postsPerPage));
+                m_inventoryCarouselEnabled = config.GetBoolean("InventoryCarouselEnabled", m_inventoryCarouselEnabled);
+                m_inventoryCarouselFolder = inventoryFolder;
+                m_regionInventoryCarouselFolderTemplate = regionInventoryTemplate;
+                m_inventoryCarouselLimit = Math.Max(1, config.GetInt("InventoryCarouselLimit", m_inventoryCarouselLimit));
+                m_inventoryCarouselCacheSeconds = Math.Max(0, config.GetInt("InventoryCarouselCacheSeconds", m_inventoryCarouselCacheSeconds));
+                m_currencyPortalEnabled = config.GetBoolean("CurrencyPortalEnabled", m_currencyPortalEnabled);
+                m_currencyBuyEnabled = config.GetBoolean("CurrencyBuyEnabled", m_currencyBuyEnabled);
+                m_currencyTransferEnabled = config.GetBoolean("CurrencyTransferEnabled", m_currencyTransferEnabled);
+                m_currencyChallengeMinutes = Math.Max(1, config.GetInt("CurrencyChallengeMinutes", m_currencyChallengeMinutes));
+                m_currencyChallengeCooldownSeconds = Math.Max(0, config.GetInt("CurrencyChallengeCooldownSeconds", m_currencyChallengeCooldownSeconds));
+                m_currencySessionHours = Math.Max(1, config.GetInt("CurrencySessionHours", m_currencySessionHours));
+                m_currencyStatementLimit = Math.Max(1, config.GetInt("CurrencyStatementLimit", m_currencyStatementLimit));
+                m_currencyBuyLimit = Math.Max(1, config.GetInt("CurrencyBuyLimit", m_currencyBuyLimit));
+                m_currencyBuyMode = NormalizeCurrencyBuyMode(config.GetString("CurrencyBuyMode", m_currencyBuyMode));
+                m_payPalEnabled = config.GetBoolean("PayPalEnabled", m_payPalEnabled);
+                m_payPalEnvironment = NormalizePayPalEnvironment(config.GetString("PayPalEnvironment", m_payPalEnvironment));
+                m_payPalClientID = config.GetString("PayPalClientID", m_payPalClientID).Trim();
+                m_payPalClientSecret = config.GetString("PayPalClientSecret", m_payPalClientSecret).Trim();
+                m_payPalCurrencyCode = NormalizePayPalCurrency(config.GetString("PayPalCurrencyCode", m_payPalCurrencyCode));
+                m_payPalPricePerToken = ParsePositiveDecimal(config.GetString("PayPalPricePerToken", m_payPalPricePerToken.ToString(CultureInfo.InvariantCulture)), m_payPalPricePerToken);
+                m_payPalReturnBaseUrl = config.GetString("PayPalReturnBaseUrl", m_payPalReturnBaseUrl).Trim();
+                m_defaultEstateTitle = defaultEstateTitle;
+                m_contentDirectory = contentDirectory;
+                m_absoluteContentDirectory = Path.IsPathRooted(m_contentDirectory)
+                    ? m_contentDirectory
+                    : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, m_contentDirectory);
+            }
+
+            lock (m_inventoryCarouselCacheLock)
+                m_inventoryCarouselAssetCache.Clear();
+
+            try
+            {
+                Directory.CreateDirectory(m_absoluteContentDirectory);
+                if (m_autoCreateContent)
+                    EnsureEstateContent();
+            }
+            catch (Exception e)
+            {
+                severity = "error";
+                message = "RegionWeb settings were reloaded in memory, but content folder refresh failed: " + e.Message;
+                return true;
+            }
+
+            message = "RegionWeb runtime settings reloaded. PublicPath, Enabled, storage paths and other startup-bound settings still need a simulator restart.";
+            return true;
+        }
+
+        private bool CreateEstateAdminBackup(EstateAdminConfigFile file, out string relativeBackupPath, out string reason)
+        {
+            relativeBackupPath = string.Empty;
+            reason = string.Empty;
+
+            try
+            {
+                string backupRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ConfigBackups", "RegionWebAdmin");
+                Directory.CreateDirectory(backupRoot);
+                string backupName = SanitizeBackupFileName(file.RelativePath)
+                    + "."
+                    + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture)
+                    + ".bak";
+                string backupPath = Path.Combine(backupRoot, backupName);
+                File.Copy(file.AbsolutePath, backupPath, false);
+                relativeBackupPath = MakeEstateAdminRelativePath(AppDomain.CurrentDomain.BaseDirectory, backupPath);
+                return true;
+            }
+            catch (Exception e)
+            {
+                reason = "Could not create backup before saving: " + e.Message;
+                return false;
+            }
+        }
+
+        private static string SanitizeBackupFileName(string path)
+        {
+            StringBuilder safe = new StringBuilder();
+            foreach (char ch in path ?? string.Empty)
+            {
+                if (char.IsLetterOrDigit(ch) || ch == '.' || ch == '-' || ch == '_')
+                    safe.Append(ch);
+                else
+                    safe.Append('_');
+            }
+            return safe.Length == 0 ? "config" : safe.ToString();
+        }
+
+        private static bool ValidateEstateAdminIniText(string content, out string reason)
+        {
+            reason = string.Empty;
+            if (content == null)
+            {
+                reason = "Config content is empty.";
+                return false;
+            }
+
+            using (StringReader reader = new StringReader(content))
+            {
+                string line;
+                int lineNumber = 0;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    lineNumber++;
+                    string trimmed = line.Trim();
+                    if (trimmed.Length == 0 || trimmed.StartsWith(";", StringComparison.Ordinal) || trimmed.StartsWith("#", StringComparison.Ordinal))
+                        continue;
+
+                    if (trimmed.StartsWith("[", StringComparison.Ordinal) && !trimmed.Contains("]"))
+                    {
+                        reason = "Line " + lineNumber.ToString(CultureInfo.InvariantCulture) + " starts a section but is missing ']'.";
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        private static string UpdateEstateAdminIniSetting(string content, string section, string key, string value)
+        {
+            string normalized = (content ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
+            bool hadFinalNewline = normalized.EndsWith("\n", StringComparison.Ordinal);
+            List<string> lines = normalized.Split('\n').ToList();
+            if (hadFinalNewline && lines.Count > 0 && lines[lines.Count - 1].Length == 0)
+                lines.RemoveAt(lines.Count - 1);
+
+            string targetSection = section ?? string.Empty;
+            string currentSection = string.Empty;
+            int targetSectionStart = -1;
+            int targetSectionEnd = lines.Count;
+
+            for (int i = 0; i < lines.Count; i++)
+            {
+                string trimmed = lines[i].Trim();
+                if (TryParseIniSection(trimmed, out string parsedSection))
+                {
+                    if (targetSectionStart >= 0 && targetSectionEnd == lines.Count)
+                        targetSectionEnd = i;
+
+                    currentSection = parsedSection;
+                    if (currentSection.Equals(targetSection, StringComparison.OrdinalIgnoreCase))
+                    {
+                        targetSectionStart = i;
+                        targetSectionEnd = lines.Count;
+                    }
+                    continue;
+                }
+
+                if (currentSection.Equals(targetSection, StringComparison.OrdinalIgnoreCase)
+                    && TryParseIniKey(lines[i], out string parsedKey, out int equalsIndex)
+                    && parsedKey.Equals(key, StringComparison.OrdinalIgnoreCase))
+                {
+                    lines[i] = lines[i].Substring(0, equalsIndex + 1) + " " + value;
+                    return JoinIniLines(lines, hadFinalNewline);
+                }
+            }
+
+            string newLine = key.Trim() + " = " + value;
+            if (targetSectionStart >= 0)
+            {
+                lines.Insert(targetSectionEnd, newLine);
+            }
+            else
+            {
+                if (lines.Count > 0 && lines[lines.Count - 1].Length > 0)
+                    lines.Add(string.Empty);
+                if (!string.IsNullOrEmpty(targetSection))
+                    lines.Add("[" + targetSection + "]");
+                lines.Add(newLine);
+            }
+
+            return JoinIniLines(lines, true);
+        }
+
+        private static string JoinIniLines(List<string> lines, bool finalNewline)
+        {
+            string result = string.Join(Environment.NewLine, lines.ToArray());
+            if (finalNewline)
+                result += Environment.NewLine;
+            return result;
+        }
+
+        private static bool TryParseIniSection(string trimmed, out string section)
+        {
+            section = string.Empty;
+            if (string.IsNullOrEmpty(trimmed) || !trimmed.StartsWith("[", StringComparison.Ordinal))
+                return false;
+
+            int end = trimmed.IndexOf(']');
+            if (end <= 1)
+                return false;
+
+            section = trimmed.Substring(1, end - 1).Trim();
+            return true;
+        }
+
+        private static bool TryParseIniKey(string line, out string key, out int equalsIndex)
+        {
+            key = string.Empty;
+            equalsIndex = -1;
+            string trimmed = (line ?? string.Empty).TrimStart();
+            if (trimmed.StartsWith(";", StringComparison.Ordinal) || trimmed.StartsWith("#", StringComparison.Ordinal))
+                return false;
+
+            equalsIndex = line.IndexOf('=');
+            if (equalsIndex <= 0)
+                return false;
+
+            key = line.Substring(0, equalsIndex).Trim();
+            return key.Length > 0;
+        }
+
+        private static List<EstateAdminIniSection> ParseEstateAdminIni(string content)
+        {
+            List<EstateAdminIniSection> sections = new List<EstateAdminIniSection>();
+            EstateAdminIniSection current = new EstateAdminIniSection { Name = string.Empty };
+
+            using (StringReader reader = new StringReader(content ?? string.Empty))
+            {
+                string line;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    string trimmed = line.Trim();
+                    if (TryParseIniSection(trimmed, out string parsedSection))
+                    {
+                        if (current.Entries.Count > 0 || !string.IsNullOrEmpty(current.Name))
+                            sections.Add(current);
+                        current = new EstateAdminIniSection { Name = parsedSection };
+                        continue;
+                    }
+
+                    if (TryParseIniKey(line, out string key, out int equalsIndex))
+                    {
+                        current.Entries.Add(new EstateAdminIniEntry
+                        {
+                            Key = key,
+                            Value = line.Substring(equalsIndex + 1).Trim()
+                        });
+                    }
+                }
+            }
+
+            if (current.Entries.Count > 0 || !string.IsNullOrEmpty(current.Name))
+                sections.Add(current);
+
+            return sections;
+        }
+
+        private static string ClassifyEstateAdminSetting(EstateAdminConfigFile file, string section, string key, out string cssClass)
+        {
+            cssClass = "reload-restart";
+            string lowerSection = (section ?? string.Empty).ToLowerInvariant();
+            string lowerKey = (key ?? string.Empty).ToLowerInvariant();
+
+            if (file != null && file.Scope.IndexOf("Estate", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                cssClass = "reload-safe";
+                return "estate reload";
+            }
+
+            if (file != null && file.Scope.IndexOf("Region", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "restart region";
+
+            if (lowerSection == "regionweb")
+            {
+                if (lowerKey == "enabled" || lowerKey == "publicpath" || lowerKey.EndsWith("storage", StringComparison.Ordinal)
+                    || lowerKey.EndsWith("storagepath", StringComparison.Ordinal))
+                    return "restart required";
+
+                cssClass = "reload-safe";
+                return "portal reload";
+            }
+
+            if (lowerSection.Contains("network") || lowerSection.Contains("database") || lowerSection.Contains("startup")
+                || lowerKey.Contains("port") || lowerKey.Contains("hostname") || lowerKey.Contains("connectionstring"))
+                return "restart required";
+
+            if (lowerSection.Contains("ubode") || lowerSection.Contains("physics") || lowerSection.Contains("modules")
+                || lowerKey.EndsWith("enabled", StringComparison.Ordinal))
+                return "restart likely";
+
+            cssClass = "reload-maybe";
+            return "maybe live";
+        }
+
         private static string ReadCookie(IOSHttpRequest request, string name)
         {
             string cookies = request.Headers["cookie"] ?? request.Headers["Cookie"];
@@ -2781,6 +3775,13 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
         {
             if (form != null && form.TryGetValue(name, out string value))
                 return value == null ? string.Empty : value.Trim();
+            return string.Empty;
+        }
+
+        private static string FormRawValue(Dictionary<string, string> form, string name)
+        {
+            if (form != null && form.TryGetValue(name, out string value))
+                return value ?? string.Empty;
             return string.Empty;
         }
 
@@ -3688,6 +4689,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             EnsureFeature(content.Features, "Group auto invite",
                 "Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects.");
             EnsureFeature(content.Features, CurrencyFeatureTitle, CurrencyFeatureBody);
+            EnsureFeature(content.Features, EstateAdminFeatureTitle, EstateAdminFeatureBody);
             EnsureFeature(content.Features, MultiGridFeatureTitle, MultiGridFeatureBody);
             EnsureFeature(content.Features, "Viewer polish",
                 "Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.");
@@ -3731,7 +4733,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             if (notes.Count > 0)
                 content.Notes = notes;
 
-            MergeFeaturePageDefaults(content, defaults, IsScriptEngineFeature(feature.Title) || IsRegionWebFeature(feature.Title) || IsMultiGridFeature(feature.Title));
+            MergeFeaturePageDefaults(content, defaults, IsScriptEngineFeature(feature.Title) || IsRegionWebFeature(feature.Title) || IsMultiGridFeature(feature.Title) || IsEstateAdminFeature(feature.Title));
 
             return content;
         }
@@ -3929,6 +4931,24 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                     content.Notes.Add("This is a publication/attachment layer. The simulator still has one primary grid for inventory, assets, accounts and presence.");
                     content.Notes.Add("Public grids may reject registration unless they explicitly allow your region server or provide credentials.");
                     content.Notes.Add("Use a DNS name rather than a raw IP address for Hypergrid-facing endpoints; some grids refuse raw-IP HG addresses.");
+                    break;
+
+                case "estate-owner-control-room":
+                case "estate-admin":
+                case "web-admin":
+                case "opensim-web-admin":
+                    content.Title = EstateAdminFeatureTitle;
+                    content.Summary = EstateAdminFeatureBody;
+                    content.Overview = EstateAdminFeatureOverview;
+                    content.Usage.Add("Open /regionweb/admin on the simulator HTTP address.");
+                    content.Usage.Add("Request an estate admin token while the estate owner avatar is online, then enter that token in the web form.");
+                    content.Usage.Add("Choose OpenSim.ini, OpenSimDefaults.ini, config-include INI files, region files, estate files or switch profile INI files from the protected configuration browser.");
+                    content.Usage.Add("Use the structured editor for quick one-setting changes, or the raw editor when you need to preserve comments and edit a whole section.");
+                    content.Usage.Add("Every save creates a timestamped backup under ConfigBackups/RegionWebAdmin before the file is changed.");
+                    content.Usage.Add("Press Reload what can be reloaded now after changing estate data or RegionWeb settings.");
+                    content.Notes.Add("The admin portal only exposes an allowlist under the simulator bin folder; it does not accept arbitrary filesystem paths from the browser.");
+                    content.Notes.Add("Estate files can request a live estate reload for loaded regions. RegionWeb settings can reload the portal's own runtime options.");
+                    content.Notes.Add("Network, database, module startup, region identity, ports and most physics settings are still startup-bound in OpenSim. The panel saves them safely and labels them as restart-required instead of pretending they hot reload.");
                     break;
 
                 case "viewer-polish":
@@ -4243,8 +5263,10 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 + "Feature8 = \"Automatic cloud avatar recovery|If an avatar becomes a cloud, the server automatically handles the recovery and restores the normal appearance within a few seconds.\"\n"
                 + "Feature9 = \"Group auto invite|Visitors can receive normal viewer group invitations on arrival without needing scripted invite objects.\"\n"
                 + "Feature10 = \"" + CurrencyFeatureTitle + "|" + CurrencyFeatureBody + "\"\n"
-                + "Feature11 = \"Viewer polish|Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.\"\n"
-                + "Feature12 = \"" + ScriptEngineFeatureTitle + "|" + ScriptEngineFeatureBody + "\"\n",
+                + "Feature11 = \"" + EstateAdminFeatureTitle + "|" + EstateAdminFeatureBody + "\"\n"
+                + "Feature12 = \"" + MultiGridFeatureTitle + "|" + MultiGridFeatureBody + "\"\n"
+                + "Feature13 = \"Viewer polish|Simulator version branding reduces noisy viewer warnings and keeps neighbouring regions feeling consistent.\"\n"
+                + "Feature14 = \"" + ScriptEngineFeatureTitle + "|" + ScriptEngineFeatureBody + "\"\n",
                 new UTF8Encoding(false));
         }
 
@@ -5025,6 +6047,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             bool regionWebFeatureAdded = false;
             bool scriptEngineFeatureAdded = false;
             bool currencyFeatureAdded = false;
+            bool estateAdminFeatureAdded = false;
 
             foreach (FeatureItem feature in features)
             {
@@ -5083,6 +6106,21 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                             Body = CurrencyFeatureBody
                         });
                         currencyFeatureAdded = true;
+                    }
+
+                    continue;
+                }
+
+                if (IsEstateAdminFeature(feature.Title))
+                {
+                    if (!estateAdminFeatureAdded)
+                    {
+                        normalized.Add(new FeatureItem
+                        {
+                            Title = EstateAdminFeatureTitle,
+                            Body = EstateAdminFeatureBody
+                        });
+                        estateAdminFeatureAdded = true;
                     }
 
                     continue;
@@ -5181,6 +6219,22 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 || normalized == "viewer-visible currency";
         }
 
+        private static bool IsEstateAdminFeature(string title)
+        {
+            if (string.IsNullOrEmpty(title))
+                return false;
+
+            string normalized = title.Trim().ToLowerInvariant();
+            return normalized == "estate owner control room"
+                || normalized == "estate admin"
+                || normalized == "estate web admin"
+                || normalized == "web admin"
+                || normalized == "opensim web admin"
+                || normalized == "configuration admin"
+                || normalized == "configuration control room"
+                || normalized == "estate configuration panel";
+        }
+
         private static bool IsMultiGridFeature(string title)
         {
             if (string.IsNullOrEmpty(title))
@@ -5252,6 +6306,11 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             });
             features.Add(new FeatureItem
             {
+                Title = EstateAdminFeatureTitle,
+                Body = EstateAdminFeatureBody
+            });
+            features.Add(new FeatureItem
+            {
                 Title = MultiGridFeatureTitle,
                 Body = MultiGridFeatureBody
             });
@@ -5273,7 +6332,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             {
                 if (feature.Title.Equals(title, StringComparison.OrdinalIgnoreCase))
                 {
-                    if (IsRegionWebFeature(title) || IsScriptEngineFeature(title) || IsCurrencyFeature(title) || IsMultiGridFeature(title))
+                    if (IsRegionWebFeature(title) || IsScriptEngineFeature(title) || IsCurrencyFeature(title) || IsMultiGridFeature(title) || IsEstateAdminFeature(title))
                         feature.Body = body;
                     return;
                 }
@@ -5329,7 +6388,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
                 .Append(".script-source{max-width:880px;color:#52606b}.script-toc{border-top:1px solid var(--line);margin-top:32px;padding-top:24px}.script-toc h2,.script-group h2{font-size:30px;margin:0 0 14px}.script-toc div{display:flex;flex-wrap:wrap;gap:10px}.script-toc a{background:#fff;border:1px solid var(--line);border-radius:6px;padding:9px 12px;color:#111820;font-weight:900}.script-toc span{color:#0079b6}.script-group{border-top:1px solid var(--line);margin-top:32px;padding-top:26px}.script-card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;margin:0 0 16px;box-shadow:0 12px 34px rgba(5,10,15,.07)}.script-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.script-card h3{font-size:23px;margin:0}.script-card-head span{color:#67727b;font-size:13px;text-align:right}.signature{margin:12px 0;color:#111820}.signature code,.script-card pre{background:#0d1115;border:1px solid #252d35;border-radius:6px}.signature code{display:block;overflow:auto;padding:11px;color:#eef7fb}.script-detail{margin:8px 0;color:#424d56}.script-detail strong{color:#111820}.script-card details{margin-top:12px}.script-card summary{cursor:pointer;color:#0079b6;font-weight:1000}.script-card pre{overflow:auto;padding:12px;color:#dfeaf0}.script-focus{border-top:1px solid var(--line);margin-top:30px;padding-top:26px}")
                 .Append(".wallet-guide{display:flex;align-items:center;justify-content:space-between;gap:18px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;margin:22px 0 4px;box-shadow:0 12px 34px rgba(5,10,15,.07)}.wallet-guide span{display:block;color:var(--accent);font-size:13px;font-weight:1000;letter-spacing:.08em;text-transform:uppercase}.wallet-guide h2{margin:4px 0 6px;font-size:25px}.wallet-guide p{margin:0;color:#56616a}.wallet-guide a{flex:0 0 auto;background:#020304;color:#fff;border:1px solid var(--accent);border-radius:5px;padding:10px 14px;font-weight:1000}.wallet-guide a:hover{background:var(--accent);color:#020304}")
                 .Append(".wallet-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:18px;margin-top:26px}.wallet-card,.wallet-summary{background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;box-shadow:0 12px 34px rgba(5,10,15,.07)}.wallet-card h2{margin:0 0 14px;font-size:25px}.wallet-card label{display:block;color:#46515a;font-weight:900;margin:0 0 12px}.wallet-card input{box-sizing:border-box;width:100%;margin-top:6px;background:#f8fbfc;border:1px solid #cfdce2;color:#111820;border-radius:6px;padding:11px;font:inherit}.wallet-card button,.wallet-logout button{border:0;border-radius:5px;background:var(--accent2);color:#fff;padding:11px 15px;font-weight:1000;cursor:pointer}.wallet-card button:hover,.wallet-logout button:hover{background:#a900e0}.wallet-note{color:#65717a;margin:12px 0 0}.wallet-message{border:1px solid #b9e7c4;background:#ecfff1;color:#145923;border-radius:6px;padding:12px 14px}.wallet-message.error{border-color:#f0b6b6;background:#fff0f0;color:#8a1d1d}.wallet-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:24px;padding:0;overflow:hidden}.wallet-summary div{background:#fff;padding:18px}.wallet-summary span{display:block;color:#65717a}.wallet-summary strong{display:block;font-size:28px;word-break:break-word}.wallet-statement{margin-top:18px}.wallet-table{overflow:auto;background:#fff;border-radius:8px;border:1px solid var(--line)}.wallet-table table{width:100%;border-collapse:collapse}.wallet-table th,.wallet-table td{text-align:left;border-top:1px solid var(--line);padding:10px;white-space:nowrap}.wallet-table th{background:#f0f5f7}.wallet-table td:last-child{white-space:normal}.wallet-table .credit{color:#128c3b}.wallet-table .debit{color:#b92828}.wallet-logout{margin-top:18px}")
-                .Append(".back-to-top{position:fixed;right:18px;bottom:18px;z-index:1001;background:#020304;color:#fff;border:1px solid var(--accent);border-radius:6px;padding:10px 13px;font-weight:1000;box-shadow:0 12px 34px rgba(0,0,0,.32)}.back-to-top:hover{background:var(--accent);color:#020304}@media(max-width:980px){.nav-wrap{align-items:flex-start;flex-direction:column;padding-top:12px;padding-bottom:14px}.nav-links{justify-content:flex-start;gap:14px}.layout,.estate-stats,.wallet-summary{grid-template-columns:1fr}.wallet-guide{display:block}.wallet-guide a{display:inline-flex;margin-top:14px}.estate-hero{min-height:500px}.hero{min-height:330px}.estate-hero h1,.hero h1,.feature-page h1,.script-reference h1,.wallet-page h1{font-size:44px}.estate-hero .wrap{padding-top:80px;padding-bottom:64px}.wrap{padding-left:18px;padding-right:18px}.script-card-head{display:block}.script-card-head span{text-align:left;display:block;margin-top:5px}.brand{min-width:0}.back-to-top{right:14px;bottom:14px;padding:9px 11px}}");
+                .Append(".estate-admin-shell{display:grid;grid-template-columns:300px minmax(0,1fr);gap:20px;margin-top:24px}.estate-admin-files{align-self:start;position:sticky;top:92px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 12px 34px rgba(5,10,15,.07);max-height:calc(100vh - 124px);overflow:auto}.estate-admin-files h2{font-size:20px;margin:0 0 12px}.estate-admin-files a{display:block;border:1px solid var(--line);border-radius:7px;padding:11px;margin:0 0 8px;color:#111820;background:#f8fbfc}.estate-admin-files a.is-active{border-color:var(--accent);background:#ecfaff}.estate-admin-files span{display:block;font-weight:1000}.estate-admin-files small{display:block;color:#66727b}.estate-admin-editor{min-width:0}.estate-admin-file-head{display:flex;align-items:center;justify-content:space-between;gap:14px}.estate-admin-file-head p{margin:0;color:#66727b;word-break:break-all}.reload-pill{display:inline-flex;align-items:center;justify-content:center;min-height:30px;border-radius:999px;border:1px solid #d1dbe0;padding:0 10px;font-size:12px;font-style:normal;font-weight:1000;text-transform:uppercase;color:#34404a;background:#f3f7f9;white-space:nowrap}.reload-safe{background:#eafff0;border-color:#abdfba;color:#146326}.reload-maybe{background:#fff8df;border-color:#ead37c;color:#7b5b00}.reload-restart{background:#fff0f0;border-color:#efb4b4;color:#8a1d1d}.config-textarea{box-sizing:border-box;width:100%;min-height:460px;margin:8px 0 12px;padding:14px;border:1px solid #cfdce2;border-radius:7px;background:#0d1115;color:#dfeaf0;font:13px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;tab-size:4}.inline-admin-form{margin-top:10px}.estate-admin-structured{margin-top:18px}.config-section{border:1px solid var(--line);border-radius:8px;margin:12px 0;background:#fbfdfe;overflow:hidden}.config-section summary{cursor:pointer;padding:12px 14px;font-weight:1000;background:#f0f5f7}.config-section summary span{color:#0079b6}.config-table{display:grid;gap:1px;background:var(--line)}.config-table form{display:grid;grid-template-columns:minmax(210px,1fr) auto auto;gap:10px;align-items:end;background:#fff;padding:10px}.config-table label{margin:0}.config-table label span{display:block;color:#46515a;font-size:13px;font-weight:1000;word-break:break-all}.config-table input{box-sizing:border-box;width:100%;margin-top:5px;background:#f8fbfc;border:1px solid #cfdce2;color:#111820;border-radius:6px;padding:9px;font:inherit}.config-table button{border:0;border-radius:5px;background:#020304;color:#fff;padding:9px 12px;font-weight:1000;cursor:pointer}.config-table button:hover{background:#0079b6}.estate-admin-summary strong{font-size:24px}")
+                .Append(".back-to-top{position:fixed;right:18px;bottom:18px;z-index:1001;background:#020304;color:#fff;border:1px solid var(--accent);border-radius:6px;padding:10px 13px;font-weight:1000;box-shadow:0 12px 34px rgba(0,0,0,.32)}.back-to-top:hover{background:var(--accent);color:#020304}@media(max-width:980px){.nav-wrap{align-items:flex-start;flex-direction:column;padding-top:12px;padding-bottom:14px}.nav-links{justify-content:flex-start;gap:14px}.layout,.estate-stats,.wallet-summary,.estate-admin-shell{grid-template-columns:1fr}.estate-admin-files{position:static;max-height:none}.config-table form{grid-template-columns:1fr}.wallet-guide{display:block}.wallet-guide a{display:inline-flex;margin-top:14px}.estate-hero{min-height:500px}.hero{min-height:330px}.estate-hero h1,.hero h1,.feature-page h1,.script-reference h1,.wallet-page h1{font-size:44px}.estate-hero .wrap{padding-top:80px;padding-bottom:64px}.wrap{padding-left:18px;padding-right:18px}.script-card-head{display:block}.script-card-head span{text-align:left;display:block;margin-top:5px}.brand{min-width:0}.back-to-top{right:14px;bottom:14px;padding:9px 11px}}");
             return css.ToString();
         }
 
@@ -5364,6 +6424,8 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             if (m_currencyPortalEnabled)
                 html.Append("<a class=\"nav-cta\" href=\"").Append(Html(m_basePath)).Append("/currency/\">Wallet</a>");
+
+            html.Append("<a href=\"").Append(Html(m_basePath)).Append("/admin\">Admin</a>");
 
             html.Append("<a class=\"nav-github\" href=\"").Append(Html(VanillaSimRepositoryUrl))
                 .Append("\" target=\"_blank\" rel=\"noopener\" aria-label=\"Vanilla Sim GitHub repository\">")
@@ -6060,6 +7122,29 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
             public string CsrfToken;
             public DateTime ExpiresUTC;
             public bool IsAdmin;
+        }
+
+        private class EstateAdminConfigFile
+        {
+            public string ID;
+            public string Label;
+            public string AbsolutePath;
+            public string RelativePath;
+            public string Scope;
+            public string ReloadLabel;
+            public string ReloadClass;
+        }
+
+        private class EstateAdminIniSection
+        {
+            public string Name;
+            public readonly List<EstateAdminIniEntry> Entries = new List<EstateAdminIniEntry>();
+        }
+
+        private class EstateAdminIniEntry
+        {
+            public string Key;
+            public string Value;
         }
 
         private class CurrencyPurchaseRequest

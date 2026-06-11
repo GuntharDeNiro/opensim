@@ -341,9 +341,33 @@ http://vanilla-sim.com:9000/regionweb/
 The same URL is also advertised through the grid info service as the viewer
 login splash, economy, about, help and registration page. The generated portal
 uses Vanilla Sim branding, sticky top navigation, page-local back links, a
-back-to-top button, a GitHub link, a wallet entry and live estate/region stats.
-Money Admin is not exposed as a main navigation item; it appears from the wallet
-only after an estate owner opens the admin token flow.
+back-to-top button, a GitHub link, a wallet entry, an estate admin entry and
+live estate/region stats. Money Admin is not exposed as a main navigation item;
+it appears from the wallet only after an estate owner opens the admin token
+flow.
+
+Estate owners can open the protected configuration control room at:
+
+```text
+http://vanilla-sim.com:9000/regionweb/admin
+```
+
+Request an admin token while the estate owner avatar is online, then enter that
+token in the web form. The control room scans an allowlist under `bin` only:
+`OpenSim.ini`, `OpenSimDefaults.ini`, `config-include\*.ini`,
+`Regions\*.ini`, `Estates\*.ini` and `config-profiles\**\*.ini`. It supports
+raw INI edits, structured one-setting edits, automatic timestamped backups and
+a reload button. Backups are written before every save under:
+
+```text
+ConfigBackups\RegionWebAdmin
+```
+
+Estate files can request a live estate reload for loaded regions. `[RegionWeb]`
+settings such as portal display, carousel, wallet limits and PayPal options can
+reload in memory. Startup-bound settings such as HTTP path, enabled state,
+network ports, databases, region identity and most simulator/module/physics
+options are saved safely but still require a simulator or region restart.
 
 RegionWeb can use owner inventory images for the front page and individual
 region hero carousels. At startup it auto-creates these folders when they are
