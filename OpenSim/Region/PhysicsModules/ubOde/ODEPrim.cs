@@ -4158,8 +4158,9 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             }
 
             float alpha = Math.Clamp(m_sceneTimeStep / m_parentScene.PhysicalPrimWaterSmoothingTimescale, 0.015f, 1f);
+            bool firstWaterContact = !m_hasWaterDynamicsState;
 
-            if (!m_hasWaterDynamicsState)
+            if (firstWaterContact)
             {
                 m_smoothedWaterHeight = rawWaterHeight;
                 m_smoothedWaterNormal = rawWaterNormal;
@@ -4234,6 +4235,18 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 float waterAcceleration = -m_parentScene.gravityz * buoyancy * submerged;
                 float maxWaterAcceleration = -m_parentScene.gravityz + m_parentScene.PhysicalPrimWaterMaxRiseAcceleration;
                 targetLiftAcceleration = MathF.Min(waterAcceleration, maxWaterAcceleration);
+            }
+
+            if (firstWaterContact && buoyancy > 1f && targetLiftAcceleration > 0f)
+            {
+                float equilibriumSubmerged = Math.Clamp(1f / buoyancy, 0.08f, 0.95f);
+                float entryDepth = SmoothStep01(Math.Clamp(trueSubmerged / equilibriumSubmerged, 0f, 1f));
+                float preloadScale = 0.55f + 0.30f * entryDepth;
+
+                if (vel.Z < -1f)
+                    preloadScale = MathF.Min(0.95f, preloadScale + MathF.Min(-vel.Z * 0.04f, 0.12f));
+
+                m_smoothedWaterLift = MathF.Max(m_smoothedWaterLift, targetLiftAcceleration * preloadScale);
             }
 
             float liftAlpha = Math.Clamp(m_sceneTimeStep / m_parentScene.PhysicalPrimWaterLiftSmoothingTimescale, 0.02f, 1f);

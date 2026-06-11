@@ -140,18 +140,19 @@ boat_wave_drift_scale = 0.25
 physical_prim_water_dynamics_enabled = true
 physical_prim_water_smoothing_timescale = 0.85
 physical_prim_water_surface_cushion = 0.28
-physical_prim_water_lift_smoothing_timescale = 0.18
-physical_prim_water_lift_slew_rate = 35.0
+physical_prim_water_lift_smoothing_timescale = 0.14
+physical_prim_water_lift_slew_rate = 50.0
 physical_prim_water_vertical_damping = 4.5
 physical_prim_water_surface_damping = 7.0
-physical_prim_water_max_rise_acceleration = 0.9
+physical_prim_water_max_rise_acceleration = 1.25
 physical_prim_water_drag = 1.35
-physical_prim_water_drift_scale = 12.0
+physical_prim_water_drift_scale = 16.0
+physical_prim_water_drift_response = 1.05
 physical_prim_water_equilibrium_enabled = true
-physical_prim_water_equilibrium_response = 0.75
+physical_prim_water_equilibrium_response = 0.90
 physical_prim_water_equilibrium_damping = 4.5
-physical_prim_water_equilibrium_max_velocity = 0.45
-physical_prim_water_equilibrium_max_acceleration = 4.5
+physical_prim_water_equilibrium_max_velocity = 0.62
+physical_prim_water_equilibrium_max_acceleration = 5.5
 physical_prim_water_footprint_sampling_enabled = true
 physical_prim_water_footprint_sample_scale = 0.35
 physical_prim_water_footprint_min_size = 1.5
@@ -246,6 +247,11 @@ Floating prims sample the water under their footprint, so larger objects feel
 the wave height under each side and get a distributed lift torque instead of one
 flat center push. That makes rafts, boxes and boat-like builds roll and settle
 with the water more naturally.
+Floating objects preload part of their lift as soon as they touch water, so wood
+and other buoyant materials do not spend too long fully submerged before rising
+back to the surface. The water drift defaults are also slightly stronger, making
+floating props visibly follow the current without turning them into scripted
+vehicles.
 Low-speed contact micro-bounce damping keeps rubber/plastic bounce at visible
 impact speeds while fading the tiny resting rebounds that make settled objects
 tremble on terrain.
