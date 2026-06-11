@@ -1299,7 +1299,7 @@ namespace OpenSim.Region.OptionalModules.World.RegionWeb
 
             foreach (EstateAdminIniSection section in sections)
             {
-                html.Append("<details class=\"config-section\" open><summary>")
+                html.Append("<details class=\"config-section\"><summary>")
                     .Append(Html(string.IsNullOrEmpty(section.Name) ? "Global" : section.Name))
                     .Append(" <span>")
                     .Append(section.Entries.Count.ToString(CultureInfo.InvariantCulture))
