@@ -185,12 +185,31 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 SharedChrContact.CharacterFeet = true;
             }
 
-            contactSharedForJoints.surface.mu = 0;
+            float previousMu = contactSharedForJoints.surface.mu;
+            float previousBounce = contactSharedForJoints.surface.bounce;
+            float previousSoftERP = contactSharedForJoints.surface.soft_erp;
+            float previousSoftCFM = contactSharedForJoints.surface.soft_cfm;
+
+            contactSharedForJoints.surface.mu = AvatarAvatarCollisionTuningEnabled ? AvatarAvatarFriction : 0;
             contactSharedForJoints.surface.bounce = 0;
+            if (AvatarAvatarCollisionTuningEnabled)
+            {
+                contactSharedForJoints.surface.soft_erp = AvatarAvatarContactERP;
+                contactSharedForJoints.surface.soft_cfm = AvatarAvatarContactCFM;
+            }
+
             contactSharedForJoints.geom.pos = Unsafe.As<Vector3, UBOdeNative.Vector3>(ref SharedChrContact.Position);
             contactSharedForJoints.geom.normal = Unsafe.As<Vector3, UBOdeNative.Vector3>(ref SharedChrContact.SurfaceNormal);
-            contactSharedForJoints.geom.depth = SharedChrContact.PenetrationDepth;
+            contactSharedForJoints.geom.depth = AvatarAvatarCollisionTuningEnabled
+                ? MathF.Min(SharedChrContact.PenetrationDepth * AvatarAvatarContactDepthScale, AvatarAvatarMaxPenetration)
+                : SharedChrContact.PenetrationDepth;
+
             IntPtr Joint = CreateCharContacJoint();
+            contactSharedForJoints.surface.mu = previousMu;
+            contactSharedForJoints.surface.bounce = previousBounce;
+            contactSharedForJoints.surface.soft_erp = previousSoftERP;
+            contactSharedForJoints.surface.soft_cfm = previousSoftCFM;
+
             if (Joint == IntPtr.Zero)
                 return;
             UBOdeNative.JointAttach(Joint, p1.Body, p2.Body);
@@ -361,4 +380,3 @@ _checkends:
         }
     }
 }
-

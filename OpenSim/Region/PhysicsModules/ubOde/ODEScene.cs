@@ -211,6 +211,12 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         internal float AvatarMovementSmoothingTimescale = 0.12f;
         internal float AvatarStepAssistStrength = 0.18f;
         internal float AvatarStepAssistMaxVelocity = 2.4f;
+        internal bool AvatarAvatarCollisionTuningEnabled = true;
+        internal float AvatarAvatarContactERP = 0.24f;
+        internal float AvatarAvatarContactCFM = 0.006f;
+        internal float AvatarAvatarContactDepthScale = 0.65f;
+        internal float AvatarAvatarMaxPenetration = 0.16f;
+        internal float AvatarAvatarFriction = 0.02f;
         internal bool AvatarFallDampingEnabled = true;
         internal float AvatarTerminalVelocity = 54f;
         internal float AvatarFallDamping = 0.18f;
@@ -802,6 +808,12 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     AvatarMovementSmoothingTimescale = ConfigFloat(physicsconfig, "avatar_movement_smoothing_timescale", AvatarMovementSmoothingTimescale, ODE_STEPSIZE, 5f);
                     AvatarStepAssistStrength = ConfigFloat(physicsconfig, "avatar_step_assist_strength", AvatarStepAssistStrength, 0f, 5f);
                     AvatarStepAssistMaxVelocity = ConfigFloat(physicsconfig, "avatar_step_assist_max_velocity", AvatarStepAssistMaxVelocity, 0f, 10f);
+                    AvatarAvatarCollisionTuningEnabled = physicsconfig.GetBoolean("avatar_avatar_collision_tuning_enabled", AvatarAvatarCollisionTuningEnabled);
+                    AvatarAvatarContactERP = ConfigFloat(physicsconfig, "avatar_avatar_contact_erp", AvatarAvatarContactERP, 0.01f, 1f);
+                    AvatarAvatarContactCFM = ConfigFloat(physicsconfig, "avatar_avatar_contact_cfm", AvatarAvatarContactCFM, 0.000001f, 0.1f);
+                    AvatarAvatarContactDepthScale = ConfigFloat(physicsconfig, "avatar_avatar_contact_depth_scale", AvatarAvatarContactDepthScale, 0.05f, 1f);
+                    AvatarAvatarMaxPenetration = ConfigFloat(physicsconfig, "avatar_avatar_max_penetration", AvatarAvatarMaxPenetration, 0.01f, 1f);
+                    AvatarAvatarFriction = ConfigFloat(physicsconfig, "avatar_avatar_friction", AvatarAvatarFriction, 0f, 1f);
                     AvatarFallDampingEnabled = physicsconfig.GetBoolean("avatar_fall_damping_enabled", AvatarFallDampingEnabled);
                     AvatarTerminalVelocity = ConfigFloat(physicsconfig, "avatar_terminal_velocity", AvatarTerminalVelocity, 1f, 255f);
                     AvatarFallDamping = ConfigFloat(physicsconfig, "avatar_fall_damping", AvatarFallDamping, 0f, 10f);
@@ -934,7 +946,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             LoadMaterialWaterSettings(physicsconfig);
 
             m_log.InfoFormat(
-                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s primWaterRise={16:0.###} primWaterDrag={17:0.###} airDrag={18} restDamp={19} rolling={20:0.###} nearRestSleep={21} microBounce={22} materialDensity={23} shapeInertia={24} avatarTune={25} avatarWater={26} avatarWaterSmooth={27:0.###}s avatarMoveSmooth={28:0.###}s avatarSettle={29:0.###} avatarFallDamp={30} waterCushion={31:0.###} liftSmooth={32:0.###}s waterSpinSettle={33}",
+                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s primWaterRise={16:0.###} primWaterDrag={17:0.###} airDrag={18} restDamp={19} rolling={20:0.###} nearRestSleep={21} microBounce={22} materialDensity={23} shapeInertia={24} avatarTune={25} avatarWater={26} avatarWaterSmooth={27:0.###}s avatarMoveSmooth={28:0.###}s avatarSettle={29:0.###} avatarAvatar={30} avatarFallDamp={31} waterCushion={32:0.###} liftSmooth={33:0.###}s waterSpinSettle={34}",
                 ODE_STEPSIZE, m_physicsiterations, bodyFramesAutoDisable, worldLinearDamping, worldAngularDamping,
                 commonContactERP, commonContactCFM, commonContactSLIP, contactsurfacelayer,
                 contactMaxCorrectingVelocity, commonContactBounceVelocity, TerrainFriction, TerrainBounce,
@@ -953,6 +965,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 AvatarWaterSmoothingTimescale,
                 AvatarMovementSmoothingTimescale,
                 AvatarContactSettleDamping,
+                AvatarAvatarCollisionTuningEnabled ? "enabled" : "disabled",
                 AvatarFallDampingEnabled ? "enabled" : "disabled",
                 PhysicalPrimWaterSurfaceCushion,
                 PhysicalPrimWaterLiftSmoothingTimescale,

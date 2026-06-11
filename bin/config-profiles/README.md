@@ -184,6 +184,12 @@ avatar_ground_traction = 0.14
 avatar_movement_smoothing_timescale = 0.12
 avatar_step_assist_strength = 0.18
 avatar_step_assist_max_velocity = 2.4
+avatar_avatar_collision_tuning_enabled = true
+avatar_avatar_contact_erp = 0.24
+avatar_avatar_contact_cfm = 0.006
+avatar_avatar_contact_depth_scale = 0.65
+avatar_avatar_max_penetration = 0.16
+avatar_avatar_friction = 0.02
 avatar_fall_damping_enabled = true
 avatar_fall_damping = 0.18
 avatar_water_dynamics_enabled = true
@@ -242,8 +248,10 @@ damping and water movement that slows and supports the avatar body instead of
 making water feel like empty air. Contact normals are smoothed between physics
 ticks, slopes add a little rest damping, and low prim edges get a small step
 assist so walking over uneven builds feels less twitchy. ubODE also applies the
-configured avatar terminal velocity with a gentle fall damping curve, and avatar
-water immersion is smoothed over several physics ticks so walking into water or
+configured avatar terminal velocity with a gentle fall damping curve, and
+avatar-to-avatar contacts use a softer dedicated profile so people separate
+without hard capsule shoves or ice-like lateral sliding. Avatar water immersion
+is smoothed over several physics ticks so walking into water or
 breaking the surface feels less abrupt. Movement commands are also eased over a
 short timescale, while slopes reduce push speed slightly and add lateral
 traction so turning or stopping on uneven ground feels less skittery. A small
