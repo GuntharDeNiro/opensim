@@ -145,6 +145,11 @@ physical_prim_water_surface_damping = 3.5
 physical_prim_water_max_rise_acceleration = 2.5
 physical_prim_water_drag = 1.35
 physical_prim_water_drift_scale = 12.0
+physical_prim_water_equilibrium_enabled = true
+physical_prim_water_equilibrium_response = 1.15
+physical_prim_water_equilibrium_damping = 1.6
+physical_prim_water_equilibrium_max_velocity = 1.1
+physical_prim_water_equilibrium_max_acceleration = 4.0
 physical_prim_water_righting_strength = 3.0
 physical_prim_water_angular_damping = 5.0
 physical_prim_water_spin_settle_enabled = true
@@ -236,6 +241,9 @@ projected-area water drag, so broad faces push more water than narrow ones.
 Water lift now has a small surface-entry cushion plus frame-to-frame smoothing:
 it only starts after real immersion and then ramps in, so floating prims ease
 into buoyancy instead of getting an instant upward kick at the exact waterline.
+Buoyant materials also use a waterline equilibrium pass that targets a plausible
+submerged fraction for the material and damps toward it, reducing the repeated
+surface jumping that makes light objects look weightless.
 Floating prims that are not vehicles and are not being actively torqued also get
 idle spin settling, which damps the last slow rotations of cubes and other
 nearly symmetric objects without fighting scripted boats.

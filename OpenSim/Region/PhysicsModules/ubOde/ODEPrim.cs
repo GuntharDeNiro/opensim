@@ -4070,6 +4070,27 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             if (vel.Z > 0f && rawSubmerged < 0.45f)
                 fz -= vel.Z * m_parentScene.PhysicalPrimWaterSurfaceDamping * (1f - rawSubmerged / 0.45f);
 
+            if (m_parentScene.PhysicalPrimWaterEquilibriumEnabled &&
+                buoyancy > 1f &&
+                m_parentScene.PhysicalPrimWaterEquilibriumDamping > 0f &&
+                m_parentScene.PhysicalPrimWaterEquilibriumMaxAcceleration > 0f)
+            {
+                float equilibriumSubmerged = Math.Clamp(1f / buoyancy, 0.08f, 0.95f);
+                float equilibriumError = submerged - equilibriumSubmerged;
+                float targetVerticalVelocity = Math.Clamp(
+                    equilibriumError * m_parentScene.PhysicalPrimWaterEquilibriumResponse,
+                    -m_parentScene.PhysicalPrimWaterEquilibriumMaxVelocity,
+                    m_parentScene.PhysicalPrimWaterEquilibriumMaxVelocity);
+                float equilibriumBlend = SmoothStep01(submerged);
+                float equilibriumAcceleration = (targetVerticalVelocity - vel.Z) *
+                    m_parentScene.PhysicalPrimWaterEquilibriumDamping * equilibriumBlend;
+
+                fz += Math.Clamp(
+                    equilibriumAcceleration,
+                    -m_parentScene.PhysicalPrimWaterEquilibriumMaxAcceleration,
+                    m_parentScene.PhysicalPrimWaterEquilibriumMaxAcceleration);
+            }
+
             Vector3 relativeWaterVelocity = new(vel.X - m_smoothedWaterFlow.X, vel.Y - m_smoothedWaterFlow.Y, vel.Z);
             float relativeWaterSpeed = relativeWaterVelocity.Length();
             if (relativeWaterSpeed > 0.01f)

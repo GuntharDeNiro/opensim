@@ -294,6 +294,11 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         internal float PhysicalPrimWaterDrag = 1.35f;
         internal float PhysicalPrimWaterDriftScale = 12.0f;
         internal float PhysicalPrimWaterDriftResponse = 0.8f;
+        internal bool PhysicalPrimWaterEquilibriumEnabled = true;
+        internal float PhysicalPrimWaterEquilibriumResponse = 1.15f;
+        internal float PhysicalPrimWaterEquilibriumDamping = 1.6f;
+        internal float PhysicalPrimWaterEquilibriumMaxVelocity = 1.1f;
+        internal float PhysicalPrimWaterEquilibriumMaxAcceleration = 4.0f;
         internal float PhysicalPrimWaterTiltScale = 0.35f;
         internal float PhysicalPrimWaterRightingStrength = 3.0f;
         internal float PhysicalPrimWaterAngularDamping = 5.0f;
@@ -874,6 +879,11 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     PhysicalPrimWaterDrag = ConfigFloat(physicsconfig, "physical_prim_water_drag", PhysicalPrimWaterDrag, 0f, 20f);
                     PhysicalPrimWaterDriftScale = ConfigFloat(physicsconfig, "physical_prim_water_drift_scale", PhysicalPrimWaterDriftScale, 0f, 100f);
                     PhysicalPrimWaterDriftResponse = ConfigFloat(physicsconfig, "physical_prim_water_drift_response", PhysicalPrimWaterDriftResponse, 0f, 20f);
+                    PhysicalPrimWaterEquilibriumEnabled = physicsconfig.GetBoolean("physical_prim_water_equilibrium_enabled", PhysicalPrimWaterEquilibriumEnabled);
+                    PhysicalPrimWaterEquilibriumResponse = ConfigFloat(physicsconfig, "physical_prim_water_equilibrium_response", PhysicalPrimWaterEquilibriumResponse, 0f, 20f);
+                    PhysicalPrimWaterEquilibriumDamping = ConfigFloat(physicsconfig, "physical_prim_water_equilibrium_damping", PhysicalPrimWaterEquilibriumDamping, 0f, 20f);
+                    PhysicalPrimWaterEquilibriumMaxVelocity = ConfigFloat(physicsconfig, "physical_prim_water_equilibrium_max_velocity", PhysicalPrimWaterEquilibriumMaxVelocity, 0f, 20f);
+                    PhysicalPrimWaterEquilibriumMaxAcceleration = ConfigFloat(physicsconfig, "physical_prim_water_equilibrium_max_acceleration", PhysicalPrimWaterEquilibriumMaxAcceleration, 0f, 50f);
                     PhysicalPrimWaterTiltScale = ConfigFloat(physicsconfig, "physical_prim_water_tilt_scale", PhysicalPrimWaterTiltScale, 0f, 20f);
                     PhysicalPrimWaterRightingStrength = ConfigFloat(physicsconfig, "physical_prim_water_righting_strength", PhysicalPrimWaterRightingStrength, 0f, 50f);
                     PhysicalPrimWaterAngularDamping = ConfigFloat(physicsconfig, "physical_prim_water_angular_damping", PhysicalPrimWaterAngularDamping, 0f, 50f);
@@ -958,7 +968,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             LoadMaterialWaterSettings(physicsconfig);
 
             m_log.InfoFormat(
-                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s primWaterRise={16:0.###} primWaterDrag={17:0.###} airDrag={18} restDamp={19} rolling={20:0.###} nearRestSleep={21} microBounce={22} materialDensity={23} shapeInertia={24} avatarTune={25} avatarWater={26} avatarWaterSmooth={27:0.###}s avatarMoveSmooth={28:0.###}s avatarSettle={29:0.###} avatarAvatar={30} avatarObject={31} avatarFallDamp={32} waterCushion={33:0.###} liftSmooth={34:0.###}s waterSpinSettle={35}",
+                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s primWaterRise={16:0.###} primWaterDrag={17:0.###} airDrag={18} restDamp={19} rolling={20:0.###} nearRestSleep={21} microBounce={22} materialDensity={23} shapeInertia={24} avatarTune={25} avatarWater={26} avatarWaterSmooth={27:0.###}s avatarMoveSmooth={28:0.###}s avatarSettle={29:0.###} avatarAvatar={30} avatarObject={31} avatarFallDamp={32} waterCushion={33:0.###} liftSmooth={34:0.###}s waterEq={35} waterSpinSettle={36}",
                 ODE_STEPSIZE, m_physicsiterations, bodyFramesAutoDisable, worldLinearDamping, worldAngularDamping,
                 commonContactERP, commonContactCFM, commonContactSLIP, contactsurfacelayer,
                 contactMaxCorrectingVelocity, commonContactBounceVelocity, TerrainFriction, TerrainBounce,
@@ -982,6 +992,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 AvatarFallDampingEnabled ? "enabled" : "disabled",
                 PhysicalPrimWaterSurfaceCushion,
                 PhysicalPrimWaterLiftSmoothingTimescale,
+                PhysicalPrimWaterEquilibriumEnabled ? "enabled" : "disabled",
                 PhysicalPrimWaterSpinSettleEnabled ? "enabled" : "disabled");
 
             m_lastframe = Util.GetTimeStamp();
