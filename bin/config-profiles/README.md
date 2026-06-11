@@ -158,6 +158,10 @@ physical_prim_rolling_resistance_angular_speed = 2.0
 physical_prim_near_rest_sleep_enabled = true
 physical_prim_near_rest_linear_speed = 0.018
 physical_prim_near_rest_angular_speed = 0.025
+physical_prim_micro_bounce_damping_enabled = true
+physical_prim_micro_bounce_min_speed = 0.32
+physical_prim_micro_bounce_max_depth = 0.06
+physical_prim_micro_bounce_friction_boost = 1.25
 physical_prim_shape_inertia_enabled = true
 physical_prim_base_inertia_scale = 1.08
 physical_prim_thin_shape_inertia_boost = 0.45
@@ -198,6 +202,9 @@ inworld demos; terrain contact uses a square-root bounce blend so low terrain
 restitution does not cancel a bouncy material. Physical prims now also get
 material-based water buoyancy: wood, plastic and rubber float, while metal and
 stone mostly sink.
+Low-speed contact micro-bounce damping keeps rubber/plastic bounce at visible
+impact speeds while fading the tiny resting rebounds that make settled objects
+tremble on terrain.
 Floating prims receive wave drift and a small water-normal tilt so simple
 inworld boat hulls can move without being scripted as vehicles first. The solver
 runs at a slightly smaller step with softer contact correction so high-bounce

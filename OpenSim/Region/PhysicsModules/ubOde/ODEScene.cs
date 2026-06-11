@@ -298,6 +298,10 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         internal bool PhysicalPrimNearRestSleepEnabled = true;
         internal float PhysicalPrimNearRestLinearSpeed = 0.018f;
         internal float PhysicalPrimNearRestAngularSpeed = 0.025f;
+        internal bool PhysicalPrimMicroBounceDampingEnabled = true;
+        internal float PhysicalPrimMicroBounceMinSpeed = 0.32f;
+        internal float PhysicalPrimMicroBounceMaxDepth = 0.06f;
+        internal float PhysicalPrimMicroBounceFrictionBoost = 1.25f;
         internal bool PhysicalPrimMaterialDensityEnabled = true;
         internal bool PhysicalPrimShapeInertiaEnabled = true;
         internal float PhysicalPrimBaseInertiaScale = 1.08f;
@@ -464,6 +468,44 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             // Direct multiplication makes rubber-on-terrain almost inert when
             // terrain bounce is low; sqrt keeps both surfaces meaningful.
             return MathF.Sqrt(bounce1 * bounce2);
+        }
+
+        private static float GetContactNormalSpeed(PhysicsActor p1, PhysicsActor p2, ref UBOdeNative.ContactGeom contact)
+        {
+            Vector3 relativeVelocity = Vector3.Zero;
+
+            if (p2.IsPhysical)
+                relativeVelocity = p2.rootVelocity;
+
+            if (p1.IsPhysical)
+                relativeVelocity -= p1.rootVelocity;
+
+            Vector3 normal = Unsafe.As<UBOdeNative.Vector3, Vector3>(ref contact.normal);
+            if (!normal.IsFinite() || normal.LengthSquared() <= 0.000001f)
+                return 0f;
+
+            normal.Normalize();
+            return MathF.Abs(Vector3.Dot(relativeVelocity, normal));
+        }
+
+        private void ApplyContactMicroBounceDamping(PhysicsActor p1, PhysicsActor p2, ref UBOdeNative.ContactGeom contact, float baseBounce, float baseMu)
+        {
+            contactSharedForJoints.surface.bounce = baseBounce;
+            contactSharedForJoints.surface.mu = baseMu;
+
+            if (!PhysicalPrimMicroBounceDampingEnabled || baseBounce <= 0f || PhysicalPrimMicroBounceMinSpeed <= 0f)
+                return;
+
+            if (contact.depth > PhysicalPrimMicroBounceMaxDepth)
+                return;
+
+            float normalSpeed = GetContactNormalSpeed(p1, p2, ref contact);
+            if (normalSpeed >= PhysicalPrimMicroBounceMinSpeed)
+                return;
+
+            float speedRatio = normalSpeed / PhysicalPrimMicroBounceMinSpeed;
+            contactSharedForJoints.surface.bounce = baseBounce * speedRatio;
+            contactSharedForJoints.surface.mu = baseMu * PhysicalPrimMicroBounceFrictionBoost;
         }
 
         internal float GetDynamicWaterHeight(float x, float y)
@@ -818,6 +860,10 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     PhysicalPrimNearRestSleepEnabled = physicsconfig.GetBoolean("physical_prim_near_rest_sleep_enabled", PhysicalPrimNearRestSleepEnabled);
                     PhysicalPrimNearRestLinearSpeed = ConfigFloat(physicsconfig, "physical_prim_near_rest_linear_speed", PhysicalPrimNearRestLinearSpeed, 0f, 1f);
                     PhysicalPrimNearRestAngularSpeed = ConfigFloat(physicsconfig, "physical_prim_near_rest_angular_speed", PhysicalPrimNearRestAngularSpeed, 0f, 1f);
+                    PhysicalPrimMicroBounceDampingEnabled = physicsconfig.GetBoolean("physical_prim_micro_bounce_damping_enabled", PhysicalPrimMicroBounceDampingEnabled);
+                    PhysicalPrimMicroBounceMinSpeed = ConfigFloat(physicsconfig, "physical_prim_micro_bounce_min_speed", PhysicalPrimMicroBounceMinSpeed, 0f, 5f);
+                    PhysicalPrimMicroBounceMaxDepth = ConfigFloat(physicsconfig, "physical_prim_micro_bounce_max_depth", PhysicalPrimMicroBounceMaxDepth, 0f, 1f);
+                    PhysicalPrimMicroBounceFrictionBoost = ConfigFloat(physicsconfig, "physical_prim_micro_bounce_friction_boost", PhysicalPrimMicroBounceFrictionBoost, 1f, 5f);
                     PhysicalPrimMaterialDensityEnabled = physicsconfig.GetBoolean("physical_prim_material_density_enabled", PhysicalPrimMaterialDensityEnabled);
                     PhysicalPrimShapeInertiaEnabled = physicsconfig.GetBoolean("physical_prim_shape_inertia_enabled", PhysicalPrimShapeInertiaEnabled);
                     PhysicalPrimBaseInertiaScale = ConfigFloat(physicsconfig, "physical_prim_base_inertia_scale", PhysicalPrimBaseInertiaScale, 0.1f, 10f);
@@ -876,7 +922,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             LoadMaterialWaterSettings(physicsconfig);
 
             m_log.InfoFormat(
-                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s primWaterRise={16:0.###} primWaterDrag={17:0.###} airDrag={18} restDamp={19} rolling={20:0.###} nearRestSleep={21} materialDensity={22} shapeInertia={23} avatarTune={24} avatarWater={25} avatarWaterSmooth={26:0.###}s avatarMoveSmooth={27:0.###}s avatarSettle={28:0.###} avatarFallDamp={29}",
+                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s primWaterRise={16:0.###} primWaterDrag={17:0.###} airDrag={18} restDamp={19} rolling={20:0.###} nearRestSleep={21} microBounce={22} materialDensity={23} shapeInertia={24} avatarTune={25} avatarWater={26} avatarWaterSmooth={27:0.###}s avatarMoveSmooth={28:0.###}s avatarSettle={29:0.###} avatarFallDamp={30}",
                 ODE_STEPSIZE, m_physicsiterations, bodyFramesAutoDisable, worldLinearDamping, worldAngularDamping,
                 commonContactERP, commonContactCFM, commonContactSLIP, contactsurfacelayer,
                 contactMaxCorrectingVelocity, commonContactBounceVelocity, TerrainFriction, TerrainBounce,
@@ -887,6 +933,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 PhysicalPrimRestingDampingEnabled ? "enabled" : "disabled",
                 PhysicalPrimRollingResistance,
                 PhysicalPrimNearRestSleepEnabled ? "enabled" : "disabled",
+                PhysicalPrimMicroBounceDampingEnabled ? "enabled" : "disabled",
                 PhysicalPrimMaterialDensityEnabled ? "enabled" : "disabled",
                 PhysicalPrimShapeInertiaEnabled ? "enabled" : "disabled",
                 AvatarPhysicsTuningEnabled ? "enabled" : "disabled",
@@ -1157,8 +1204,10 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             float minDepth = float.MaxValue;
             float maxDepth = float.MinValue;
 
-            contactSharedForJoints.surface.mu = mu;
-            contactSharedForJoints.surface.bounce = bounce;
+            float baseMu = mu;
+            float baseBounce = bounce;
+            contactSharedForJoints.surface.mu = baseMu;
+            contactSharedForJoints.surface.bounce = baseBounce;
 
             bool useAltcontact;
             bool noskip;
@@ -1208,9 +1257,17 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
                 if (noskip)
                 {
-                    Joint = useAltcontact ? 
-                                CreateContacJoint(ref altWorkContact, smoothMesh) : 
-                                CreateContacJoint(ref curctc, smoothMesh);
+                    if (useAltcontact)
+                    {
+                        ApplyContactMicroBounceDamping(p1, p2, ref altWorkContact, baseBounce, baseMu);
+                        Joint = CreateContacJoint(ref altWorkContact, smoothMesh);
+                    }
+                    else
+                    {
+                        ApplyContactMicroBounceDamping(p1, p2, ref curctc, baseBounce, baseMu);
+                        Joint = CreateContacJoint(ref curctc, smoothMesh);
+                    }
+
                     if (Joint == IntPtr.Zero)
                         break;
 
