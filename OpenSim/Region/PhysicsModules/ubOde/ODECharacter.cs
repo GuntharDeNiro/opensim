@@ -107,6 +107,9 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         private bool m_pidControllerActive = true;
 
         internal Vector3 CollideNormal;
+        private Vector3 m_smoothedCollideNormal = Vector3.UnitZ;
+        private bool m_hasSmoothedCollideNormal = false;
+        private int m_feetCollisionFrames = 0;
 
         public int  _charsListIndex;
 
@@ -1079,9 +1082,10 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 if (offset.Z <= 0)
                 {
                     feetcollision = true;
+                    m_feetCollisionFrames = 2;
                     if (h < boneOff)
                     {
-                        CollideNormal = Unsafe.As<UBOdeNative.Vector3, Vector3>(ref contact.normal);
+                        SetAvatarCollideNormal(Unsafe.As<UBOdeNative.Vector3, Vector3>(ref contact.normal));
                         IsColliding = true;
                     }
                 }
@@ -1092,9 +1096,10 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 return true;
 
             feetcollision = true;
+            m_feetCollisionFrames = 2;
             if (h < boneOff)
             {
-                CollideNormal = Unsafe.As<UBOdeNative.Vector3, Vector3>(ref contact.normal);
+                SetAvatarCollideNormal(Unsafe.As<UBOdeNative.Vector3, Vector3>(ref contact.normal));
                 IsColliding = true;
             }
 
@@ -1132,6 +1137,40 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 altContact.normal.Z = -offset.Z;
             }
             return true;
+        }
+
+        private void ResetAvatarCollideNormalSmoothing()
+        {
+            m_hasSmoothedCollideNormal = false;
+            m_smoothedCollideNormal = Vector3.UnitZ;
+            CollideNormal = Vector3.Zero;
+        }
+
+        private void SetAvatarCollideNormal(Vector3 normal)
+        {
+            if (!normal.IsFinite() || normal.LengthSquared() <= 0.000001f)
+                normal = Vector3.UnitZ;
+            else
+                normal.Normalize();
+
+            if (!m_parent_scene.AvatarPhysicsTuningEnabled ||
+                m_parent_scene.AvatarContactNormalSmoothing <= 0f ||
+                !m_hasSmoothedCollideNormal)
+            {
+                m_smoothedCollideNormal = normal;
+                m_hasSmoothedCollideNormal = true;
+                CollideNormal = normal;
+                return;
+            }
+
+            float alpha = Math.Clamp(m_parent_scene.AvatarContactNormalSmoothing, 0f, 1f);
+            m_smoothedCollideNormal += (normal - m_smoothedCollideNormal) * alpha;
+            if (m_smoothedCollideNormal.LengthSquared() <= 0.000001f)
+                m_smoothedCollideNormal = normal;
+            else
+                m_smoothedCollideNormal.Normalize();
+
+            CollideNormal = m_smoothedCollideNormal;
         }
 
         private float GetAvatarWaterSubmerged(Vector3 pos)
@@ -1195,6 +1234,36 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 vec.Y -= vel.Y * damping;
             if (vel.Z > -0.25f && vel.Z < 0.45f)
                 vec.Z -= vel.Z * damping * 0.35f;
+        }
+
+        private void ApplyAvatarSlopeDamping(Vector3 vel, bool targetVelocityZero, bool hoverPIDActive, ref Vector3 vec)
+        {
+            if (!m_parent_scene.AvatarPhysicsTuningEnabled || !targetVelocityZero || m_flying || hoverPIDActive)
+                return;
+
+            if ((!m_iscolliding && !m_iscollidingGround) || CollideNormal.Z <= 0.05f || CollideNormal.Z >= 0.96f)
+                return;
+
+            float slope = 1f - CollideNormal.Z;
+            float damping = PID_D * m_parent_scene.AvatarSlopeDamping * slope;
+            vec.X -= vel.X * damping;
+            vec.Y -= vel.Y * damping;
+        }
+
+        private void ApplyAvatarStepAssist(Vector3 ctv, Vector3 vel, bool hoverPIDActive, ref Vector3 vec)
+        {
+            if (!m_parent_scene.AvatarPhysicsTuningEnabled || m_flying || hoverPIDActive)
+                return;
+
+            if (!m_iscollidingObj || m_iscollidingGround || m_feetCollisionFrames <= 0 || CollideNormal.Z > 0.75f)
+                return;
+
+            if ((ctv.X * ctv.X + ctv.Y * ctv.Y) < 0.04f || vel.Z >= m_parent_scene.AvatarStepAssistMaxVelocity)
+                return;
+
+            float lift = (m_parent_scene.AvatarStepAssistMaxVelocity - vel.Z) *
+                PID_D * m_parent_scene.AvatarStepAssistStrength;
+            vec.Z += lift;
         }
 
         private void ApplyAvatarWaterForces(float waterSubmerged, Vector3 vel, ref Vector3 vec)
@@ -1432,7 +1501,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                             m_freemove = false;
                         }
 
-                        CollideNormal = n;
+                        SetAvatarCollideNormal(n);
 
                         m_iscollidingGround = true;
 
@@ -1472,8 +1541,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
 
             //******************************************
-            if (!m_iscolliding)
-                CollideNormal.Z = 0;
+            if (!m_iscolliding && !m_iscollidingGround && !m_iscollidingObj)
+                ResetAvatarCollideNormalSmoothing();
 
             ApplyAvatarAirControl(ref ctv, waterSubmerged, hoverPIDActive);
             ApplyAvatarWaterMovement(waterSubmerged, ref ctv);
@@ -1666,9 +1735,14 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
             ApplyAvatarWaterForces(waterSubmerged, vel, ref vec);
             ApplyAvatarGroundRestDamping(vel, tviszero, hoverPIDActive, ref vec);
+            ApplyAvatarSlopeDamping(vel, tviszero, hoverPIDActive, ref vec);
+            ApplyAvatarStepAssist(ctv, vel, hoverPIDActive, ref vec);
 
             if ((vec.Z != 0 || vec.X != 0 || vec.Y != 0))
                 UBOdeNative.BodyAddForce(Body, vec.X, vec.Y, vec.Z);
+
+            if (m_feetCollisionFrames > 0)
+                m_feetCollisionFrames--;
 
             if (_zeroFlag)
             {

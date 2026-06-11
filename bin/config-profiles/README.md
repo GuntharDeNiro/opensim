@@ -159,6 +159,10 @@ avatar_physics_tuning_enabled = true
 avatar_ground_rest_damping = 0.55
 avatar_landing_damping = 0.35
 avatar_air_control_scale = 0.65
+avatar_contact_normal_smoothing = 0.35
+avatar_slope_damping = 0.18
+avatar_step_assist_strength = 0.18
+avatar_step_assist_max_velocity = 2.4
 avatar_water_dynamics_enabled = true
 avatar_water_buoyancy = 0.92
 avatar_water_drag = 0.85
@@ -199,7 +203,9 @@ their broad face settles toward the water surface.
 Avatar movement also receives a conservative realism pass: light avatar-to-prim
 friction, softer landings, reduced air steering while falling, near-rest ground
 damping and water movement that slows and supports the avatar body instead of
-making water feel like empty air.
+making water feel like empty air. Contact normals are smoothed between physics
+ticks, slopes add a little rest damping, and low prim edges get a small step
+assist so walking over uneven builds feels less twitchy.
 
 RegionWeb Portal And Inventory Carousels
 ----------------------------------------

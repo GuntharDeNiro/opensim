@@ -203,6 +203,10 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         internal float AvatarGroundRestDamping = 0.55f;
         internal float AvatarLandingDamping = 0.35f;
         internal float AvatarAirControlScale = 0.65f;
+        internal float AvatarContactNormalSmoothing = 0.35f;
+        internal float AvatarSlopeDamping = 0.18f;
+        internal float AvatarStepAssistStrength = 0.18f;
+        internal float AvatarStepAssistMaxVelocity = 2.4f;
         internal bool AvatarWaterDynamicsEnabled = true;
         internal float AvatarWaterBuoyancy = 0.92f;
         internal float AvatarWaterDrag = 0.85f;
@@ -727,6 +731,10 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     AvatarGroundRestDamping = ConfigFloat(physicsconfig, "avatar_ground_rest_damping", AvatarGroundRestDamping, 0f, 10f);
                     AvatarLandingDamping = ConfigFloat(physicsconfig, "avatar_landing_damping", AvatarLandingDamping, 0f, 10f);
                     AvatarAirControlScale = ConfigFloat(physicsconfig, "avatar_air_control_scale", AvatarAirControlScale, 0f, 1f);
+                    AvatarContactNormalSmoothing = ConfigFloat(physicsconfig, "avatar_contact_normal_smoothing", AvatarContactNormalSmoothing, 0f, 1f);
+                    AvatarSlopeDamping = ConfigFloat(physicsconfig, "avatar_slope_damping", AvatarSlopeDamping, 0f, 10f);
+                    AvatarStepAssistStrength = ConfigFloat(physicsconfig, "avatar_step_assist_strength", AvatarStepAssistStrength, 0f, 5f);
+                    AvatarStepAssistMaxVelocity = ConfigFloat(physicsconfig, "avatar_step_assist_max_velocity", AvatarStepAssistMaxVelocity, 0f, 10f);
                     AvatarWaterDynamicsEnabled = physicsconfig.GetBoolean("avatar_water_dynamics_enabled", AvatarWaterDynamicsEnabled);
                     AvatarWaterBuoyancy = ConfigFloat(physicsconfig, "avatar_water_buoyancy", AvatarWaterBuoyancy, 0f, 2f);
                     AvatarWaterDrag = ConfigFloat(physicsconfig, "avatar_water_drag", AvatarWaterDrag, 0f, 10f);
