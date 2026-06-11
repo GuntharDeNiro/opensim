@@ -3841,6 +3841,115 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             return value * value * (3f - 2f * value);
         }
 
+        private Vector3 GetHorizontalWaterSampleOffset(Quaternion orientation, Vector3 localAxis, float size)
+        {
+            if (!m_parentScene.PhysicalPrimWaterFootprintSamplingEnabled ||
+                size < m_parentScene.PhysicalPrimWaterFootprintMinSize ||
+                m_parentScene.PhysicalPrimWaterFootprintSampleScale <= 0f ||
+                m_parentScene.PhysicalPrimWaterFootprintMaxOffset <= 0f)
+                return Vector3.Zero;
+
+            Vector3 axis = localAxis * orientation;
+            axis.Z = 0f;
+
+            float axisLength = axis.Length();
+            if (axisLength <= 0.001f)
+                return Vector3.Zero;
+
+            float offset = Math.Clamp(
+                size * 0.5f * axisLength * m_parentScene.PhysicalPrimWaterFootprintSampleScale,
+                0f,
+                m_parentScene.PhysicalPrimWaterFootprintMaxOffset);
+            if (offset <= 0.05f)
+                return Vector3.Zero;
+
+            return axis * (offset / axisLength);
+        }
+
+        private static void SelectWaterFootprintOffset(Vector3 candidate, ref Vector3 first, ref float firstLengthSq, ref Vector3 second, ref float secondLengthSq)
+        {
+            float candidateLengthSq = candidate.LengthSquared();
+            if (candidateLengthSq <= 0.0025f)
+                return;
+
+            if (candidateLengthSq > firstLengthSq)
+            {
+                second = first;
+                secondLengthSq = firstLengthSq;
+                first = candidate;
+                firstLengthSq = candidateLengthSq;
+            }
+            else if (candidateLengthSq > secondLengthSq)
+            {
+                second = candidate;
+                secondLengthSq = candidateLengthSq;
+            }
+        }
+
+        private void AddWaterSurfaceSample(Vector3 samplePosition, ref float heightSum, ref Vector3 normalSum, ref Vector3 flowSum, ref int count)
+        {
+            heightSum += m_parentScene.GetDynamicWaterHeight(samplePosition.X, samplePosition.Y);
+            normalSum += m_parentScene.GetDynamicWaterNormal(samplePosition.X, samplePosition.Y);
+            flowSum += m_parentScene.GetDynamicWaterFlow(samplePosition.X, samplePosition.Y);
+            count++;
+        }
+
+        private void SamplePhysicalPrimWaterSurface(Vector3 pos, Quaternion orientation, out float waterHeight, out Vector3 waterNormal, out Vector3 waterFlow)
+        {
+            float heightSum = 0f;
+            Vector3 normalSum = Vector3.Zero;
+            Vector3 flowSum = Vector3.Zero;
+            int count = 0;
+
+            AddWaterSurfaceSample(pos, ref heightSum, ref normalSum, ref flowSum, ref count);
+
+            Vector3 first = Vector3.Zero;
+            Vector3 second = Vector3.Zero;
+            float firstLengthSq = 0f;
+            float secondLengthSq = 0f;
+
+            SelectWaterFootprintOffset(
+                GetHorizontalWaterSampleOffset(orientation, Vector3.UnitX, m_size.X),
+                ref first,
+                ref firstLengthSq,
+                ref second,
+                ref secondLengthSq);
+            SelectWaterFootprintOffset(
+                GetHorizontalWaterSampleOffset(orientation, Vector3.UnitY, m_size.Y),
+                ref first,
+                ref firstLengthSq,
+                ref second,
+                ref secondLengthSq);
+            SelectWaterFootprintOffset(
+                GetHorizontalWaterSampleOffset(orientation, Vector3.UnitZ, m_size.Z),
+                ref first,
+                ref firstLengthSq,
+                ref second,
+                ref secondLengthSq);
+
+            if (firstLengthSq > 0f)
+            {
+                AddWaterSurfaceSample(pos + first, ref heightSum, ref normalSum, ref flowSum, ref count);
+                AddWaterSurfaceSample(pos - first, ref heightSum, ref normalSum, ref flowSum, ref count);
+            }
+
+            if (secondLengthSq > 0f)
+            {
+                AddWaterSurfaceSample(pos + second, ref heightSum, ref normalSum, ref flowSum, ref count);
+                AddWaterSurfaceSample(pos - second, ref heightSum, ref normalSum, ref flowSum, ref count);
+            }
+
+            float inverseCount = 1f / count;
+            waterHeight = heightSum * inverseCount;
+            waterNormal = normalSum * inverseCount;
+            if (waterNormal.LengthSquared() <= 0.000001f)
+                waterNormal = Vector3.UnitZ;
+            else
+                waterNormal.Normalize();
+
+            waterFlow = flowSum * (m_parentScene.PhysicalPrimWaterDriftScale * inverseCount);
+        }
+
         private void ResetWaterDynamicsState()
         {
             m_hasWaterDynamicsState = false;
@@ -3983,14 +4092,14 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 return;
             }
 
-            float rawWaterHeight = m_parentScene.GetDynamicWaterHeight(pos.X, pos.Y);
+            Quaternion orientation = Body != IntPtr.Zero ? UBOdeNative.BodyGetQuaternionOMV(Body) : m_orientation;
+            SamplePhysicalPrimWaterSurface(pos, orientation, out float rawWaterHeight, out Vector3 rawWaterNormal, out Vector3 rawFlow);
             if (m_parentScene.GetTerrainHeightAtXY(pos.X, pos.Y) > rawWaterHeight - 0.1f)
             {
                 ResetWaterDynamicsState();
                 return;
             }
 
-            Quaternion orientation = Body != IntPtr.Zero ? UBOdeNative.BodyGetQuaternionOMV(Body) : m_orientation;
             float halfHeight = GetProjectedHalfExtent(orientation, Vector3.UnitZ);
             float objectHeight = halfHeight * 2f;
             float surfaceCushion = MathF.Min(m_parentScene.PhysicalPrimWaterSurfaceCushion, objectHeight * 0.35f);
@@ -4018,8 +4127,6 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 rawSubmerged *= SmoothStep01(trueSubmerged / cushionFraction);
             }
 
-            Vector3 rawWaterNormal = m_parentScene.GetDynamicWaterNormal(pos.X, pos.Y);
-            Vector3 rawFlow = m_parentScene.GetDynamicWaterFlow(pos.X, pos.Y) * m_parentScene.PhysicalPrimWaterDriftScale;
             float alpha = Math.Clamp(m_sceneTimeStep / m_parentScene.PhysicalPrimWaterSmoothingTimescale, 0.015f, 1f);
 
             if (!m_hasWaterDynamicsState)

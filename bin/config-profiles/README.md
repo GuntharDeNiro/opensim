@@ -150,6 +150,10 @@ physical_prim_water_equilibrium_response = 1.15
 physical_prim_water_equilibrium_damping = 1.6
 physical_prim_water_equilibrium_max_velocity = 1.1
 physical_prim_water_equilibrium_max_acceleration = 4.0
+physical_prim_water_footprint_sampling_enabled = true
+physical_prim_water_footprint_sample_scale = 0.35
+physical_prim_water_footprint_min_size = 1.5
+physical_prim_water_footprint_max_offset = 6.0
 physical_prim_water_righting_strength = 3.0
 physical_prim_water_angular_damping = 5.0
 physical_prim_water_spin_settle_enabled = true
@@ -250,6 +254,9 @@ into buoyancy instead of getting an instant upward kick at the exact waterline.
 Buoyant materials also use a waterline equilibrium pass that targets a plausible
 submerged fraction for the material and damps toward it, reducing the repeated
 surface jumping that makes light objects look weightless.
+Large floating objects sample the water across their horizontal footprint
+instead of only at their center, so long boxes and boat-like builds react to an
+averaged surface and flow rather than twitching around one wave point.
 Floating prims that are not vehicles and are not being actively torqued also get
 idle spin settling, which damps the last slow rotations of cubes and other
 nearly symmetric objects without fighting scripted boats.
