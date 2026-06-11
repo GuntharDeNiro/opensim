@@ -182,6 +182,8 @@ physical_prim_micro_bounce_damping_enabled = true
 physical_prim_micro_bounce_min_speed = 0.32
 physical_prim_micro_bounce_max_depth = 0.06
 physical_prim_micro_bounce_friction_boost = 1.25
+physical_prim_high_bounce_min_bounce = 0.70
+physical_prim_high_bounce_micro_bounce_min_speed = 0.12
 physical_prim_impact_softening_enabled = true
 physical_prim_impact_softening_min_speed = 3.0
 physical_prim_impact_softening_full_speed = 9.0
@@ -247,6 +249,9 @@ with the water more naturally.
 Low-speed contact micro-bounce damping keeps rubber/plastic bounce at visible
 impact speeds while fading the tiny resting rebounds that make settled objects
 tremble on terrain.
+Rubber-on-wood and rubber-on-plastic contacts keep a rubber-dominant bounce
+curve, so a rubber ball keeps several diminishing rebounds on a wooden floor
+while stone/flesh contacts keep their heavier damping.
 Floating prims receive wave drift and a small water-normal tilt so simple
 inworld boat hulls can move without being scripted as vehicles first. The solver
 runs at a slightly smaller step with softer contact correction so high-bounce

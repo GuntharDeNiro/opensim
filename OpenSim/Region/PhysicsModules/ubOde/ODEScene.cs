@@ -332,6 +332,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         internal float PhysicalPrimMicroBounceMinSpeed = 0.32f;
         internal float PhysicalPrimMicroBounceMaxDepth = 0.06f;
         internal float PhysicalPrimMicroBounceFrictionBoost = 1.25f;
+        internal float PhysicalPrimHighBounceMinBounce = 0.70f;
+        internal float PhysicalPrimHighBounceMicroBounceMinSpeed = 0.12f;
         internal bool PhysicalPrimImpactSofteningEnabled = true;
         internal float PhysicalPrimImpactSofteningMinSpeed = 3.0f;
         internal float PhysicalPrimImpactSofteningFullSpeed = 9.0f;
@@ -506,6 +508,37 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             return MathF.Sqrt(bounce1 * bounce2);
         }
 
+        private static bool IsPrimMaterial(PhysicsActor actor, Material material)
+        {
+            return actor is OdePrim prim && prim.m_material == (int)material;
+        }
+
+        private static float CombineObjectContactBounce(
+            PhysicsActor p1,
+            PhysicsActor p2,
+            ContactData contactdata1,
+            ContactData contactdata2)
+        {
+            float combined = CombineContactBounce(contactdata1.bounce, contactdata2.bounce);
+            bool p1Rubber = IsPrimMaterial(p1, Material.Rubber);
+            bool p2Rubber = IsPrimMaterial(p2, Material.Rubber);
+
+            if (p1Rubber && p2Rubber)
+                return MathF.Max(combined, MathF.Min(contactdata1.bounce, contactdata2.bounce));
+
+            if (p1Rubber != p2Rubber)
+            {
+                float otherBounce = p1Rubber ? contactdata2.bounce : contactdata1.bounce;
+                if (otherBounce >= 0.15f)
+                {
+                    float rubberDominantBounce = MathF.Min(0.86f, 0.62f + otherBounce * 0.65f);
+                    combined = MathF.Max(combined, rubberDominantBounce);
+                }
+            }
+
+            return combined;
+        }
+
         private static float SmoothStep01(float value)
         {
             value = Math.Clamp(value, 0f, 1f);
@@ -542,8 +575,11 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             bool hasAvatar =
                 p1.PhysicsActorType == (int)ActorTypes.Agent ||
                 p2.PhysicsActorType == (int)ActorTypes.Agent;
+            float microBounceMinSpeed = baseBounce >= PhysicalPrimHighBounceMinBounce
+                ? MathF.Min(PhysicalPrimMicroBounceMinSpeed, PhysicalPrimHighBounceMicroBounceMinSpeed)
+                : PhysicalPrimMicroBounceMinSpeed;
             bool needNormalSpeed =
-                (PhysicalPrimMicroBounceDampingEnabled && baseBounce > 0f && PhysicalPrimMicroBounceMinSpeed > 0f) ||
+                (PhysicalPrimMicroBounceDampingEnabled && baseBounce > 0f && microBounceMinSpeed > 0f) ||
                 (!hasAvatar && PhysicalPrimImpactSofteningEnabled);
 
             float normalSpeed = needNormalSpeed ? GetContactNormalSpeed(p1, p2, ref contact) : 0f;
@@ -565,14 +601,14 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
             if (!PhysicalPrimMicroBounceDampingEnabled ||
                 baseBounce <= 0f ||
-                PhysicalPrimMicroBounceMinSpeed <= 0f ||
+                microBounceMinSpeed <= 0f ||
                 contact.depth > PhysicalPrimMicroBounceMaxDepth)
                 return;
 
-            if (normalSpeed >= PhysicalPrimMicroBounceMinSpeed)
+            if (normalSpeed >= microBounceMinSpeed)
                 return;
 
-            float speedRatio = normalSpeed / PhysicalPrimMicroBounceMinSpeed;
+            float speedRatio = normalSpeed / microBounceMinSpeed;
             contactSharedForJoints.surface.bounce = baseBounce * speedRatio;
             contactSharedForJoints.surface.mu = baseMu * PhysicalPrimMicroBounceFrictionBoost;
         }
@@ -963,6 +999,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     PhysicalPrimMicroBounceMinSpeed = ConfigFloat(physicsconfig, "physical_prim_micro_bounce_min_speed", PhysicalPrimMicroBounceMinSpeed, 0f, 5f);
                     PhysicalPrimMicroBounceMaxDepth = ConfigFloat(physicsconfig, "physical_prim_micro_bounce_max_depth", PhysicalPrimMicroBounceMaxDepth, 0f, 1f);
                     PhysicalPrimMicroBounceFrictionBoost = ConfigFloat(physicsconfig, "physical_prim_micro_bounce_friction_boost", PhysicalPrimMicroBounceFrictionBoost, 1f, 5f);
+                    PhysicalPrimHighBounceMinBounce = ConfigFloat(physicsconfig, "physical_prim_high_bounce_min_bounce", PhysicalPrimHighBounceMinBounce, 0f, 1f);
+                    PhysicalPrimHighBounceMicroBounceMinSpeed = ConfigFloat(physicsconfig, "physical_prim_high_bounce_micro_bounce_min_speed", PhysicalPrimHighBounceMicroBounceMinSpeed, 0f, 5f);
                     PhysicalPrimImpactSofteningEnabled = physicsconfig.GetBoolean("physical_prim_impact_softening_enabled", PhysicalPrimImpactSofteningEnabled);
                     PhysicalPrimImpactSofteningMinSpeed = ConfigFloat(physicsconfig, "physical_prim_impact_softening_min_speed", PhysicalPrimImpactSofteningMinSpeed, 0f, 100f);
                     PhysicalPrimImpactSofteningFullSpeed = ConfigFloat(physicsconfig, "physical_prim_impact_softening_full_speed", PhysicalPrimImpactSofteningFullSpeed, 0f, 100f);
@@ -1027,7 +1065,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             LoadMaterialWaterSettings(physicsconfig);
 
             m_log.InfoFormat(
-                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s primWaterRise={16:0.###} primWaterDrag={17:0.###} airDrag={18} restDamp={19} rolling={20:0.###} nearRestSleep={21} microBounce={22} impactSoft={23} materialDensity={24} shapeInertia={25} avatarTune={26} avatarWater={27} avatarWaterSmooth={28:0.###}s avatarMoveSmooth={29:0.###}s avatarSettle={30:0.###} avatarAvatar={31} avatarObject={32} avatarFallDamp={33} waterCushion={34:0.###} liftSmooth={35:0.###}s waterEq={36} waterFootprint={37} waterDistributed={38} waterSpinSettle={39}",
+                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s primWaterRise={16:0.###} primWaterDrag={17:0.###} airDrag={18} restDamp={19} rolling={20:0.###} nearRestSleep={21} microBounce={22} impactSoft={23} materialDensity={24} shapeInertia={25} avatarTune={26} avatarWater={27} avatarWaterSmooth={28:0.###}s avatarMoveSmooth={29:0.###}s avatarSettle={30:0.###} avatarAvatar={31} avatarObject={32} avatarFallDamp={33} waterCushion={34:0.###} liftSmooth={35:0.###}s waterEq={36} waterFootprint={37} waterDistributed={38} waterSpinSettle={39} highBounce=({40:0.###},{41:0.###})",
                 ODE_STEPSIZE, m_physicsiterations, bodyFramesAutoDisable, worldLinearDamping, worldAngularDamping,
                 commonContactERP, commonContactCFM, commonContactSLIP, contactsurfacelayer,
                 contactMaxCorrectingVelocity, commonContactBounceVelocity, TerrainFriction, TerrainBounce,
@@ -1055,7 +1093,9 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 PhysicalPrimWaterEquilibriumEnabled ? "enabled" : "disabled",
                 PhysicalPrimWaterFootprintSamplingEnabled ? "enabled" : "disabled",
                 PhysicalPrimWaterDistributedLiftEnabled ? "enabled" : "disabled",
-                PhysicalPrimWaterSpinSettleEnabled ? "enabled" : "disabled");
+                PhysicalPrimWaterSpinSettleEnabled ? "enabled" : "disabled",
+                PhysicalPrimHighBounceMinBounce,
+                PhysicalPrimHighBounceMicroBounceMinSpeed);
 
             m_lastframe = Util.GetTimeStamp();
             m_lastMeshExpire = m_lastframe;
@@ -1280,7 +1320,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                                 }
                                 p1.getContactData(ref contactdata1);
                                 p2.getContactData(ref contactdata2);
-                                bounce = CombineContactBounce(contactdata1.bounce, contactdata2.bounce);
+                                bounce = CombineObjectContactBounce(p1, p2, contactdata1, contactdata2);
                                 mu = (float)Math.Sqrt(contactdata1.mu * contactdata2.mu);
 
                                 //if (relVlenSQ > 0.01f)
