@@ -92,6 +92,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         private bool m_hasWaterDynamicsState;
         private float m_smoothedWaterHeight;
         private float m_smoothedWaterSubmerged;
+        private float m_smoothedWaterLift;
         private Vector3 m_smoothedWaterNormal = Vector3.UnitZ;
         private Vector3 m_smoothedWaterFlow = Vector3.Zero;
 
@@ -3834,11 +3835,18 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             return value * (maxLength / MathF.Sqrt(lenSq));
         }
 
+        private static float SmoothStep01(float value)
+        {
+            value = Math.Clamp(value, 0f, 1f);
+            return value * value * (3f - 2f * value);
+        }
+
         private void ResetWaterDynamicsState()
         {
             m_hasWaterDynamicsState = false;
             m_smoothedWaterHeight = 0f;
             m_smoothedWaterSubmerged = 0f;
+            m_smoothedWaterLift = 0f;
             m_smoothedWaterNormal = Vector3.UnitZ;
             m_smoothedWaterFlow = Vector3.Zero;
         }
@@ -3985,6 +3993,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             Quaternion orientation = Body != IntPtr.Zero ? UBOdeNative.BodyGetQuaternionOMV(Body) : m_orientation;
             float halfHeight = GetProjectedHalfExtent(orientation, Vector3.UnitZ);
             float objectHeight = halfHeight * 2f;
+            float surfaceCushion = MathF.Min(m_parentScene.PhysicalPrimWaterSurfaceCushion, objectHeight * 0.35f);
             float bottom = pos.Z - halfHeight;
             float top = pos.Z + halfHeight;
 
@@ -3995,7 +4004,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 return;
             }
 
-            float rawSubmerged = Math.Clamp((rawWaterHeight - bottom) / objectHeight, 0f, 1f);
+            float rawSubmerged = Math.Clamp((rawWaterHeight + surfaceCushion - bottom) / (objectHeight + surfaceCushion), 0f, 1f);
+            rawSubmerged = SmoothStep01(rawSubmerged);
             if (rawSubmerged <= 0f)
             {
                 ResetWaterDynamicsState();
@@ -4012,6 +4022,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 m_smoothedWaterNormal = rawWaterNormal;
                 m_smoothedWaterFlow = rawFlow;
                 m_smoothedWaterSubmerged = rawSubmerged;
+                m_smoothedWaterLift = 0f;
                 m_hasWaterDynamicsState = true;
             }
             else
@@ -4042,7 +4053,13 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             float verticalDamping = m_parentScene.PhysicalPrimWaterVerticalDamping * submerged;
             float waterAcceleration = -m_parentScene.gravityz * buoyancy * submerged;
             float maxWaterAcceleration = -m_parentScene.gravityz + m_parentScene.PhysicalPrimWaterMaxRiseAcceleration;
-            fz += MathF.Min(waterAcceleration, maxWaterAcceleration);
+            float targetLiftAcceleration = MathF.Min(waterAcceleration, maxWaterAcceleration);
+            float liftAlpha = Math.Clamp(m_sceneTimeStep / m_parentScene.PhysicalPrimWaterLiftSmoothingTimescale, 0.02f, 1f);
+            float liftDelta = (targetLiftAcceleration - m_smoothedWaterLift) * liftAlpha;
+            float maxLiftDelta = m_parentScene.PhysicalPrimWaterLiftSlewRate * m_sceneTimeStep;
+            liftDelta = Math.Clamp(liftDelta, -maxLiftDelta, maxLiftDelta);
+            m_smoothedWaterLift += liftDelta;
+            fz += m_smoothedWaterLift;
             fz -= vel.Z * verticalDamping;
             if (vel.Z > 0f && rawSubmerged < 0.45f)
                 fz -= vel.Z * m_parentScene.PhysicalPrimWaterSurfaceDamping * (1f - rawSubmerged / 0.45f);

@@ -138,6 +138,9 @@ boat_wave_height_1 = 0.09
 boat_wave_drift_scale = 0.25
 physical_prim_water_dynamics_enabled = true
 physical_prim_water_smoothing_timescale = 0.65
+physical_prim_water_surface_cushion = 0.18
+physical_prim_water_lift_smoothing_timescale = 0.24
+physical_prim_water_lift_slew_rate = 35.0
 physical_prim_water_surface_damping = 3.5
 physical_prim_water_max_rise_acceleration = 2.5
 physical_prim_water_drag = 1.35
@@ -215,6 +218,9 @@ sample. The water response also limits maximum upward rise and applies extra
 surface damping when an object exits the water, so a wooden cube dropped from
 above settles into the surface instead of pogoing. Submerged objects now receive
 projected-area water drag, so broad faces push more water than narrow ones.
+Water lift now has a small surface cushion plus frame-to-frame smoothing, so
+floating prims ease into buoyancy instead of getting an instant upward kick at
+the exact waterline.
 Physical prims also get light air drag and a near-rest damping pass that removes
 small residual terrain or water jitter once an object is almost still. Terrain
 contact now adds a gentle rolling resistance and a very low near-rest sleep
