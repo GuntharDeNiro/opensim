@@ -146,8 +146,9 @@ physical_prim_water_vertical_damping = 4.5
 physical_prim_water_surface_damping = 7.0
 physical_prim_water_max_rise_acceleration = 1.25
 physical_prim_water_drag = 1.35
-physical_prim_water_drift_scale = 16.0
-physical_prim_water_drift_response = 1.05
+physical_prim_water_drift_scale = 13.5
+physical_prim_water_drift_response = 0.45
+physical_prim_water_drift_max_acceleration = 0.22
 physical_prim_water_equilibrium_enabled = true
 physical_prim_water_equilibrium_response = 0.90
 physical_prim_water_equilibrium_damping = 4.5
@@ -249,9 +250,9 @@ flat center push. That makes rafts, boxes and boat-like builds roll and settle
 with the water more naturally.
 Floating objects preload part of their lift as soon as they touch water, so wood
 and other buoyant materials do not spend too long fully submerged before rising
-back to the surface. The water drift defaults are also slightly stronger, making
-floating props visibly follow the current without turning them into scripted
-vehicles.
+back to the surface. Water drift ramps in gradually and has a small acceleration
+cap, making floating props visibly follow the current without snapping forward
+or feeling like scripted vehicles.
 Low-speed contact micro-bounce damping keeps rubber/plastic bounce at visible
 impact speeds while fading the tiny resting rebounds that make settled objects
 tremble on terrain.
