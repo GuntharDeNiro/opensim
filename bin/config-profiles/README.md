@@ -208,6 +208,8 @@ avatar_ground_traction = 0.14
 avatar_movement_smoothing_timescale = 0.12
 avatar_step_assist_strength = 0.18
 avatar_step_assist_max_velocity = 2.4
+avatar_social_physics_enabled = true
+avatar_social_default_mode = friendly
 avatar_avatar_collision_tuning_enabled = true
 avatar_avatar_contact_erp = 0.24
 avatar_avatar_contact_cfm = 0.006
@@ -259,6 +261,11 @@ tremble on terrain.
 Rubber-on-wood and rubber-on-plastic contacts keep a rubber-dominant bounce
 curve, so a rubber ball keeps several diminishing rebounds on a wooden floor
 while stone/flesh contacts keep their heavier damping.
+Avatar-to-avatar contact uses Social Physics by default in `friendly` mode for
+the showroom. It is not gender based: every avatar gets the same soft personal
+space, light shoulder-brush pushback and low-friction contact unless the region
+owner switches `avatar_social_default_mode` to `neutral`, `playful`, `romantic`
+or `no-touch`.
 Floating prims receive wave drift and a small water-normal tilt so simple
 inworld boat hulls can move without being scripted as vehicles first. The solver
 runs at a slightly smaller step with softer contact correction so high-bounce

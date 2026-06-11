@@ -211,6 +211,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         internal float AvatarMovementSmoothingTimescale = 0.12f;
         internal float AvatarStepAssistStrength = 0.18f;
         internal float AvatarStepAssistMaxVelocity = 2.4f;
+        internal bool AvatarSocialPhysicsEnabled = true;
+        internal string AvatarSocialPhysicsDefaultMode = "friendly";
         internal bool AvatarAvatarCollisionTuningEnabled = true;
         internal float AvatarAvatarContactERP = 0.24f;
         internal float AvatarAvatarContactCFM = 0.006f;
@@ -902,6 +904,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     AvatarMovementSmoothingTimescale = ConfigFloat(physicsconfig, "avatar_movement_smoothing_timescale", AvatarMovementSmoothingTimescale, ODE_STEPSIZE, 5f);
                     AvatarStepAssistStrength = ConfigFloat(physicsconfig, "avatar_step_assist_strength", AvatarStepAssistStrength, 0f, 5f);
                     AvatarStepAssistMaxVelocity = ConfigFloat(physicsconfig, "avatar_step_assist_max_velocity", AvatarStepAssistMaxVelocity, 0f, 10f);
+                    AvatarSocialPhysicsEnabled = physicsconfig.GetBoolean("avatar_social_physics_enabled", AvatarSocialPhysicsEnabled);
+                    AvatarSocialPhysicsDefaultMode = physicsconfig.GetString("avatar_social_default_mode", AvatarSocialPhysicsDefaultMode).Trim();
                     AvatarAvatarCollisionTuningEnabled = physicsconfig.GetBoolean("avatar_avatar_collision_tuning_enabled", AvatarAvatarCollisionTuningEnabled);
                     AvatarAvatarContactERP = ConfigFloat(physicsconfig, "avatar_avatar_contact_erp", AvatarAvatarContactERP, 0.01f, 1f);
                     AvatarAvatarContactCFM = ConfigFloat(physicsconfig, "avatar_avatar_contact_cfm", AvatarAvatarContactCFM, 0.000001f, 0.1f);
@@ -1067,7 +1071,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             LoadMaterialWaterSettings(physicsconfig);
 
             m_log.InfoFormat(
-                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s primWaterRise={16:0.###} primWaterDrag={17:0.###} airDrag={18} restDamp={19} rolling={20:0.###} nearRestSleep={21} microBounce={22} impactSoft={23} materialDensity={24} shapeInertia={25} avatarTune={26} avatarWater={27} avatarWaterSmooth={28:0.###}s avatarMoveSmooth={29:0.###}s avatarSettle={30:0.###} avatarAvatar={31} avatarObject={32} avatarFallDamp={33} waterCushion={34:0.###} liftSmooth={35:0.###}s waterEq={36} waterFootprint={37} waterDistributed={38} waterSpinSettle={39} highBounce=({40:0.###},{41:0.###}) waterDrift=({42:0.###},{43:0.###},max={44:0.###})",
+                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s primWaterRise={16:0.###} primWaterDrag={17:0.###} airDrag={18} restDamp={19} rolling={20:0.###} nearRestSleep={21} microBounce={22} impactSoft={23} materialDensity={24} shapeInertia={25} avatarTune={26} avatarWater={27} avatarWaterSmooth={28:0.###}s avatarMoveSmooth={29:0.###}s avatarSettle={30:0.###} avatarAvatar={31} avatarObject={32} avatarFallDamp={33} waterCushion={34:0.###} liftSmooth={35:0.###}s waterEq={36} waterFootprint={37} waterDistributed={38} waterSpinSettle={39} highBounce=({40:0.###},{41:0.###}) waterDrift=({42:0.###},{43:0.###},max={44:0.###}) avatarSocial={45}",
                 ODE_STEPSIZE, m_physicsiterations, bodyFramesAutoDisable, worldLinearDamping, worldAngularDamping,
                 commonContactERP, commonContactCFM, commonContactSLIP, contactsurfacelayer,
                 contactMaxCorrectingVelocity, commonContactBounceVelocity, TerrainFriction, TerrainBounce,
@@ -1100,7 +1104,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 PhysicalPrimHighBounceMicroBounceMinSpeed,
                 PhysicalPrimWaterDriftScale,
                 PhysicalPrimWaterDriftResponse,
-                PhysicalPrimWaterDriftMaxAcceleration);
+                PhysicalPrimWaterDriftMaxAcceleration,
+                AvatarSocialPhysicsEnabled ? AvatarSocialPhysicsDefaultMode : "disabled");
 
             m_lastframe = Util.GetTimeStamp();
             m_lastMeshExpire = m_lastframe;
@@ -1146,6 +1151,103 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             IntPtr contact = new(GlobalContactsArray.ToInt64() + (Int64)(ContactJointCount * UBOdeNative.SizeOfContact));
             Marshal.StructureToPtr(contactSharedForJoints, contact, false);
             return UBOdeNative.JointCreateContactPtr(world, JointContactGroup, contact);
+        }
+
+        private void GetAvatarAvatarContactProfile(
+            out float friction,
+            out float softERP,
+            out float softCFM,
+            out float depthScale,
+            out float maxPenetration)
+        {
+            friction = AvatarAvatarFriction;
+            softERP = AvatarAvatarContactERP;
+            softCFM = AvatarAvatarContactCFM;
+            depthScale = AvatarAvatarContactDepthScale;
+            maxPenetration = AvatarAvatarMaxPenetration;
+
+            if (!AvatarSocialPhysicsEnabled)
+                return;
+
+            string mode = AvatarSocialPhysicsDefaultMode?.Trim().ToLowerInvariant();
+            if (string.IsNullOrEmpty(mode))
+                mode = "friendly";
+
+            switch (mode)
+            {
+                case "friendly":
+                    friction = MathF.Min(friction, 0.012f);
+                    softERP = MathF.Min(softERP, 0.18f);
+                    softCFM = MathF.Max(softCFM, 0.010f);
+                    depthScale = MathF.Min(depthScale, 0.55f);
+                    maxPenetration = MathF.Max(maxPenetration, 0.18f);
+                    break;
+
+                case "playful":
+                    friction = MathF.Min(friction, 0.025f);
+                    softERP = MathF.Max(softERP, 0.30f);
+                    softCFM = MathF.Min(softCFM, 0.005f);
+                    depthScale = MathF.Max(depthScale, 0.70f);
+                    maxPenetration = MathF.Min(maxPenetration, 0.14f);
+                    break;
+
+                case "romantic":
+                    friction = MathF.Min(friction, 0.006f);
+                    softERP = MathF.Min(softERP, 0.12f);
+                    softCFM = MathF.Max(softCFM, 0.016f);
+                    depthScale = MathF.Min(depthScale, 0.42f);
+                    maxPenetration = MathF.Max(maxPenetration, 0.24f);
+                    break;
+
+                case "no-touch":
+                case "notouch":
+                    friction = MathF.Max(friction, 0.040f);
+                    softERP = MathF.Max(softERP, 0.36f);
+                    softCFM = MathF.Min(softCFM, 0.003f);
+                    depthScale = MathF.Max(depthScale, 0.85f);
+                    maxPenetration = MathF.Min(maxPenetration, 0.10f);
+                    break;
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private IntPtr CreateAvatarAvatarContactJoint(ref UBOdeNative.ContactGeom contactGeom, bool feetCollision)
+        {
+            if (!AvatarAvatarCollisionTuningEnabled)
+                return CreateContacJoint(ref contactGeom, false);
+
+            float previousMu = contactSharedForJoints.surface.mu;
+            float previousBounce = contactSharedForJoints.surface.bounce;
+            float previousSoftERP = contactSharedForJoints.surface.soft_erp;
+            float previousSoftCFM = contactSharedForJoints.surface.soft_cfm;
+
+            GetAvatarAvatarContactProfile(
+                out float friction,
+                out float softERP,
+                out float softCFM,
+                out float depthScale,
+                out float maxPenetration);
+
+            contactSharedForJoints.surface.mu = friction;
+            contactSharedForJoints.surface.bounce = 0;
+            contactSharedForJoints.surface.soft_erp = softERP;
+            contactSharedForJoints.surface.soft_cfm = softCFM;
+
+            UBOdeNative.ContactGeom tunedContact = contactGeom;
+            if (!feetCollision)
+            {
+                tunedContact.depth = MathF.Min(
+                    contactGeom.depth * depthScale,
+                    maxPenetration);
+            }
+
+            IntPtr joint = CreateContacJoint(ref tunedContact, false);
+
+            contactSharedForJoints.surface.mu = previousMu;
+            contactSharedForJoints.surface.bounce = previousBounce;
+            contactSharedForJoints.surface.soft_erp = previousSoftERP;
+            contactSharedForJoints.surface.soft_cfm = previousSoftCFM;
+            return joint;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1407,6 +1509,10 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             if (dop1ava || dop2ava)
                 smoothMesh = false;
 
+            bool isAvatarAvatarContact =
+                p1.PhysicsActorType == (int)ActorTypes.Agent &&
+                p2.PhysicsActorType == (int)ActorTypes.Agent;
+
             IntPtr b1 = UBOdeNative.GeomGetBody(g1);
             IntPtr b2 = UBOdeNative.GeomGetBody(g2);
 
@@ -1452,12 +1558,16 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     if (useAltcontact)
                     {
                         ApplyPhysicalPrimContactResponse(p1, p2, ref altWorkContact, baseBounce, baseMu);
-                        Joint = CreateContacJoint(ref altWorkContact, smoothMesh);
+                        Joint = isAvatarAvatarContact ?
+                            CreateAvatarAvatarContactJoint(ref altWorkContact, FeetCollision) :
+                            CreateContacJoint(ref altWorkContact, smoothMesh);
                     }
                     else
                     {
                         ApplyPhysicalPrimContactResponse(p1, p2, ref curctc, baseBounce, baseMu);
-                        Joint = CreateContacJoint(ref curctc, smoothMesh);
+                        Joint = isAvatarAvatarContact ?
+                            CreateAvatarAvatarContactJoint(ref curctc, FeetCollision) :
+                            CreateContacJoint(ref curctc, smoothMesh);
                     }
 
                     if (Joint == IntPtr.Zero)
