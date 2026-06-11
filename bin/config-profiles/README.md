@@ -147,6 +147,9 @@ physical_prim_water_drag = 1.35
 physical_prim_water_drift_scale = 12.0
 physical_prim_water_righting_strength = 3.0
 physical_prim_water_angular_damping = 5.0
+physical_prim_water_spin_settle_enabled = true
+physical_prim_water_spin_settle_angular_speed = 1.5
+physical_prim_water_spin_settle_damping = 4.0
 physical_prim_air_dynamics_enabled = true
 physical_prim_air_linear_drag = 0.018
 physical_prim_air_angular_drag = 0.004
@@ -221,6 +224,9 @@ projected-area water drag, so broad faces push more water than narrow ones.
 Water lift now has a small surface cushion plus frame-to-frame smoothing, so
 floating prims ease into buoyancy instead of getting an instant upward kick at
 the exact waterline.
+Floating prims that are not vehicles and are not being actively torqued also get
+idle spin settling, which damps the last slow rotations of cubes and other
+nearly symmetric objects without fighting scripted boats.
 Physical prims also get light air drag and a near-rest damping pass that removes
 small residual terrain or water jitter once an object is almost still. Terrain
 contact now adds a gentle rolling resistance and a very low near-rest sleep

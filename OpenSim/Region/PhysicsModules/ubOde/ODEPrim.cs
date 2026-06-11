@@ -4085,8 +4085,23 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             fy += (m_smoothedWaterFlow.Y - vel.Y) * driftResponse;
 
             Vector3 angularVel = UBOdeNative.BodyGetAngularVelOMV(Body);
+            bool isVehicle = m_vehicle != null && m_vehicle.Type != Vehicle.TYPE_NONE;
+            bool hasExternalAngularForce = m_torque.LengthSquared() > 0.000001f ||
+                m_angularForceacc.LengthSquared() > 0.000001f;
             float massScale = MathF.Min(m_mass, 2000f);
             Vector3 waterTorque = -angularVel * massScale * m_parentScene.PhysicalPrimWaterAngularDamping * submerged;
+            float angularSpeed = angularVel.Length();
+
+            if (m_parentScene.PhysicalPrimWaterSpinSettleEnabled &&
+                !isVehicle &&
+                !hasExternalAngularForce &&
+                m_parentScene.PhysicalPrimWaterSpinSettleAngularSpeed > 0f &&
+                angularSpeed > 0.01f &&
+                angularSpeed < m_parentScene.PhysicalPrimWaterSpinSettleAngularSpeed)
+            {
+                float spinSettle = SmoothStep01(1f - angularSpeed / m_parentScene.PhysicalPrimWaterSpinSettleAngularSpeed) * submerged;
+                waterTorque += -angularVel * massScale * m_parentScene.PhysicalPrimWaterSpinSettleDamping * spinSettle;
+            }
 
             if (TryGetWaterStableAxis(orientation, targetUp, out Vector3 stableAxis, out float shapeBias))
             {
