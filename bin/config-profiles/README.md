@@ -152,6 +152,12 @@ physical_prim_resting_linear_damping = 3.0
 physical_prim_resting_angular_damping = 2.0
 physical_prim_resting_speed = 0.08
 physical_prim_resting_angular_speed = 0.12
+physical_prim_rolling_resistance = 0.18
+physical_prim_rolling_resistance_speed = 1.25
+physical_prim_rolling_resistance_angular_speed = 2.0
+physical_prim_near_rest_sleep_enabled = true
+physical_prim_near_rest_linear_speed = 0.018
+physical_prim_near_rest_angular_speed = 0.025
 physical_prim_shape_inertia_enabled = true
 physical_prim_base_inertia_scale = 1.08
 physical_prim_thin_shape_inertia_boost = 0.45
@@ -203,10 +209,12 @@ surface damping when an object exits the water, so a wooden cube dropped from
 above settles into the surface instead of pogoing. Submerged objects now receive
 projected-area water drag, so broad faces push more water than narrow ones.
 Physical prims also get light air drag and a near-rest damping pass that removes
-small residual terrain or water jitter once an object is almost still. Shape
-inertia tuning adds a little rotational weight, especially for thin or stretched
-objects, so boards and poles do not spin like massless props. Buoyant prims use
-their current orientation and dimensions to find a stable floating face:
+small residual terrain or water jitter once an object is almost still. Terrain
+contact now adds a gentle rolling resistance and a very low near-rest sleep
+threshold, so balls and boxes can settle instead of vibrating forever after the
+visible motion is gone. Shape inertia tuning adds a little rotational weight,
+especially for thin or stretched objects, so boards and poles do not spin like
+massless props. Buoyant prims use their current orientation and dimensions to find a stable floating face:
 cube-like shapes damp their spin, while stretched boxes right themselves so
 their broad face settles toward the water surface.
 Avatar movement also receives a conservative realism pass: light avatar-to-prim

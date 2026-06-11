@@ -292,6 +292,12 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         internal float PhysicalPrimRestingAngularDamping = 2.0f;
         internal float PhysicalPrimRestingSpeed = 0.08f;
         internal float PhysicalPrimRestingAngularSpeed = 0.12f;
+        internal float PhysicalPrimRollingResistance = 0.18f;
+        internal float PhysicalPrimRollingResistanceSpeed = 1.25f;
+        internal float PhysicalPrimRollingResistanceAngularSpeed = 2.0f;
+        internal bool PhysicalPrimNearRestSleepEnabled = true;
+        internal float PhysicalPrimNearRestLinearSpeed = 0.018f;
+        internal float PhysicalPrimNearRestAngularSpeed = 0.025f;
         internal bool PhysicalPrimMaterialDensityEnabled = true;
         internal bool PhysicalPrimShapeInertiaEnabled = true;
         internal float PhysicalPrimBaseInertiaScale = 1.08f;
@@ -806,6 +812,12 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     PhysicalPrimRestingAngularDamping = ConfigFloat(physicsconfig, "physical_prim_resting_angular_damping", PhysicalPrimRestingAngularDamping, 0f, 20f);
                     PhysicalPrimRestingSpeed = ConfigFloat(physicsconfig, "physical_prim_resting_speed", PhysicalPrimRestingSpeed, 0f, 5f);
                     PhysicalPrimRestingAngularSpeed = ConfigFloat(physicsconfig, "physical_prim_resting_angular_speed", PhysicalPrimRestingAngularSpeed, 0f, 5f);
+                    PhysicalPrimRollingResistance = ConfigFloat(physicsconfig, "physical_prim_rolling_resistance", PhysicalPrimRollingResistance, 0f, 10f);
+                    PhysicalPrimRollingResistanceSpeed = ConfigFloat(physicsconfig, "physical_prim_rolling_resistance_speed", PhysicalPrimRollingResistanceSpeed, 0f, 20f);
+                    PhysicalPrimRollingResistanceAngularSpeed = ConfigFloat(physicsconfig, "physical_prim_rolling_resistance_angular_speed", PhysicalPrimRollingResistanceAngularSpeed, 0f, 20f);
+                    PhysicalPrimNearRestSleepEnabled = physicsconfig.GetBoolean("physical_prim_near_rest_sleep_enabled", PhysicalPrimNearRestSleepEnabled);
+                    PhysicalPrimNearRestLinearSpeed = ConfigFloat(physicsconfig, "physical_prim_near_rest_linear_speed", PhysicalPrimNearRestLinearSpeed, 0f, 1f);
+                    PhysicalPrimNearRestAngularSpeed = ConfigFloat(physicsconfig, "physical_prim_near_rest_angular_speed", PhysicalPrimNearRestAngularSpeed, 0f, 1f);
                     PhysicalPrimMaterialDensityEnabled = physicsconfig.GetBoolean("physical_prim_material_density_enabled", PhysicalPrimMaterialDensityEnabled);
                     PhysicalPrimShapeInertiaEnabled = physicsconfig.GetBoolean("physical_prim_shape_inertia_enabled", PhysicalPrimShapeInertiaEnabled);
                     PhysicalPrimBaseInertiaScale = ConfigFloat(physicsconfig, "physical_prim_base_inertia_scale", PhysicalPrimBaseInertiaScale, 0.1f, 10f);
@@ -864,7 +876,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             LoadMaterialWaterSettings(physicsconfig);
 
             m_log.InfoFormat(
-                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s primWaterRise={16:0.###} primWaterDrag={17:0.###} airDrag={18} restDamp={19} materialDensity={20} shapeInertia={21} avatarTune={22} avatarWater={23} avatarWaterSmooth={24:0.###}s avatarMoveSmooth={25:0.###}s avatarSettle={26:0.###} avatarFallDamp={27}",
+                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s primWaterRise={16:0.###} primWaterDrag={17:0.###} airDrag={18} restDamp={19} rolling={20:0.###} nearRestSleep={21} materialDensity={22} shapeInertia={23} avatarTune={24} avatarWater={25} avatarWaterSmooth={26:0.###}s avatarMoveSmooth={27:0.###}s avatarSettle={28:0.###} avatarFallDamp={29}",
                 ODE_STEPSIZE, m_physicsiterations, bodyFramesAutoDisable, worldLinearDamping, worldAngularDamping,
                 commonContactERP, commonContactCFM, commonContactSLIP, contactsurfacelayer,
                 contactMaxCorrectingVelocity, commonContactBounceVelocity, TerrainFriction, TerrainBounce,
@@ -873,6 +885,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 PhysicalPrimWaterSmoothingTimescale, PhysicalPrimWaterMaxRiseAcceleration, PhysicalPrimWaterDrag,
                 PhysicalPrimAirDynamicsEnabled ? "enabled" : "disabled",
                 PhysicalPrimRestingDampingEnabled ? "enabled" : "disabled",
+                PhysicalPrimRollingResistance,
+                PhysicalPrimNearRestSleepEnabled ? "enabled" : "disabled",
                 PhysicalPrimMaterialDensityEnabled ? "enabled" : "disabled",
                 PhysicalPrimShapeInertiaEnabled ? "enabled" : "disabled",
                 AvatarPhysicsTuningEnabled ? "enabled" : "disabled",

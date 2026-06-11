@@ -3894,6 +3894,11 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
             UBOdeNative.Vector3 vel = UBOdeNative.BodyGetLinearVel(Body);
             Vector3 linearVelocity = new(vel.X, vel.Y, vel.Z);
+            Vector3 horizontalVelocity = new(linearVelocity.X, linearVelocity.Y, 0f);
+            bool hasExternalLinearForce = m_force.LengthSquared() > 0.000001f ||
+                m_forceacc.LengthSquared() > 0.000001f;
+            bool hasExternalAngularForce = m_torque.LengthSquared() > 0.000001f ||
+                m_angularForceacc.LengthSquared() > 0.000001f;
             if (linearVelocity.LengthSquared() <=
                 m_parentScene.PhysicalPrimRestingSpeed * m_parentScene.PhysicalPrimRestingSpeed)
             {
@@ -3903,12 +3908,55 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 fz += damping.Z;
             }
 
+            if (nearTerrain &&
+                MathF.Abs(linearVelocity.Z) < 0.25f &&
+                horizontalVelocity.LengthSquared() <=
+                    m_parentScene.PhysicalPrimRollingResistanceSpeed *
+                    m_parentScene.PhysicalPrimRollingResistanceSpeed)
+            {
+                float materialFriction = IsValidMaterial(m_material)
+                    ? m_parentScene.m_materialContactsData[m_material].mu
+                    : 0.6f;
+                float rollingScale = Math.Clamp(materialFriction, 0.15f, 1.5f) *
+                    m_parentScene.PhysicalPrimRollingResistance;
+                fx -= horizontalVelocity.X * rollingScale;
+                fy -= horizontalVelocity.Y * rollingScale;
+            }
+
             Vector3 angularVel = UBOdeNative.BodyGetAngularVelOMV(Body);
+            float angularSpeedSq = angularVel.LengthSquared();
             if (angularVel.LengthSquared() <=
                 m_parentScene.PhysicalPrimRestingAngularSpeed * m_parentScene.PhysicalPrimRestingAngularSpeed)
             {
                 m_angularForceacc += -angularVel * MathF.Min(m_mass, 2000f) *
                     m_parentScene.PhysicalPrimRestingAngularDamping;
+            }
+
+            if (nearTerrain &&
+                angularSpeedSq <=
+                    m_parentScene.PhysicalPrimRollingResistanceAngularSpeed *
+                    m_parentScene.PhysicalPrimRollingResistanceAngularSpeed)
+            {
+                float sizeScale = Math.Clamp(MathF.Max(m_size.X, MathF.Max(m_size.Y, m_size.Z)), 0.25f, 10f);
+                m_angularForceacc += -angularVel * MathF.Min(m_mass, 2000f) *
+                    m_parentScene.PhysicalPrimRollingResistance * sizeScale;
+            }
+
+            if (nearTerrain &&
+                m_parentScene.PhysicalPrimNearRestSleepEnabled &&
+                !m_usePID &&
+                !m_useHoverPID &&
+                !hasExternalLinearForce &&
+                !hasExternalAngularForce &&
+                linearVelocity.LengthSquared() <=
+                    m_parentScene.PhysicalPrimNearRestLinearSpeed *
+                    m_parentScene.PhysicalPrimNearRestLinearSpeed &&
+                angularSpeedSq <=
+                    m_parentScene.PhysicalPrimNearRestAngularSpeed *
+                    m_parentScene.PhysicalPrimNearRestAngularSpeed)
+            {
+                UBOdeNative.BodySetLinearVel(Body, 0f, 0f, 0f);
+                UBOdeNative.BodySetAngularVel(Body, 0f, 0f, 0f);
             }
         }
 
