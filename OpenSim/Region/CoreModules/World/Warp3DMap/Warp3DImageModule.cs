@@ -84,6 +84,7 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
         private bool m_useCachedAssetsOnly = true;
         private bool m_skipMissingExternalGeometry = true;
         private bool m_skipFlatTextureCardsWithoutTexture = true;
+        private bool m_skipAlphaTextureCardVolume = true;
         private bool m_forceGC = false;
         private int m_renderTimeBudgetMS = 30000;
         private int m_maxMeshAssetDecodes = 2048;
@@ -170,6 +171,8 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
                 Util.GetConfigVarFromSections<bool>(source, "Map3DSkipMissingExternalGeometry", configSections, m_skipMissingExternalGeometry);
             m_skipFlatTextureCardsWithoutTexture =
                 Util.GetConfigVarFromSections<bool>(source, "Map3DSkipFlatTextureCardsWithoutTexture", configSections, m_skipFlatTextureCardsWithoutTexture);
+            m_skipAlphaTextureCardVolume =
+                Util.GetConfigVarFromSections<bool>(source, "Map3DSkipAlphaTextureCardVolume", configSections, m_skipAlphaTextureCardVolume);
             m_forceGC =
                 Util.GetConfigVarFromSections<bool>(source, "Map3DForceGC", configSections, m_forceGC);
             m_renderTimeBudgetMS = Math.Max(0,
@@ -998,6 +1001,12 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
                 if (faceColor.A == 1.0f && InvPrimMagicTexture.Equals(teFace.TextureID))
                     break;
 
+                if (ShouldSkipFlatTextureCardVolumeFace(flatTextureCard, teFace, prim))
+                {
+                    m_flatTextureCardSkipped++;
+                    continue;
+                }
+
                 warp_Material faceMaterial;
                 if (m_texturePrims)
                 {
@@ -1092,6 +1101,24 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
 
             if (facesAdded > 0)
                 m_renderedParts++;
+        }
+
+        private bool ShouldSkipFlatTextureCardVolumeFace(bool flatTextureCard, Primitive.TextureEntryFace face, SceneObjectPart prim)
+        {
+            if (!flatTextureCard || !m_drawFlatTextureCardSprites)
+                return false;
+
+            if (!IsUsableSpriteFace(face))
+                return m_skipFlatTextureCardsWithoutTexture;
+
+            MapSpriteTexture sprite = GetSpriteTexture(face.TextureID, prim);
+            if (sprite == null)
+                return m_skipFlatTextureCardsWithoutTexture;
+
+            if (sprite.AlphaCoverage < m_spriteMinAlphaCoverage)
+                return true;
+
+            return m_skipAlphaTextureCardVolume && sprite.OpaqueCoverage <= m_spriteMaxOpaqueCoverage;
         }
 
         private FacetedMesh TryGetExternalRenderMesh(Primitive omvPrim, SceneObjectPart prim, DetailLevel lod)
