@@ -173,6 +173,12 @@ physical_prim_micro_bounce_damping_enabled = true
 physical_prim_micro_bounce_min_speed = 0.32
 physical_prim_micro_bounce_max_depth = 0.06
 physical_prim_micro_bounce_friction_boost = 1.25
+physical_prim_impact_softening_enabled = true
+physical_prim_impact_softening_min_speed = 3.0
+physical_prim_impact_softening_full_speed = 9.0
+physical_prim_impact_contact_erp = 0.34
+physical_prim_impact_contact_cfm = 0.0025
+physical_prim_impact_friction_scale = 0.85
 physical_prim_shape_inertia_enabled = true
 physical_prim_base_inertia_scale = 1.08
 physical_prim_thin_shape_inertia_boost = 0.45
@@ -251,11 +257,14 @@ Physical prims also get light air drag and a near-rest damping pass that removes
 small residual terrain or water jitter once an object is almost still. Terrain
 contact now adds a gentle rolling resistance and a very low near-rest sleep
 threshold, so balls and boxes can settle instead of vibrating forever after the
-visible motion is gone. Shape inertia tuning adds a little rotational weight,
-especially for thin or stretched objects, so boards and poles do not spin like
-massless props. Buoyant prims use their current orientation and dimensions to find a stable floating face:
-cube-like shapes damp their spin, while stretched boxes right themselves so
-their broad face settles toward the water surface.
+visible motion is gone. Faster impacts use a soft contact response that eases
+ERP/CFM and slightly relaxes friction, so heavy collisions absorb some shock
+instead of snapping through a hard correction. Shape inertia tuning adds a
+little rotational weight, especially for thin or stretched objects, so boards
+and poles do not spin like massless props. Buoyant prims use their current
+orientation and dimensions to find a stable floating face: cube-like shapes damp
+their spin, while stretched boxes right themselves so their broad face settles
+toward the water surface.
 Avatar movement also receives a conservative realism pass: softer landings,
 reduced air steering while falling, near-rest ground damping and water movement
 that slows and supports the avatar body instead of making water feel like empty

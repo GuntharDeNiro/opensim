@@ -325,6 +325,12 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         internal float PhysicalPrimMicroBounceMinSpeed = 0.32f;
         internal float PhysicalPrimMicroBounceMaxDepth = 0.06f;
         internal float PhysicalPrimMicroBounceFrictionBoost = 1.25f;
+        internal bool PhysicalPrimImpactSofteningEnabled = true;
+        internal float PhysicalPrimImpactSofteningMinSpeed = 3.0f;
+        internal float PhysicalPrimImpactSofteningFullSpeed = 9.0f;
+        internal float PhysicalPrimImpactContactERP = 0.34f;
+        internal float PhysicalPrimImpactContactCFM = 0.0025f;
+        internal float PhysicalPrimImpactFrictionScale = 0.85f;
         internal bool PhysicalPrimMaterialDensityEnabled = true;
         internal bool PhysicalPrimShapeInertiaEnabled = true;
         internal float PhysicalPrimBaseInertiaScale = 1.08f;
@@ -493,6 +499,12 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             return MathF.Sqrt(bounce1 * bounce2);
         }
 
+        private static float SmoothStep01(float value)
+        {
+            value = Math.Clamp(value, 0f, 1f);
+            return value * value * (3f - 2f * value);
+        }
+
         private static float GetContactNormalSpeed(PhysicsActor p1, PhysicsActor p2, ref UBOdeNative.ContactGeom contact)
         {
             Vector3 relativeVelocity = Vector3.Zero;
@@ -511,18 +523,45 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             return MathF.Abs(Vector3.Dot(relativeVelocity, normal));
         }
 
-        private void ApplyContactMicroBounceDamping(PhysicsActor p1, PhysicsActor p2, ref UBOdeNative.ContactGeom contact, float baseBounce, float baseMu)
+        private void ApplyPhysicalPrimContactResponse(PhysicsActor p1, PhysicsActor p2, ref UBOdeNative.ContactGeom contact, float baseBounce, float baseMu)
         {
             contactSharedForJoints.surface.bounce = baseBounce;
             contactSharedForJoints.surface.mu = baseMu;
+            contactSharedForJoints.surface.soft_erp = commonContactERP;
+            contactSharedForJoints.surface.soft_cfm = commonContactCFM;
+            contactSharedForJoints.surface.slip1 = commonContactSLIP;
+            contactSharedForJoints.surface.slip2 = commonContactSLIP;
 
-            if (!PhysicalPrimMicroBounceDampingEnabled || baseBounce <= 0f || PhysicalPrimMicroBounceMinSpeed <= 0f)
+            bool hasAvatar =
+                p1.PhysicsActorType == (int)ActorTypes.Agent ||
+                p2.PhysicsActorType == (int)ActorTypes.Agent;
+            bool needNormalSpeed =
+                (PhysicalPrimMicroBounceDampingEnabled && baseBounce > 0f && PhysicalPrimMicroBounceMinSpeed > 0f) ||
+                (!hasAvatar && PhysicalPrimImpactSofteningEnabled);
+
+            float normalSpeed = needNormalSpeed ? GetContactNormalSpeed(p1, p2, ref contact) : 0f;
+
+            if (!hasAvatar &&
+                PhysicalPrimImpactSofteningEnabled &&
+                PhysicalPrimImpactSofteningFullSpeed > PhysicalPrimImpactSofteningMinSpeed &&
+                normalSpeed > PhysicalPrimImpactSofteningMinSpeed)
+            {
+                float speedRange = PhysicalPrimImpactSofteningFullSpeed - PhysicalPrimImpactSofteningMinSpeed;
+                float impactScale = SmoothStep01((normalSpeed - PhysicalPrimImpactSofteningMinSpeed) / speedRange);
+                contactSharedForJoints.surface.soft_erp = commonContactERP +
+                    (PhysicalPrimImpactContactERP - commonContactERP) * impactScale;
+                contactSharedForJoints.surface.soft_cfm = commonContactCFM +
+                    (PhysicalPrimImpactContactCFM - commonContactCFM) * impactScale;
+                contactSharedForJoints.surface.mu = baseMu *
+                    (1f + (PhysicalPrimImpactFrictionScale - 1f) * impactScale);
+            }
+
+            if (!PhysicalPrimMicroBounceDampingEnabled ||
+                baseBounce <= 0f ||
+                PhysicalPrimMicroBounceMinSpeed <= 0f ||
+                contact.depth > PhysicalPrimMicroBounceMaxDepth)
                 return;
 
-            if (contact.depth > PhysicalPrimMicroBounceMaxDepth)
-                return;
-
-            float normalSpeed = GetContactNormalSpeed(p1, p2, ref contact);
             if (normalSpeed >= PhysicalPrimMicroBounceMinSpeed)
                 return;
 
@@ -910,6 +949,12 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     PhysicalPrimMicroBounceMinSpeed = ConfigFloat(physicsconfig, "physical_prim_micro_bounce_min_speed", PhysicalPrimMicroBounceMinSpeed, 0f, 5f);
                     PhysicalPrimMicroBounceMaxDepth = ConfigFloat(physicsconfig, "physical_prim_micro_bounce_max_depth", PhysicalPrimMicroBounceMaxDepth, 0f, 1f);
                     PhysicalPrimMicroBounceFrictionBoost = ConfigFloat(physicsconfig, "physical_prim_micro_bounce_friction_boost", PhysicalPrimMicroBounceFrictionBoost, 1f, 5f);
+                    PhysicalPrimImpactSofteningEnabled = physicsconfig.GetBoolean("physical_prim_impact_softening_enabled", PhysicalPrimImpactSofteningEnabled);
+                    PhysicalPrimImpactSofteningMinSpeed = ConfigFloat(physicsconfig, "physical_prim_impact_softening_min_speed", PhysicalPrimImpactSofteningMinSpeed, 0f, 100f);
+                    PhysicalPrimImpactSofteningFullSpeed = ConfigFloat(physicsconfig, "physical_prim_impact_softening_full_speed", PhysicalPrimImpactSofteningFullSpeed, 0f, 100f);
+                    PhysicalPrimImpactContactERP = ConfigFloat(physicsconfig, "physical_prim_impact_contact_erp", PhysicalPrimImpactContactERP, 0.01f, 1f);
+                    PhysicalPrimImpactContactCFM = ConfigFloat(physicsconfig, "physical_prim_impact_contact_cfm", PhysicalPrimImpactContactCFM, 0.000001f, 0.1f);
+                    PhysicalPrimImpactFrictionScale = ConfigFloat(physicsconfig, "physical_prim_impact_friction_scale", PhysicalPrimImpactFrictionScale, 0f, 2f);
                     PhysicalPrimMaterialDensityEnabled = physicsconfig.GetBoolean("physical_prim_material_density_enabled", PhysicalPrimMaterialDensityEnabled);
                     PhysicalPrimShapeInertiaEnabled = physicsconfig.GetBoolean("physical_prim_shape_inertia_enabled", PhysicalPrimShapeInertiaEnabled);
                     PhysicalPrimBaseInertiaScale = ConfigFloat(physicsconfig, "physical_prim_base_inertia_scale", PhysicalPrimBaseInertiaScale, 0.1f, 10f);
@@ -968,7 +1013,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             LoadMaterialWaterSettings(physicsconfig);
 
             m_log.InfoFormat(
-                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s primWaterRise={16:0.###} primWaterDrag={17:0.###} airDrag={18} restDamp={19} rolling={20:0.###} nearRestSleep={21} microBounce={22} materialDensity={23} shapeInertia={24} avatarTune={25} avatarWater={26} avatarWaterSmooth={27:0.###}s avatarMoveSmooth={28:0.###}s avatarSettle={29:0.###} avatarAvatar={30} avatarObject={31} avatarFallDamp={32} waterCushion={33:0.###} liftSmooth={34:0.###}s waterEq={35} waterSpinSettle={36}",
+                "[ubODE] Vanilla physics tuning: step={0:0.#####}s iterations={1} autoDisable={2} damping=({3:0.####},{4:0.####}) contactERP={5:0.####} contactCFM={6:0.######} contactSlip={7:0.###} surfaceLayer={8:0.###} maxCorrect={9:0.###} bounceVel={10:0.###} terrain=({11:0.###} friction,{12:0.###} bounce) boatWater={13} primWater={14} primWaterSmooth={15:0.###}s primWaterRise={16:0.###} primWaterDrag={17:0.###} airDrag={18} restDamp={19} rolling={20:0.###} nearRestSleep={21} microBounce={22} impactSoft={23} materialDensity={24} shapeInertia={25} avatarTune={26} avatarWater={27} avatarWaterSmooth={28:0.###}s avatarMoveSmooth={29:0.###}s avatarSettle={30:0.###} avatarAvatar={31} avatarObject={32} avatarFallDamp={33} waterCushion={34:0.###} liftSmooth={35:0.###}s waterEq={36} waterSpinSettle={37}",
                 ODE_STEPSIZE, m_physicsiterations, bodyFramesAutoDisable, worldLinearDamping, worldAngularDamping,
                 commonContactERP, commonContactCFM, commonContactSLIP, contactsurfacelayer,
                 contactMaxCorrectingVelocity, commonContactBounceVelocity, TerrainFriction, TerrainBounce,
@@ -980,6 +1025,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 PhysicalPrimRollingResistance,
                 PhysicalPrimNearRestSleepEnabled ? "enabled" : "disabled",
                 PhysicalPrimMicroBounceDampingEnabled ? "enabled" : "disabled",
+                PhysicalPrimImpactSofteningEnabled ? "enabled" : "disabled",
                 PhysicalPrimMaterialDensityEnabled ? "enabled" : "disabled",
                 PhysicalPrimShapeInertiaEnabled ? "enabled" : "disabled",
                 AvatarPhysicsTuningEnabled ? "enabled" : "disabled",
@@ -1344,12 +1390,12 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 {
                     if (useAltcontact)
                     {
-                        ApplyContactMicroBounceDamping(p1, p2, ref altWorkContact, baseBounce, baseMu);
+                        ApplyPhysicalPrimContactResponse(p1, p2, ref altWorkContact, baseBounce, baseMu);
                         Joint = CreateContacJoint(ref altWorkContact, smoothMesh);
                     }
                     else
                     {
-                        ApplyContactMicroBounceDamping(p1, p2, ref curctc, baseBounce, baseMu);
+                        ApplyPhysicalPrimContactResponse(p1, p2, ref curctc, baseBounce, baseMu);
                         Joint = CreateContacJoint(ref curctc, smoothMesh);
                     }
 
