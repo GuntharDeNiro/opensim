@@ -1352,6 +1352,18 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 vec.Z -= vel.Z * damping * 0.35f;
         }
 
+        private void ApplyAvatarContactSettleDamping(Vector3 vel, bool hoverPIDActive, ref Vector3 vec)
+        {
+            if (!m_parent_scene.AvatarPhysicsTuningEnabled || m_flying || hoverPIDActive)
+                return;
+
+            if ((!m_iscolliding && !m_iscollidingGround) || vel.Z <= -0.8f || vel.Z >= 0.8f)
+                return;
+
+            float normalScale = CollideNormal.Z > 0f ? Math.Clamp(CollideNormal.Z, 0.25f, 1f) : 0.75f;
+            vec.Z -= vel.Z * PID_D * m_parent_scene.AvatarContactSettleDamping * normalScale;
+        }
+
         private void ApplyAvatarSlopeDamping(Vector3 vel, bool targetVelocityZero, bool hoverPIDActive, ref Vector3 vec)
         {
             if (!m_parent_scene.AvatarPhysicsTuningEnabled || !targetVelocityZero || m_flying || hoverPIDActive)
@@ -1419,6 +1431,13 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             if (!m_flying)
             {
                 vec.Z -= m_scenegravityForceZ * m_parent_scene.AvatarWaterBuoyancy * waterSubmerged;
+
+                if (waterSubmerged > 0.08f && waterSubmerged < 0.65f)
+                {
+                    float surfaceCapture = 1f - MathF.Abs(waterSubmerged - 0.35f) / 0.35f;
+                    surfaceCapture = Math.Clamp(surfaceCapture, 0f, 1f);
+                    vec.Z -= vel.Z * PID_D * m_parent_scene.AvatarWaterSurfaceCapture * surfaceCapture;
+                }
 
                 if (vel.Z > 0f && waterSubmerged < 0.45f)
                 {
@@ -1904,6 +1923,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
             ApplyAvatarWaterForces(waterSubmerged, vel, ref vec);
             ApplyAvatarGroundRestDamping(vel, tviszero, hoverPIDActive, ref vec);
+            ApplyAvatarContactSettleDamping(vel, hoverPIDActive, ref vec);
             ApplyAvatarSlopeDamping(vel, tviszero, hoverPIDActive, ref vec);
             ApplyAvatarStepAssist(ctv, vel, hoverPIDActive, ref vec);
             ApplyAvatarFallDamping(vel, waterSubmerged, hoverPIDActive, ref vec);
@@ -2386,6 +2406,10 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             m_iscolliding = false;
             m_iscollidingGround = false;
             m_iscollidingObj = false;
+
+            ResetAvatarCollideNormalSmoothing();
+            ResetAvatarTargetVelocitySmoothing();
+            ResetAvatarWaterState();
 
             CollisionEventsThisFrame.Clear();
         }

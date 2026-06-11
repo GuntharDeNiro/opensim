@@ -159,6 +159,7 @@ avatar_friction = 0.35
 avatar_physics_tuning_enabled = true
 avatar_ground_rest_damping = 0.55
 avatar_landing_damping = 0.35
+avatar_contact_settle_damping = 0.16
 avatar_air_control_scale = 0.65
 avatar_contact_normal_smoothing = 0.35
 avatar_slope_damping = 0.18
@@ -174,6 +175,7 @@ avatar_water_buoyancy = 0.92
 avatar_water_drag = 0.85
 avatar_water_walk_speed_scale = 0.55
 avatar_water_surface_damping = 1.8
+avatar_water_surface_capture = 0.22
 avatar_water_smoothing_timescale = 0.45
 water_buoyancy_wood = 1.55
 water_buoyancy_metal = 0.10
@@ -217,7 +219,10 @@ configured avatar terminal velocity with a gentle fall damping curve, and avatar
 water immersion is smoothed over several physics ticks so walking into water or
 breaking the surface feels less abrupt. Movement commands are also eased over a
 short timescale, while slopes reduce push speed slightly and add lateral
-traction so turning or stopping on uneven ground feels less skittery.
+traction so turning or stopping on uneven ground feels less skittery. A small
+contact settle pass damps residual vertical bounce after gentle landings, and a
+surface-capture pass damps small waterline bobbing without disabling swimming or
+jump behavior.
 
 RegionWeb Portal And Inventory Carousels
 ----------------------------------------
