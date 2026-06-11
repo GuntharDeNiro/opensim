@@ -109,6 +109,8 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         internal Vector3 CollideNormal;
         private Vector3 m_smoothedCollideNormal = Vector3.UnitZ;
         private bool m_hasSmoothedCollideNormal = false;
+        private float m_smoothedWaterSubmerged = 0f;
+        private bool m_hasAvatarWaterState = false;
         private int m_feetCollisionFrames = 0;
 
         public int  _charsListIndex;
@@ -1146,6 +1148,12 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             CollideNormal = Vector3.Zero;
         }
 
+        private void ResetAvatarWaterState()
+        {
+            m_hasAvatarWaterState = false;
+            m_smoothedWaterSubmerged = 0f;
+        }
+
         private void SetAvatarCollideNormal(Vector3 normal)
         {
             if (!normal.IsFinite() || normal.LengthSquared() <= 0.000001f)
@@ -1176,16 +1184,45 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         private float GetAvatarWaterSubmerged(Vector3 pos)
         {
             if (!m_parent_scene.AvatarWaterDynamicsEnabled)
+            {
+                ResetAvatarWaterState();
                 return 0f;
+            }
 
             float waterHeight = m_parent_scene.GetDynamicWaterHeight(pos.X, pos.Y);
             float terrainHeight = m_parent_scene.GetTerrainHeightAtXY(pos.X, pos.Y);
             if (terrainHeight > waterHeight - 0.15f)
+            {
+                ResetAvatarWaterState();
                 return 0f;
+            }
 
             float avatarHeight = MathF.Max(CapsuleSizeZ * 2f, 0.1f);
             float bottom = pos.Z - CapsuleSizeZ;
-            return Math.Clamp((waterHeight - bottom) / avatarHeight, 0f, 1f);
+            float waterSubmerged = Math.Clamp((waterHeight - bottom) / avatarHeight, 0f, 1f);
+            if (waterSubmerged <= 0f)
+            {
+                ResetAvatarWaterState();
+                return 0f;
+            }
+
+            if (!m_hasAvatarWaterState)
+            {
+                m_hasAvatarWaterState = true;
+                m_smoothedWaterSubmerged = waterSubmerged;
+            }
+            else
+            {
+                float alpha = Math.Clamp(
+                    m_sceneTimeStep / m_parent_scene.AvatarWaterSmoothingTimescale,
+                    0.02f, 1f);
+                if (waterSubmerged < m_smoothedWaterSubmerged)
+                    alpha = Math.Clamp(alpha * 4f, 0.08f, 1f);
+
+                m_smoothedWaterSubmerged += (waterSubmerged - m_smoothedWaterSubmerged) * alpha;
+            }
+
+            return Math.Clamp(m_smoothedWaterSubmerged, 0f, 1f);
         }
 
         private void ApplyAvatarAirControl(ref Vector3 ctv, float waterSubmerged, bool hoverPIDActive)
@@ -1289,6 +1326,32 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                     vec.Z -= vel.Z * PID_D * m_parent_scene.AvatarWaterDrag * waterSubmerged * 0.08f;
                 }
             }
+        }
+
+        private void ApplyAvatarFallDamping(Vector3 vel, float waterSubmerged, bool hoverPIDActive, ref Vector3 vec)
+        {
+            if (!m_parent_scene.AvatarPhysicsTuningEnabled ||
+                !m_parent_scene.AvatarFallDampingEnabled ||
+                m_flying ||
+                hoverPIDActive ||
+                waterSubmerged > 0.1f ||
+                m_iscolliding ||
+                m_iscollidingGround ||
+                vel.Z >= -0.5f)
+            {
+                return;
+            }
+
+            float terminalVelocity = MathF.Max(m_parent_scene.AvatarTerminalVelocity, 1f);
+            if (vel.Z < -terminalVelocity)
+            {
+                vec.Z += (-terminalVelocity - vel.Z) * PID_D;
+                return;
+            }
+
+            float fallRatio = Math.Clamp((-vel.Z - terminalVelocity * 0.35f) / (terminalVelocity * 0.65f), 0f, 1f);
+            if (fallRatio > 0f)
+                vec.Z += -vel.Z * PID_D * m_parent_scene.AvatarFallDamping * fallRatio;
         }
 
         /// <summary>
@@ -1737,6 +1800,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             ApplyAvatarGroundRestDamping(vel, tviszero, hoverPIDActive, ref vec);
             ApplyAvatarSlopeDamping(vel, tviszero, hoverPIDActive, ref vec);
             ApplyAvatarStepAssist(ctv, vel, hoverPIDActive, ref vec);
+            ApplyAvatarFallDamping(vel, waterSubmerged, hoverPIDActive, ref vec);
 
             if ((vec.Z != 0 || vec.X != 0 || vec.Y != 0))
                 UBOdeNative.BodyAddForce(Body, vec.X, vec.Y, vec.Z);

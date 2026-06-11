@@ -120,6 +120,7 @@ world_contact_surface_layer = 0.006
 world_contact_max_correcting_velocity = 25.0
 world_contact_bounce_velocity = 0.15
 world_contact_slip = 0.01
+avatar_terminal_velocity = 54
 ubode_terrain_friction = 0.64
 ubode_terrain_bounce = 0.72
 physical_prim_material_density_enabled = true
@@ -163,11 +164,14 @@ avatar_contact_normal_smoothing = 0.35
 avatar_slope_damping = 0.18
 avatar_step_assist_strength = 0.18
 avatar_step_assist_max_velocity = 2.4
+avatar_fall_damping_enabled = true
+avatar_fall_damping = 0.18
 avatar_water_dynamics_enabled = true
 avatar_water_buoyancy = 0.92
 avatar_water_drag = 0.85
 avatar_water_walk_speed_scale = 0.55
 avatar_water_surface_damping = 1.8
+avatar_water_smoothing_timescale = 0.45
 water_buoyancy_wood = 1.55
 water_buoyancy_metal = 0.10
 boat_turn_banking_enabled = true
@@ -205,7 +209,10 @@ friction, softer landings, reduced air steering while falling, near-rest ground
 damping and water movement that slows and supports the avatar body instead of
 making water feel like empty air. Contact normals are smoothed between physics
 ticks, slopes add a little rest damping, and low prim edges get a small step
-assist so walking over uneven builds feels less twitchy.
+assist so walking over uneven builds feels less twitchy. ubODE also applies the
+configured avatar terminal velocity with a gentle fall damping curve, and avatar
+water immersion is smoothed over several physics ticks so walking into water or
+breaking the surface feels less abrupt.
 
 RegionWeb Portal And Inventory Carousels
 ----------------------------------------
