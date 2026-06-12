@@ -13,10 +13,33 @@ Quick Workflow
 Easy server wrappers from `bin`:
 
 ```bat
+start-vanilla-setup.bat
 switch-to-standalone-hg.bat
 switch-to-osgrid.bat
 switch-to-multigrid.bat
 ```
+
+For a brand new Vanilla Sim install, run the browser setup wizard first:
+
+```bat
+start-vanilla-setup.bat
+```
+
+It opens `http://127.0.0.1:9090` on the server and asks for the public grid
+domain, grid name, first region, first avatar and the showroom features to
+enable. The happy path keeps everything on: Warp3D maps, RegionWeb, weather,
+currency, groups, TextBuild, multi-grid publication, LSL scripting, offline IM
+and Vanilla Sim physics tuning.
+
+When the wizard finishes, run the generated launcher:
+
+```bat
+start-vanilla-sim-first-run.bat
+```
+
+That starts `OpenSim.exe`, waits for local RemoteAdmin and creates the first
+avatar with its home set to the starter region. After that, open the viewer,
+use the login URI shown by the wizard and start inworld.
 
 The standalone and multigrid wrappers default to `vanilla-sim.com`. To use a
 different public Hypergrid DNS name, pass it as the first argument:
