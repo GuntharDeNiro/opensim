@@ -257,6 +257,7 @@ function Read-Settings($Form) {
         RegionPort = $regionPort
         MaxPrims = Get-SafeInt $Form "max_prims" 30000 1000 1000000
         MaxAgents = Get-SafeInt $Form "max_agents" 80 1 1000
+        AvatarID = [guid]::NewGuid().ToString()
         AvatarFirst = $firstName
         AvatarLast = $lastName
         AvatarPassword = $avatarPassword
@@ -295,6 +296,7 @@ DefaultLanding = <128,128,30>
 MaxPrims = $($Settings.MaxPrims)
 MaxAgents = $($Settings.MaxAgents)
 RegionType = "Vanilla Sim Showroom"
+TargetEstate = $($Settings.GridName)
 "@
 
     Set-Content -Encoding UTF8 -Path $regionTarget -Value $content
@@ -578,10 +580,16 @@ function Get-SetupStatus() {
         $script:SetupState.Error = "OpenSim.exe exited before RegionWeb was ready. Check the OpenSim console window."
     }
 
-    $firstUserMessage = Try-CreateFirstUser
     $regionWebReady = Test-RegionWebReady
+    $firstUserMessage = "Waiting for regions to finish startup."
 
     if ($regionWebReady) {
+        $firstUserMessage = Try-CreateFirstUser
+    }
+
+    $ready = $regionWebReady -and $script:SetupState.FirstUserReady
+
+    if ($ready) {
         $script:SetupState.Status = "ready"
     }
 
@@ -602,7 +610,8 @@ function Get-SetupStatus() {
     }
 
     return @{
-        ready = $regionWebReady
+        ready = $ready
+        regionWebReady = $regionWebReady
         phase = $phase
         message = $message
         loginUri = $script:SetupState.LoginUri
@@ -642,6 +651,11 @@ function Apply-Setup($Form) {
     $openSimIni = Set-IniKey $openSimIni "GridInfoService" "gridnick" (Quote-Ini $settings.GridNick)
     $openSimIni = Set-IniKey $openSimIni "RegionWeb" "EstateTitle" (Quote-Ini $settings.GridName)
     $openSimIni = Set-IniKey $openSimIni "ClientStack.LindenUDP" "ViewerSimulatorVersionOverride" (Quote-Ini $settings.GridName)
+    $openSimIni = Set-IniKey $openSimIni "Estates" "DefaultEstateName" (Quote-Ini $settings.GridName)
+    $openSimIni = Set-IniKey $openSimIni "Estates" "DefaultEstateOwnerName" (Quote-Ini "$($settings.AvatarFirst) $($settings.AvatarLast)")
+    $openSimIni = Set-IniKey $openSimIni "Estates" "DefaultEstateOwnerUUID" (Quote-Ini $settings.AvatarID)
+    $openSimIni = Set-IniKey $openSimIni "Estates" "DefaultEstateOwnerEMail" (Quote-Ini $settings.AvatarEmail)
+    $openSimIni = Set-IniKey $openSimIni "Estates" "DefaultEstateOwnerPassword" (Quote-Ini $settings.AvatarPassword)
 
     $openSimIni = Set-IniKey $openSimIni "Map" "GenerateMaptiles" (Bool-Text $settings.FeatureMaps)
     if ($settings.FeatureMaps) {
@@ -1354,9 +1368,9 @@ function Render-SplashPage() {
           error.style.display = 'none';
         }
 
-        mark(stepOpenSim, data.phase === 'RegionWeb is ready' ? 'done' : 'active');
+        mark(stepOpenSim, data.regionWebReady ? 'done' : 'active');
         mark(stepUser, data.firstUserReady ? 'done' : (data.phase === 'Booting simulator services' ? 'active' : ''));
-        mark(stepRegionWeb, data.ready ? 'done' : 'active');
+        mark(stepRegionWeb, data.regionWebReady ? 'done' : 'active');
 
         if (data.ready && !redirected) {
           redirected = true;
