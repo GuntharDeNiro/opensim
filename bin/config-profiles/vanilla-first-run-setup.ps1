@@ -10,6 +10,20 @@ $SetupDir = Join-Path $BinRoot "VanillaFirstRun"
 $SwitchScript = Join-Path $ProfileRoot "switch-to-standalone-hg.ps1"
 $Prefix = "http://127.0.0.1:$Port/"
 
+$script:SetupState = @{
+    Status = "idle"
+    Settings = $null
+    RemoteAdminPassword = ""
+    OpenSimProcess = $null
+    FirstUserReady = $false
+    FirstUserMessage = ""
+    StartedAt = $null
+    LoginUri = ""
+    RegionWebUrl = ""
+    PublicRegionWebUrl = ""
+    Error = ""
+}
+
 function Html([string]$Value) {
     if ($null -eq $Value) {
         return ""
@@ -32,6 +46,38 @@ function Bool-Text([bool]$Value) {
     }
 
     return "false"
+}
+
+function Xml-Escape([string]$Value) {
+    if ($null -eq $Value) {
+        return ""
+    }
+
+    return [System.Security.SecurityElement]::Escape($Value)
+}
+
+function New-XmlRpcStruct([string]$MethodName, [hashtable]$Values) {
+    $members = New-Object System.Text.StringBuilder
+    foreach ($key in $Values.Keys) {
+        $value = $Values[$key]
+        if ($value -is [int]) {
+            [void]$members.Append("<member><name>$(Xml-Escape $key)</name><value><int>$value</int></value></member>")
+        } elseif ($value -is [bool]) {
+            $boolValue = 0
+            if ($value) {
+                $boolValue = 1
+            }
+            [void]$members.Append("<member><name>$(Xml-Escape $key)</name><value><boolean>$boolValue</boolean></value></member>")
+        } else {
+            [void]$members.Append("<member><name>$(Xml-Escape $key)</name><value><string>$(Xml-Escape ([string]$value))</string></value></member>")
+        }
+    }
+
+    return "<?xml version=`"1.0`"?><methodCall><methodName>$(Xml-Escape $MethodName)</methodName><params><param><value><struct>$members</struct></value></param></params></methodCall>"
+}
+
+function Test-XmlRpcSuccess([string]$Content) {
+    return $Content -match "<name>success</name>\s*<value>\s*<(boolean|string|int)>(1|true|True)</"
 }
 
 function Parse-Form($Request) {
@@ -404,9 +450,14 @@ Starter region: $($Settings.RegionName) at $($Settings.RegionX),$($Settings.Regi
 First avatar: $($Settings.AvatarFirst) $($Settings.AvatarLast)
 
 Next step:
-1. Build Vanilla Sim if you have not already done it.
-2. Run bin\start-vanilla-sim-first-run.bat on the server.
+1. The setup wizard starts OpenSim.exe automatically when you press Create.
+2. The wizard splash page waits for RegionWeb and then opens it automatically.
 3. Log in from the viewer with the URI above and your first avatar credentials.
+
+Fallback:
+If the browser was closed before startup finished, run
+bin\start-vanilla-sim-first-run.bat from bin. It starts OpenSim.exe and creates
+or confirms the first avatar.
 
 Security note:
 This folder contains a one-time RemoteAdmin password and the first avatar
@@ -415,6 +466,151 @@ you can delete bin\VanillaFirstRun if you do not need the bootstrap helper again
 "@
 
     Set-Content -Encoding UTF8 -Path $summaryPath -Value $summary
+}
+
+function Start-VanillaSim($Settings) {
+    $exe = Join-Path $BinRoot "OpenSim.exe"
+    if (-not (Test-Path $exe)) {
+        throw "OpenSim.exe was not found in bin. Build Vanilla Sim first, then run the setup wizard again."
+    }
+
+    if (Test-RegionWebReady) {
+        $script:SetupState.Status = "ready"
+        return
+    }
+
+    if ($script:SetupState.OpenSimProcess -and -not $script:SetupState.OpenSimProcess.HasExited) {
+        return
+    }
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $exe
+    $psi.WorkingDirectory = $BinRoot
+    $psi.UseShellExecute = $true
+    $psi.WindowStyle = "Normal"
+
+    $script:SetupState.OpenSimProcess = [System.Diagnostics.Process]::Start($psi)
+    $script:SetupState.Status = "starting"
+    $script:SetupState.StartedAt = Get-Date
+}
+
+function Try-CreateFirstUser() {
+    $settings = $script:SetupState.Settings
+    if ($null -eq $settings) {
+        return "Waiting for setup settings."
+    }
+
+    if ($script:SetupState.FirstUserReady) {
+        return $script:SetupState.FirstUserMessage
+    }
+
+    $remoteAdminUrl = "http://127.0.0.1:$($settings.PublicPort)/"
+    $existsBody = New-XmlRpcStruct "admin_exists_user" @{
+        password = $script:SetupState.RemoteAdminPassword
+        user_firstname = $settings.AvatarFirst
+        user_lastname = $settings.AvatarLast
+    }
+
+    $createBody = New-XmlRpcStruct "admin_create_user" @{
+        password = $script:SetupState.RemoteAdminPassword
+        user_firstname = $settings.AvatarFirst
+        user_lastname = $settings.AvatarLast
+        user_password = $settings.AvatarPassword
+        user_email = $settings.AvatarEmail
+        start_region_x = $settings.RegionX
+        start_region_y = $settings.RegionY
+    }
+
+    try {
+        $exists = Invoke-WebRequest -Uri $remoteAdminUrl -Method Post -ContentType "text/xml" -Body $existsBody -UseBasicParsing -TimeoutSec 4
+        if (Test-XmlRpcSuccess $exists.Content) {
+            $script:SetupState.FirstUserReady = $true
+            $script:SetupState.FirstUserMessage = "First avatar already exists."
+            return $script:SetupState.FirstUserMessage
+        }
+
+        $created = Invoke-WebRequest -Uri $remoteAdminUrl -Method Post -ContentType "text/xml" -Body $createBody -UseBasicParsing -TimeoutSec 4
+        if (Test-XmlRpcSuccess $created.Content) {
+            $script:SetupState.FirstUserReady = $true
+            $script:SetupState.FirstUserMessage = "First avatar created."
+            return $script:SetupState.FirstUserMessage
+        }
+
+        return "RemoteAdmin is online; waiting for user services."
+    }
+    catch {
+        return "Waiting for RemoteAdmin and user services."
+    }
+}
+
+function Test-RegionWebReady() {
+    if ([string]::IsNullOrWhiteSpace($script:SetupState.RegionWebUrl)) {
+        return $false
+    }
+
+    try {
+        $response = Invoke-WebRequest -Uri $script:SetupState.RegionWebUrl -Method Get -UseBasicParsing -TimeoutSec 4
+        return ($response.StatusCode -ge 200 -and $response.StatusCode -lt 400)
+    }
+    catch {
+        return $false
+    }
+}
+
+function Get-SetupStatus() {
+    $settings = $script:SetupState.Settings
+
+    if ($null -eq $settings) {
+        return @{
+            ready = $false
+            phase = "Waiting for setup"
+            message = "Fill the wizard form to create Vanilla Sim."
+            loginUri = ""
+            regionWebUrl = ""
+            publicRegionWebUrl = ""
+            firstUserReady = $false
+            error = ""
+        }
+    }
+
+    if ($script:SetupState.OpenSimProcess -and $script:SetupState.OpenSimProcess.HasExited) {
+        $script:SetupState.Status = "error"
+        $script:SetupState.Error = "OpenSim.exe exited before RegionWeb was ready. Check the OpenSim console window."
+    }
+
+    $firstUserMessage = Try-CreateFirstUser
+    $regionWebReady = Test-RegionWebReady
+
+    if ($regionWebReady) {
+        $script:SetupState.Status = "ready"
+    }
+
+    $phase = "Starting OpenSim.exe"
+    if ($script:SetupState.Status -eq "configured") {
+        $phase = "Writing configuration"
+    } elseif ($script:SetupState.Status -eq "starting") {
+        $phase = "Booting simulator services"
+    } elseif ($script:SetupState.Status -eq "ready") {
+        $phase = "RegionWeb is ready"
+    } elseif ($script:SetupState.Status -eq "error") {
+        $phase = "Startup needs attention"
+    }
+
+    $message = "Config ready. OpenSim is starting, first avatar is being prepared, then RegionWeb will open automatically."
+    if (-not [string]::IsNullOrWhiteSpace($firstUserMessage)) {
+        $message = $firstUserMessage
+    }
+
+    return @{
+        ready = $regionWebReady
+        phase = $phase
+        message = $message
+        loginUri = $script:SetupState.LoginUri
+        regionWebUrl = $script:SetupState.RegionWebUrl
+        publicRegionWebUrl = $script:SetupState.PublicRegionWebUrl
+        firstUserReady = $script:SetupState.FirstUserReady
+        error = $script:SetupState.Error
+    }
 }
 
 function Apply-Setup($Form) {
@@ -491,6 +687,16 @@ function Apply-Setup($Form) {
     Set-Content -Encoding UTF8 -Path $target -Value $openSimIni
     Write-RegionsIni $settings
     Write-FirstRunScripts $settings $remoteAdminPassword
+
+    $script:SetupState.Status = "configured"
+    $script:SetupState.Settings = $settings
+    $script:SetupState.RemoteAdminPassword = $remoteAdminPassword
+    $script:SetupState.FirstUserReady = $false
+    $script:SetupState.FirstUserMessage = ""
+    $script:SetupState.LoginUri = "http://$($settings.HostName):$($settings.PublicPort)/"
+    $script:SetupState.RegionWebUrl = "http://127.0.0.1:$($settings.PublicPort)/regionweb"
+    $script:SetupState.PublicRegionWebUrl = "http://$($settings.HostName):$($settings.PublicPort)/regionweb"
+    $script:SetupState.Error = ""
 
     return $settings
 }
@@ -894,6 +1100,284 @@ function Render-Page($Form, [string]$Message, [string]$MessageKind) {
 "@
 }
 
+function Render-SplashPage() {
+    $loginUri = Html $script:SetupState.LoginUri
+    $regionWebUrl = Html $script:SetupState.RegionWebUrl
+    $publicRegionWebUrl = Html $script:SetupState.PublicRegionWebUrl
+
+    return @"
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Starting Vanilla Sim</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #05080d;
+      --panel: #101722;
+      --text: #f7fbff;
+      --muted: #a8b6c8;
+      --line: #263545;
+      --cyan: #14c8ff;
+      --magenta: #c600ff;
+      --green: #4ef0a3;
+      --amber: #ffd166;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 18% 12%, rgba(20, 200, 255, .24), transparent 26rem),
+        radial-gradient(circle at 84% 18%, rgba(198, 0, 255, .24), transparent 30rem),
+        linear-gradient(180deg, #05080d, #09111c 70%, #05080d);
+      color: var(--text);
+      font-family: Inter, Segoe UI, Arial, sans-serif;
+      display: grid;
+      place-items: center;
+      padding: 28px;
+    }
+    .shell {
+      width: min(1060px, 100%);
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 24px;
+      align-items: stretch;
+    }
+    .hero, .side {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(12, 18, 27, .92);
+      box-shadow: 0 28px 90px rgba(0, 0, 0, .42);
+    }
+    .hero {
+      min-height: 520px;
+      padding: clamp(26px, 5vw, 54px);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      overflow: hidden;
+      position: relative;
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: auto -10% -22% 20%;
+      height: 220px;
+      background: radial-gradient(ellipse, rgba(20, 200, 255, .22), transparent 68%);
+      pointer-events: none;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-weight: 950;
+      letter-spacing: 0;
+      text-transform: uppercase;
+      margin-bottom: 38px;
+    }
+    .mark {
+      width: 62px;
+      height: 62px;
+      border: 4px solid var(--cyan);
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      color: var(--cyan);
+      font-size: 26px;
+      box-shadow: 0 0 26px rgba(20, 200, 255, .36);
+      transform: rotate(-6deg);
+    }
+    .brand span {
+      display: block;
+      line-height: .86;
+      font-size: 30px;
+    }
+    .eyebrow {
+      color: var(--cyan);
+      font-weight: 950;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+      font-size: 14px;
+    }
+    h1 {
+      margin: 14px 0 16px;
+      font-size: clamp(44px, 7vw, 84px);
+      line-height: .92;
+      letter-spacing: 0;
+    }
+    .message {
+      color: #dce8f6;
+      font-size: 22px;
+      font-weight: 700;
+      max-width: 720px;
+    }
+    .progress {
+      height: 8px;
+      margin-top: 36px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: #162231;
+    }
+    .bar {
+      width: 35%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--cyan), var(--magenta));
+      animation: glide 2.6s ease-in-out infinite;
+    }
+    @keyframes glide {
+      0% { transform: translateX(-115%); width: 32%; }
+      50% { width: 62%; }
+      100% { transform: translateX(330%); width: 32%; }
+    }
+    .side {
+      padding: 24px;
+      display: grid;
+      gap: 16px;
+      align-content: center;
+    }
+    .step {
+      display: grid;
+      grid-template-columns: 26px minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0b131e;
+    }
+    .dot {
+      width: 14px;
+      height: 14px;
+      margin-top: 4px;
+      border-radius: 50%;
+      background: #516074;
+    }
+    .step.active .dot {
+      background: var(--amber);
+      box-shadow: 0 0 18px rgba(255, 209, 102, .5);
+    }
+    .step.done .dot {
+      background: var(--green);
+      box-shadow: 0 0 18px rgba(78, 240, 163, .48);
+    }
+    .step strong {
+      display: block;
+      font-size: 15px;
+    }
+    .step small {
+      display: block;
+      color: var(--muted);
+      margin-top: 3px;
+      font-weight: 650;
+    }
+    .links {
+      display: grid;
+      gap: 8px;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      word-break: break-word;
+    }
+    .links a {
+      color: var(--cyan);
+      font-weight: 850;
+      text-decoration: none;
+    }
+    .error {
+      display: none;
+      color: #ffd1dc;
+      border: 1px solid rgba(255, 80, 120, .35);
+      background: rgba(255, 80, 120, .14);
+      border-radius: 8px;
+      padding: 12px;
+      font-weight: 750;
+    }
+    @media (max-width: 860px) {
+      body { display: block; }
+      .shell { grid-template-columns: 1fr; }
+      .hero { min-height: 420px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="brand"><div class="mark">VS</div><div><span>Vanilla</span><span>Sim</span></div></div>
+      <div class="eyebrow" id="phase">Starting OpenSim.exe</div>
+      <h1 id="headline">Your world is coming online.</h1>
+      <div class="message" id="message">Vanilla Sim is booting. RegionWeb will open automatically as soon as the simulator is ready.</div>
+      <div class="progress"><div class="bar"></div></div>
+    </section>
+    <aside class="side">
+      <div class="step done" id="step-config"><div class="dot"></div><div><strong>Configuration written</strong><small>OpenSim.ini, Regions.ini and feature toggles are ready.</small></div></div>
+      <div class="step active" id="step-opensim"><div class="dot"></div><div><strong>OpenSim.exe starting</strong><small>Simulator services, regions and modules are loading.</small></div></div>
+      <div class="step" id="step-user"><div class="dot"></div><div><strong>First avatar</strong><small>RemoteAdmin will create or confirm the starter account.</small></div></div>
+      <div class="step" id="step-regionweb"><div class="dot"></div><div><strong>RegionWeb portal</strong><small>When the portal answers, this page redirects automatically.</small></div></div>
+      <div class="error" id="error"></div>
+      <div class="links">
+        <div>Viewer login: <strong>$loginUri</strong></div>
+        <div>Local RegionWeb: <a href="$regionWebUrl">$regionWebUrl</a></div>
+        <div>Public RegionWeb: <a href="$publicRegionWebUrl">$publicRegionWebUrl</a></div>
+      </div>
+    </aside>
+  </main>
+  <script>
+    const phase = document.getElementById('phase');
+    const headline = document.getElementById('headline');
+    const message = document.getElementById('message');
+    const error = document.getElementById('error');
+    const stepOpenSim = document.getElementById('step-opensim');
+    const stepUser = document.getElementById('step-user');
+    const stepRegionWeb = document.getElementById('step-regionweb');
+    let redirected = false;
+
+    function mark(el, state) {
+      el.classList.remove('active', 'done');
+      if (state) el.classList.add(state);
+    }
+
+    async function poll() {
+      try {
+        const res = await fetch('/status', { cache: 'no-store' });
+        const data = await res.json();
+        phase.textContent = data.phase || 'Starting OpenSim.exe';
+        message.textContent = data.message || 'Still starting Vanilla Sim.';
+
+        if (data.error) {
+          error.style.display = 'block';
+          error.textContent = data.error;
+        } else {
+          error.style.display = 'none';
+        }
+
+        mark(stepOpenSim, data.phase === 'RegionWeb is ready' ? 'done' : 'active');
+        mark(stepUser, data.firstUserReady ? 'done' : (data.phase === 'Booting simulator services' ? 'active' : ''));
+        mark(stepRegionWeb, data.ready ? 'done' : 'active');
+
+        if (data.ready && !redirected) {
+          redirected = true;
+          headline.textContent = 'RegionWeb is ready.';
+          message.textContent = 'Opening the Vanilla Sim portal now.';
+          setTimeout(() => { window.location.href = data.regionWebUrl; }, 1200);
+        }
+      } catch (e) {
+        phase.textContent = 'Waiting for wizard status';
+        message.textContent = 'The setup page is still waiting for a status response.';
+      }
+    }
+
+    poll();
+    setInterval(poll, 2500);
+  </script>
+</body>
+</html>
+"@
+}
+
 function Send-Text($Response, [string]$Body, [string]$ContentType, [int]$StatusCode) {
     $Response.StatusCode = $StatusCode
     $Response.ContentType = $ContentType
@@ -901,6 +1385,11 @@ function Send-Text($Response, [string]$Body, [string]$ContentType, [int]$StatusC
     $Response.ContentLength64 = $bytes.Length
     $Response.OutputStream.Write($bytes, 0, $bytes.Length)
     $Response.OutputStream.Close()
+}
+
+function Send-Json($Response, $Value) {
+    $json = $Value | ConvertTo-Json -Compress -Depth 4
+    Send-Text $Response $json "application/json; charset=utf-8" 200
 }
 
 if (-not (Test-Path $SwitchScript)) {
@@ -938,14 +1427,23 @@ while ($listener.IsListening) {
             continue
         }
 
+        if ($request.HttpMethod -eq "GET" -and $request.Url.AbsolutePath -eq "/splash") {
+            Send-Text $response (Render-SplashPage) "text/html; charset=utf-8" 200
+            continue
+        }
+
+        if ($request.HttpMethod -eq "GET" -and $request.Url.AbsolutePath -eq "/status") {
+            Send-Json $response (Get-SetupStatus)
+            continue
+        }
+
         if ($request.HttpMethod -eq "POST" -and $request.Url.AbsolutePath -eq "/apply") {
             $form = Parse-Form $request
 
             try {
                 $settings = Apply-Setup $form
-                $loginUri = "http://$($settings.HostName):$($settings.PublicPort)/"
-                $message = "Vanilla Sim is configured. Next: build if needed, then run <code>bin\start-vanilla-sim-first-run.bat</code>. Login URI: <code>$(Html $loginUri)</code>. First avatar: <code>$(Html ($settings.AvatarFirst + ' ' + $settings.AvatarLast))</code>."
-                Send-Text $response (Render-Page $form $message "success") "text/html; charset=utf-8" 200
+                Start-VanillaSim $settings
+                Send-Text $response (Render-SplashPage) "text/html; charset=utf-8" 200
             }
             catch {
                 Send-Text $response (Render-Page $form (Html $_.Exception.Message) "error") "text/html; charset=utf-8" 400
